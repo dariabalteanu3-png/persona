@@ -421,6 +421,28 @@ def _write_tz_cookie(tz):
         pass
 
 
+def _restore_sound():
+    if st.session_state.get("_sound_restored"):
+        return
+    st.session_state._sound_restored = True
+    try:
+        v = _cookies().get("persona_sound")
+    except Exception:  # noqa
+        v = None
+    if isinstance(v, str) and v in ("iPhone", "Samsung"):
+        st.session_state.sound_theme = v
+
+
+def _write_sound_cookie(v):
+    import datetime as _dt
+    try:
+        _cookies().set("persona_sound", v,
+                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
+                       same_site="lax")
+    except Exception:  # noqa
+        pass
+
+
 def _send_code(email, purpose):
     try:
         code = auth.gen_code(email, purpose)
@@ -894,6 +916,7 @@ _cookies()  # montează componenta de cookie-uri devreme (ca să poată citi ses
 _restore_session()
 _restore_theme()
 _restore_tz()
+_restore_sound()
 user = current_user()
 with st.sidebar:
     st.markdown('<div class="app-logo">🎭 Persona<span class="dot">.</span></div>', unsafe_allow_html=True)
@@ -1550,6 +1573,7 @@ def render_chat(char):
                 st.audio(base64.b64decode(user_audio), format="audio/wav")
             st.markdown(prompt)
         haptic(15)
+        play_sound("send", char.get("notif_theme"))
         reply = None
         with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
             typing = st.empty()
@@ -2281,8 +2305,26 @@ def render_profil():
                 help="Volumul sunetelor de notificare și mesaj",
                 key="notif_volume_slider",
             )
-            if st.button("🔔 Testează sunetul", key="test_notif_sound", use_container_width=True):
+            _snd_opts = ["iPhone", "Samsung"]
+            _cur_snd = st.session_state.get("sound_theme", "iPhone")
+            _snd = st.selectbox(
+                "🔔 Stil sunete (notificare, trimitere, apel)",
+                _snd_opts,
+                index=_snd_opts.index(_cur_snd) if _cur_snd in _snd_opts else 0,
+                key="sound_theme_sel",
+                help="Alege cum sună mesajele și apelurile: stil iPhone sau Samsung",
+            )
+            if _snd != st.session_state.get("sound_theme"):
+                st.session_state.sound_theme = _snd
+                _write_sound_cookie(_snd)
+                st.rerun()
+            _tc = st.columns(3)
+            if _tc[0].button("🔔 Notificare", key="test_notif_sound", use_container_width=True):
                 play_sound("notification")
+            if _tc[1].button("✉️ Trimitere", key="test_send_sound", use_container_width=True):
+                play_sound("send")
+            if _tc[2].button("📞 Apel", key="test_ring_sound", use_container_width=True):
+                play_sound("ringtone")
             st.markdown("---")
             if st.checkbox("Vreau să-mi șterg contul", key="del_confirm"):
                 st.warning("Se șterg definitiv contul și toate personajele tale. Acțiunea e ireversibilă.")
