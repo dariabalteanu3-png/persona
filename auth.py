@@ -1,6 +1,7 @@
 import random
 import re
 import secrets
+import unicodedata
 
 import bcrypt
 
@@ -34,7 +35,7 @@ def public_by_email(email):
     return _public(u) if u else None
 
 
-def register(username, password, name=""):
+def register(username, password, name="", question=None, answer=None):
     username = (username or "").strip().lower()
     if len(username) < 3:
         raise ValueError("Numele de utilizator trebuie să aibă minim 3 caractere.")
@@ -42,8 +43,31 @@ def register(username, password, name=""):
         raise ValueError("Parola trebuie să aibă minim 6 caractere.")
     if db.get_user_by_email(username):
         raise ValueError("Există deja un cont cu acest nume de utilizator.")
-    db.create_user(username, hash_password(password), (name or "").strip() or username, verified=True)
+    q = (question or "").strip() or None
+    a_hash = hash_password(_norm_answer(answer)) if (q and answer and answer.strip()) else None
+    db.create_user(
+        username, hash_password(password), (name or "").strip() or username,
+        verified=True, security_question=q, security_answer_hash=a_hash,
+    )
     return username
+
+
+def _norm_answer(a):
+    a = (a or "").strip().lower()
+    a = unicodedata.normalize("NFKD", a)
+    return "".join(c for c in a if not unicodedata.combining(c))
+
+
+def get_security_question(username):
+    u = db.get_user_by_email((username or "").strip().lower())
+    return u.get("security_question") if u else None
+
+
+def verify_security_answer(username, answer):
+    u = db.get_user_by_email((username or "").strip().lower())
+    if not u or not u.get("security_answer_hash"):
+        return False
+    return verify_password(_norm_answer(answer), u["security_answer_hash"])
 
 
 def authenticate(email, password):

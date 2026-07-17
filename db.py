@@ -138,7 +138,7 @@ if _gh_enabled:
 
 
 # ------------------------- users / auth -------------------------
-def create_user(email, password_hash, name, verified=False):
+def create_user(email, password_hash, name, verified=False, security_question=None, security_answer_hash=None):
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
@@ -146,6 +146,8 @@ def create_user(email, password_hash, name, verified=False):
         "name": name,
         "verified": verified,
         "avatar_image": None,
+        "security_question": security_question,
+        "security_answer_hash": security_answer_hash,
         "created_at": _now(),
     }
     users.insert_one(doc)

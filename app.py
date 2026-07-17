@@ -177,6 +177,15 @@ hr { border-color:#e6e6ec !important; }
 
 EMOJIS = ["🎭", "🧙", "🦊", "🤖", "👑", "🕵️", "🧛", "🧜", "🐉", "👽", "🧝", "🦸", "🌟", "💀", "🐺"]
 
+SECURITY_QUESTIONS = [
+    "Cum se numește animalul tău de companie?",
+    "În ce oraș te-ai născut?",
+    "Care e mâncarea ta preferată?",
+    "Cum se numea primul tău învățător/profesor?",
+    "Care e numele celui mai bun prieten din copilărie?",
+    "Care e filmul tău preferat?",
+]
+
 TYPING_HTML = '<div class="typing"><span></span><span></span><span></span></div>'
 
 
@@ -583,12 +592,45 @@ def _render_login_register():
                 else:
                     _login_user(auth.public_by_email(le))
                     st.rerun()
+            # ---- Am uitat parola (întrebare secretă, fără email) ----
+            if st.checkbox("🔑 Am uitat parola", key="show_forgot"):
+                fu = st.text_input("Numele tău de utilizator", key="fp_user", placeholder="ex: daria")
+                if st.button("Continuă", key="fp_next", use_container_width=True):
+                    q = auth.get_security_question(fu)
+                    if not q:
+                        st.error("Acest cont nu are o întrebare secretă setată (sau nu există). "
+                                 "Din păcate parola nu poate fi recuperată fără ea.")
+                        st.session_state.pop("fp_question", None)
+                    else:
+                        st.session_state.fp_user_val = (fu or "").strip().lower()
+                        st.session_state.fp_question = q
+                        st.rerun()
+                if st.session_state.get("fp_question"):
+                    st.info(f"Întrebare secretă: **{st.session_state.fp_question}**")
+                    fa = st.text_input("Răspunsul tău", key="fp_answer")
+                    fnew = st.text_input("Parolă nouă (min. 6 caractere)", type="password", key="fp_newpw")
+                    if st.button("Resetează parola", key="fp_reset", use_container_width=True, type="primary"):
+                        if not auth.verify_security_answer(st.session_state.fp_user_val, fa):
+                            st.error("Răspuns greșit. Mai încearcă.")
+                        elif not fnew or len(fnew) < 6:
+                            st.error("Parola trebuie să aibă minim 6 caractere.")
+                        else:
+                            auth.reset_password(st.session_state.fp_user_val, fnew)
+                            _login_user(auth.public_by_email(st.session_state.fp_user_val))
+                            st.session_state.pop("fp_question", None)
+                            st.session_state.pop("fp_user_val", None)
+                            st.success("Parolă schimbată! Te-am conectat.")
+                            st.rerun()
         with t_reg:
             rge = st.text_input("Nume utilizator", key="reg_email", placeholder="ex: daria")
             rgp = st.text_input("Parolă (min. 6 caractere)", type="password", key="reg_pw")
+            st.caption("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
+            rq = st.selectbox("Alege o întrebare", SECURITY_QUESTIONS, key="reg_q")
+            ra = st.text_input("Răspunsul tău", key="reg_a",
+                               help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
                 try:
-                    uname = auth.register(rge, rgp)
+                    uname = auth.register(rge, rgp, question=rq, answer=ra)
                     _login_user(auth.public_by_email(uname))
                     st.rerun()
                 except ValueError as e:
