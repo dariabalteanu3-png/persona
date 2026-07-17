@@ -10,3 +10,4 @@ elevenlabs
 resend
 openai
 requests
+streamlit-cookies-controller

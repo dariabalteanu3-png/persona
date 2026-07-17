@@ -25,6 +25,11 @@ import llm
 import voice
 import image_gen
 import stt
+from streamlit_cookies_controller import CookieController
+
+
+def _cookies():
+    return CookieController(key="persona_cookies")
 
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -317,36 +322,42 @@ def current_user():
 
 
 def _set_cookie_js(token):
-    components.html(
-        "<script>try{window.parent.document.cookie="
-        f"'persona_session={token}; path=/; max-age=2592000; SameSite=Lax';"
-        "}catch(e){}</script>",
-        height=0,
-    )
+    import time
+    import datetime as _dt
+    try:
+        _cookies().set(
+            "persona_session", token,
+            expires=datetime.now(timezone.utc) + _dt.timedelta(days=30),
+            same_site="lax",
+        )
+        time.sleep(1)  # lasă browserul să scrie cookie-ul înainte de rerun
+    except Exception:  # noqa
+        pass
 
 
 def _clear_cookie_js():
-    components.html(
-        "<script>try{window.parent.document.cookie="
-        "'persona_session=; path=/; max-age=0; SameSite=Lax';}catch(e){}</script>",
-        height=0,
-    )
+    import time
+    try:
+        _cookies().remove("persona_session", same_site="lax")
+        time.sleep(0.5)
+    except Exception:  # noqa
+        pass
 
 
 def _login_user(u):
     st.session_state.auth_user = u
-    st.session_state.session_token = auth.create_session(u["id"])
-    st.session_state._cookie_written = False
+    tok = auth.create_session(u["id"])
+    st.session_state.session_token = tok
+    _set_cookie_js(tok)
 
 
 def _logout_user():
     tok = st.session_state.get("session_token")
     if tok:
         auth.destroy_session(tok)
+    _clear_cookie_js()
     st.session_state.pop("auth_user", None)
     st.session_state.pop("session_token", None)
-    st.session_state._cookie_written = False
-    st.session_state._clear_cookie = True
 
 
 def _restore_session():
@@ -354,7 +365,7 @@ def _restore_session():
         return
     tok = None
     try:
-        tok = st.context.cookies.get("persona_session")
+        tok = _cookies().get("persona_session")
     except Exception:  # noqa
         tok = None
     if tok and isinstance(tok, str):
@@ -362,7 +373,6 @@ def _restore_session():
         if u:
             st.session_state.auth_user = u
             st.session_state.session_token = tok
-            st.session_state._cookie_written = True
 
 
 def _restore_theme():
@@ -370,7 +380,7 @@ def _restore_theme():
         return
     st.session_state._theme_restored = True
     try:
-        v = st.context.cookies.get("persona_theme")
+        v = _cookies().get("persona_theme")
     except Exception:  # noqa
         v = None
     if isinstance(v, str) and v in ("light", "dark"):
@@ -379,13 +389,14 @@ def _restore_theme():
 
 
 def _write_theme_cookie(light):
+    import datetime as _dt
     val = "light" if light else "dark"
-    components.html(
-        "<script>try{window.parent.document.cookie="
-        f"'persona_theme={val}; path=/; max-age=31536000; SameSite=Lax';"
-        "}catch(e){}</script>",
-        height=0,
-    )
+    try:
+        _cookies().set("persona_theme", val,
+                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
+                       same_site="lax")
+    except Exception:  # noqa
+        pass
 
 
 def _restore_tz():
@@ -393,7 +404,7 @@ def _restore_tz():
         return
     st.session_state._tz_restored = True
     try:
-        v = st.context.cookies.get("persona_tz")
+        v = _cookies().get("persona_tz")
     except Exception:  # noqa
         v = None
     if isinstance(v, str) and v:
@@ -401,12 +412,13 @@ def _restore_tz():
 
 
 def _write_tz_cookie(tz):
-    components.html(
-        "<script>try{window.parent.document.cookie="
-        f"'persona_tz={tz}; path=/; max-age=31536000; SameSite=Lax';"
-        "}catch(e){}</script>",
-        height=0,
-    )
+    import datetime as _dt
+    try:
+        _cookies().set("persona_tz", tz,
+                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
+                       same_site="lax")
+    except Exception:  # noqa
+        pass
 
 
 def _send_code(email, purpose):
@@ -878,14 +890,10 @@ def proactive_fragment(char_id, conv_id):
 
 
 # ------------------------- sidebar -------------------------
+_cookies()  # montează componenta de cookie-uri devreme (ca să poată citi sesiunea)
 _restore_session()
 _restore_theme()
 _restore_tz()
-if st.session_state.get("session_token") and not st.session_state.get("_cookie_written"):
-    _set_cookie_js(st.session_state.session_token)
-    st.session_state._cookie_written = True
-if st.session_state.pop("_clear_cookie", False):
-    _clear_cookie_js()
 user = current_user()
 with st.sidebar:
     st.markdown('<div class="app-logo">🎭 Persona<span class="dot">.</span></div>', unsafe_allow_html=True)
