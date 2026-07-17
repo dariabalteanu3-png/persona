@@ -25,11 +25,6 @@ import llm
 import voice
 import image_gen
 import stt
-from streamlit_cookies_controller import CookieController
-
-
-def _cookies():
-    return CookieController(key="persona_cookies")
 
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -331,24 +326,16 @@ def current_user():
 
 
 def _set_cookie_js(token):
-    import time
-    import datetime as _dt
     try:
-        _cookies().set(
-            "persona_session", token,
-            expires=datetime.now(timezone.utc) + _dt.timedelta(days=30),
-            same_site="lax",
-        )
-        time.sleep(1)  # lasă browserul să scrie cookie-ul înainte de rerun
+        st.query_params["sid"] = token
     except Exception:  # noqa
         pass
 
 
 def _clear_cookie_js():
-    import time
     try:
-        _cookies().remove("persona_session", same_site="lax")
-        time.sleep(0.5)
+        if "sid" in st.query_params:
+            del st.query_params["sid"]
     except Exception:  # noqa
         pass
 
@@ -374,7 +361,7 @@ def _restore_session():
         return
     tok = None
     try:
-        tok = _cookies().get("persona_session")
+        tok = st.query_params.get("sid")
     except Exception:  # noqa
         tok = None
     if tok and isinstance(tok, str):
@@ -389,7 +376,7 @@ def _restore_theme():
         return
     st.session_state._theme_restored = True
     try:
-        v = _cookies().get("persona_theme")
+        v = st.query_params.get("th")
     except Exception:  # noqa
         v = None
     if isinstance(v, str) and v in ("light", "dark"):
@@ -398,12 +385,8 @@ def _restore_theme():
 
 
 def _write_theme_cookie(light):
-    import datetime as _dt
-    val = "light" if light else "dark"
     try:
-        _cookies().set("persona_theme", val,
-                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
-                       same_site="lax")
+        st.query_params["th"] = "light" if light else "dark"
     except Exception:  # noqa
         pass
 
@@ -413,7 +396,7 @@ def _restore_tz():
         return
     st.session_state._tz_restored = True
     try:
-        v = _cookies().get("persona_tz")
+        v = st.query_params.get("tz")
     except Exception:  # noqa
         v = None
     if isinstance(v, str) and v:
@@ -421,11 +404,8 @@ def _restore_tz():
 
 
 def _write_tz_cookie(tz):
-    import datetime as _dt
     try:
-        _cookies().set("persona_tz", tz,
-                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
-                       same_site="lax")
+        st.query_params["tz"] = tz
     except Exception:  # noqa
         pass
 
@@ -435,7 +415,7 @@ def _restore_sound():
         return
     st.session_state._sound_restored = True
     try:
-        v = _cookies().get("persona_sound")
+        v = st.query_params.get("snd")
     except Exception:  # noqa
         v = None
     if isinstance(v, str) and v in ("iPhone", "Samsung"):
@@ -443,11 +423,8 @@ def _restore_sound():
 
 
 def _write_sound_cookie(v):
-    import datetime as _dt
     try:
-        _cookies().set("persona_sound", v,
-                       expires=datetime.now(timezone.utc) + _dt.timedelta(days=365),
-                       same_site="lax")
+        st.query_params["snd"] = v
     except Exception:  # noqa
         pass
 
@@ -954,7 +931,6 @@ def proactive_fragment(char_id, conv_id):
 
 
 # ------------------------- sidebar -------------------------
-_cookies()  # montează componenta de cookie-uri devreme (ca să poată citi sesiunea)
 _restore_session()
 _restore_theme()
 _restore_tz()
