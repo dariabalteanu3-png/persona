@@ -32,6 +32,111 @@ except Exception:  # noqa
     pass
 
 
+# ------------------------- persistență automată pe GitHub (opțional) -------------------------
+# Când NU există MONGO_URL, dar sunt setate GITHUB_TOKEN + GITHUB_DATA_REPO în secrets,
+# datele (conturi, personaje, conversații, mesaje) se salvează automat într-un fișier JSON
+# dintr-un repo GitHub privat, ca să rămână salvate chiar și după ce Streamlit repornește.
+_GH_TOKEN = os.environ.get("GITHUB_TOKEN")
+_GH_REPO = os.environ.get("GITHUB_DATA_REPO")
+_GH_FILE = os.environ.get("GITHUB_DATA_FILE", "persona_db.json")
+_GH_COLLECTIONS = ["characters", "messages", "conversations", "users", "sessions", "email_codes"]
+_gh_enabled = bool(_GH_TOKEN and _GH_REPO and not _mongo_url)
+_gh_last_snapshot = None
+
+
+def _gh_api(method, url, data=None):
+    import urllib.request
+    import urllib.error
+    import json as _json
+    req = urllib.request.Request(url, method=method)
+    req.add_header("Authorization", f"token {_GH_TOKEN}")
+    req.add_header("Accept", "application/vnd.github+json")
+    body = _json.dumps(data).encode() if data is not None else None
+    if body:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, body, timeout=25) as r:
+            return _json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def _gh_url():
+    return f"https://api.github.com/repos/{_GH_REPO}/contents/{_GH_FILE}"
+
+
+def _gh_serialize():
+    import json as _json
+    out = {c: list(_db[c].find({}, {"_id": 0})) for c in _GH_COLLECTIONS}
+    return _json.dumps(out, ensure_ascii=False)
+
+
+def _gh_load():
+    import json as _json
+    import base64 as _b64
+    res = _gh_api("GET", _gh_url())
+    if not res or not res.get("content"):
+        return
+    try:
+        content = _b64.b64decode(res["content"]).decode()
+        data = _json.loads(content) if content.strip() else {}
+    except Exception:  # noqa
+        return
+    for c in _GH_COLLECTIONS:
+        docs = data.get(c, [])
+        for d in docs:
+            d.pop("_id", None)
+        _db[c].delete_many({})
+        if docs:
+            _db[c].insert_many(docs)
+
+
+def _gh_save():
+    import base64 as _b64
+    content = _b64.b64encode(_gh_serialize().encode()).decode()
+    for _attempt in range(3):
+        body = {"message": "update persona data", "content": content}
+        cur = _gh_api("GET", _gh_url())
+        if cur and cur.get("sha"):
+            body["sha"] = cur["sha"]
+        try:
+            _gh_api("PUT", _gh_url(), body)
+            return
+        except Exception as e:  # noqa
+            import urllib.error
+            if isinstance(e, urllib.error.HTTPError) and e.code == 409 and _attempt < 2:
+                import time as _t
+                _t.sleep(1)
+                continue
+            raise
+
+
+def _gh_autosave_loop():
+    import time as _time
+    global _gh_last_snapshot
+    while True:
+        _time.sleep(20)
+        try:
+            snap = _gh_serialize()
+            if snap != _gh_last_snapshot:
+                _gh_save()
+                _gh_last_snapshot = snap
+        except Exception:  # noqa
+            pass
+
+
+if _gh_enabled:
+    try:
+        _gh_load()
+        _gh_last_snapshot = _gh_serialize()
+    except Exception:  # noqa
+        pass
+    import threading as _threading
+    _threading.Thread(target=_gh_autosave_loop, daemon=True).start()
+
+
 # ------------------------- users / auth -------------------------
 def create_user(email, password_hash, name, verified=False):
     doc = {
