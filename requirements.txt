@@ -1,0 +1,12 @@
+streamlit
+pymongo
+dnspython
+mongomock
+python-dotenv
+bcrypt
+Pillow
+ddgs
+elevenlabs
+resend
+openai
+requests

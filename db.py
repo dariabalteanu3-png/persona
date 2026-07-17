@@ -1,0 +1,274 @@
+import os
+import uuid
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+
+from dotenv import load_dotenv
+from pymongo import MongoClient
+
+load_dotenv(Path(__file__).parent / ".env")
+
+_mongo_url = os.environ.get("MONGO_URL")
+if _mongo_url:
+    _client = MongoClient(_mongo_url)
+else:
+    # No external DB configured -> use a built-in in-memory store (mongomock).
+    # Simplest setup; data resets if the hosting container restarts.
+    import mongomock
+    _client = mongomock.MongoClient()
+_db = _client[os.environ.get("DB_NAME", "persona")]
+
+characters = _db.characters
+messages = _db.messages
+conversations = _db.conversations
+users = _db.users
+sessions = _db.sessions
+email_codes = _db.email_codes
+
+try:
+    users.create_index("email", unique=True)
+    sessions.create_index("token", unique=True)
+except Exception:  # noqa
+    pass
+
+
+# ------------------------- users / auth -------------------------
+def create_user(email, password_hash, name, verified=False):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": password_hash,
+        "name": name,
+        "verified": verified,
+        "avatar_image": None,
+        "created_at": _now(),
+    }
+    users.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def get_user_by_email(email):
+    return users.find_one({"email": email}, {"_id": 0})
+
+
+def get_user_by_id(uid):
+    return users.find_one({"id": uid}, {"_id": 0})
+
+
+def update_user(uid, data):
+    users.update_one({"id": uid}, {"$set": data})
+    return get_user_by_id(uid)
+
+
+def set_user_verified(email):
+    users.update_one({"email": email}, {"$set": {"verified": True}})
+
+
+def set_user_password(email, password_hash):
+    users.update_one({"email": email}, {"$set": {"password_hash": password_hash}})
+
+
+def toggle_favorite(user_id, char_id):
+    u = get_user_by_id(user_id)
+    favs = list((u or {}).get("favorites") or [])
+    if char_id in favs:
+        favs.remove(char_id)
+        state = False
+    else:
+        favs.append(char_id)
+        state = True
+    users.update_one({"id": user_id}, {"$set": {"favorites": favs}})
+    return state
+
+
+def get_favorites(user_id):
+    u = get_user_by_id(user_id)
+    return list((u or {}).get("favorites") or []) if u else []
+
+
+def favorite_counts():
+    counts = {}
+    for u in users.find({}, {"favorites": 1, "_id": 0}):
+        for cid in (u.get("favorites") or []):
+            counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
+
+def increment_stat(char_id, field, n=1):
+    characters.update_one({"id": char_id}, {"$inc": {field: n}})
+
+
+def character_message_count(char_id):
+    conv_ids = [c["id"] for c in list_conversations(char_id)]
+    if not conv_ids:
+        return 0
+    return messages.count_documents({"conversation_id": {"$in": conv_ids}})
+
+
+def delete_user(user_id):
+    u = get_user_by_id(user_id)
+    if not u:
+        return
+    for c in list_characters(owner_id=user_id):
+        delete_character(c["id"])
+    sessions.delete_many({"user_id": user_id})
+    email_codes.delete_many({"email": u.get("email")})
+    users.delete_one({"id": user_id})
+
+
+# ------------------------- email codes -------------------------
+def create_email_code(email, code, purpose, ttl_minutes=15):
+    email_codes.delete_many({"email": email, "purpose": purpose})
+    email_codes.insert_one({
+        "email": email,
+        "code": code,
+        "purpose": purpose,
+        "created_at": _now(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat(),
+    })
+
+
+def check_email_code(email, code, purpose):
+    doc = email_codes.find_one({"email": email, "purpose": purpose, "code": (code or "").strip()})
+    if not doc:
+        return False
+    try:
+        if datetime.fromisoformat(doc["expires_at"]) < datetime.now(timezone.utc):
+            email_codes.delete_one({"_id": doc["_id"]})
+            return False
+    except Exception:  # noqa
+        pass
+    email_codes.delete_one({"_id": doc["_id"]})
+    return True
+
+
+def create_session(token, user_id, expires_days=30):
+    sessions.insert_one({
+        "token": token,
+        "user_id": user_id,
+        "created_at": _now(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat(),
+    })
+
+
+def get_session(token):
+    s = sessions.find_one({"token": token}, {"_id": 0})
+    if not s:
+        return None
+    try:
+        if datetime.fromisoformat(s["expires_at"]) < datetime.now(timezone.utc):
+            sessions.delete_one({"token": token})
+            return None
+    except Exception:  # noqa
+        pass
+    return s
+
+
+def delete_session(token):
+    sessions.delete_one({"token": token})
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def create_character(data):
+    doc = {"id": str(uuid.uuid4()), "created_at": _now(), **data}
+    characters.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def list_characters(owner_id=None):
+    q = {} if owner_id is None else {"owner_id": owner_id}
+    return list(characters.find(q, {"_id": 0}).sort("created_at", -1))
+
+
+def list_public_characters():
+    return list(characters.find({"visibility": "public"}, {"_id": 0}).sort("created_at", -1))
+
+
+def get_character(cid):
+    return characters.find_one({"id": cid}, {"_id": 0})
+
+
+def update_character(cid, data):
+    characters.update_one({"id": cid}, {"$set": data})
+    return get_character(cid)
+
+
+def delete_character(cid):
+    conv_ids = [c["id"] for c in list_conversations(cid)]
+    characters.delete_one({"id": cid})
+    conversations.delete_many({"character_id": cid})
+    messages.delete_many({"conversation_id": {"$in": conv_ids}})
+
+
+# ------------------------- conversations -------------------------
+def create_conversation(character_id, title="Conversație nouă"):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "character_id": character_id,
+        "title": title,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    conversations.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def list_conversations(character_id):
+    return list(
+        conversations.find({"character_id": character_id}, {"_id": 0}).sort("created_at", 1)
+    )
+
+
+def get_conversation(conv_id):
+    return conversations.find_one({"id": conv_id}, {"_id": 0})
+
+
+def rename_conversation(conv_id, title):
+    conversations.update_one({"id": conv_id}, {"$set": {"title": title, "updated_at": _now()}})
+
+
+def touch_conversation(conv_id):
+    conversations.update_one({"id": conv_id}, {"$set": {"updated_at": _now()}})
+
+
+def delete_conversation(conv_id):
+    conversations.delete_one({"id": conv_id})
+    messages.delete_many({"conversation_id": conv_id})
+
+
+# ------------------------- messages -------------------------
+def add_message(conversation_id, role, content, audio_b64=None):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "conversation_id": conversation_id,
+        "role": role,
+        "content": content,
+        "created_at": _now(),
+    }
+    if audio_b64:
+        doc["audio_b64"] = audio_b64
+    messages.insert_one(doc)
+    touch_conversation(conversation_id)
+    doc.pop("_id", None)
+    return doc
+
+
+def get_messages(conversation_id):
+    return list(
+        messages.find({"conversation_id": conversation_id}, {"_id": 0}).sort("created_at", 1)
+    )
+
+
+def clear_messages(conversation_id):
+    messages.delete_many({"conversation_id": conversation_id})
+
+
+def set_reaction(message_id, emoji):
+    messages.update_one({"id": message_id}, {"$set": {"reaction": emoji}})
+
