@@ -540,35 +540,22 @@ def _render_login_register():
         )
         t_login, t_reg = st.tabs(["Autentificare", "Cont nou"])
         with t_login:
-            le = st.text_input("Email", key="login_email", placeholder="nume@exemplu.com")
+            le = st.text_input("Nume utilizator", key="login_email", placeholder="ex: daria")
             lp = st.text_input("Parolă", type="password", key="login_pw")
             if st.button("Intră în cont", key="do_login", use_container_width=True, type="primary"):
                 u = auth.authenticate(le, lp)
                 if not u:
-                    st.error("Email sau parolă greșite.")
+                    st.error("Nume de utilizator sau parolă greșite.")
                 else:
                     _login_user(auth.public_by_email(le))
                     st.rerun()
-            if st.checkbox("Am uitat parola", key="show_forgot"):
-                fe = st.text_input("Emailul contului", key="forgot_email", placeholder="nume@exemplu.com")
-                if st.button("Trimite cod de resetare", key="do_forgot", use_container_width=True):
-                    if not auth.public_by_email(fe):
-                        st.error("Nu există cont cu acest email.")
-                    else:
-                        ok, err = _send_code(fe.strip().lower(), "reset")
-                        if ok:
-                            st.session_state.pending_reset_email = fe.strip().lower()
-                            st.rerun()
-                        else:
-                            st.error(err)
         with t_reg:
-            rge = st.text_input("Email", key="reg_email", placeholder="nume@exemplu.com")
-            rgn = st.text_input("Nume (opțional)", key="reg_name")
+            rge = st.text_input("Nume utilizator", key="reg_email", placeholder="ex: daria")
             rgp = st.text_input("Parolă (min. 6 caractere)", type="password", key="reg_pw")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
                 try:
-                    email = auth.register(rge, rgp, rgn)
-                    _login_user(auth.public_by_email(email))
+                    uname = auth.register(rge, rgp)
+                    _login_user(auth.public_by_email(uname))
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))

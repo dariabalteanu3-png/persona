@@ -34,16 +34,16 @@ def public_by_email(email):
     return _public(u) if u else None
 
 
-def register(email, password, name=""):
-    email = (email or "").strip().lower()
-    if not EMAIL_RE.match(email):
-        raise ValueError("Adresă de email invalidă.")
+def register(username, password, name=""):
+    username = (username or "").strip().lower()
+    if len(username) < 3:
+        raise ValueError("Numele de utilizator trebuie să aibă minim 3 caractere.")
     if not password or len(password) < 6:
         raise ValueError("Parola trebuie să aibă minim 6 caractere.")
-    if db.get_user_by_email(email):
-        raise ValueError("Există deja un cont cu acest email.")
-    db.create_user(email, hash_password(password), (name or "").strip() or email.split("@")[0], verified=True)
-    return email
+    if db.get_user_by_email(username):
+        raise ValueError("Există deja un cont cu acest nume de utilizator.")
+    db.create_user(username, hash_password(password), (name or "").strip() or username, verified=True)
+    return username
 
 
 def authenticate(email, password):
