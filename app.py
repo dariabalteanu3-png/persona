@@ -1064,6 +1064,20 @@ def _render_playlist(char, key_prefix=""):
         else:
             st.info("Nu am putut pregăti versurile acum. Mai încearcă puțin mai târziu.")
 
+    # mood mini-playlist — the character curates songs for a chosen mood
+    moods = ["🌙 Liniște", "⚡ Energie", "💔 Dor", "❤️ Iubire", "🎉 Bucurie", "🌧️ Melancolie"]
+    mood = st.selectbox("Fă-mi un mini-playlist pe o stare", moods,
+                        key=f"moodsel_{key_prefix}{char['id']}")
+    if st.button(f"🎚️ {char['name']} îmi face un playlist pe această stare",
+                 key=f"moodbtn_{key_prefix}{char['id']}", use_container_width=True):
+        conv = active_conv_id(char)
+        if _emit_mood_playlist(char, conv, mood):
+            st.session_state["notif_sound"] = True
+            select_char(char["id"])
+            st.rerun()
+        else:
+            st.info("Nu am putut face playlist-ul acum. Mai încearcă puțin mai târziu.")
+
     # download the whole playlist in one place (single .zip)
     downloadable = [s for s in songs if s.get("song_b64")]
     if downloadable:
@@ -1232,6 +1246,56 @@ def _emit_lyrics(char, conv_id, song):
     msg = db.add_message(conv_id, "assistant", line, extra=extra)
     st.session_state["_pending_notify"] = (char["name"], line)
     if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _emit_mood_playlist(char, conv_id, mood):
+    """Personajul curează un mini-playlist din melodiile trimise, pentru o stare aleasă."""
+    names = db.list_song_names(char["id"]) if hasattr(db, "list_song_names") else []
+    if not names:
+        return None
+    try:
+        line = llm.mood_playlist(char, db.get_messages(conv_id), names, mood)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", f"🎚️ Mini-playlist «{mood}»:\n\n{line}")
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _emit_song_of_day(char, conv_id, song):
+    """Dimineața, personajul alege «melodia zilei» din playlist (cu redare)."""
+    sname = song.get("song_name", "melodia zilei")
+    try:
+        line = llm.song_of_the_day(char, db.get_messages(conv_id), sname)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    extra = {"media_kind": "song", "song_name": sname, "dedication": True}
+    if song.get("song_b64"):
+        extra["song_b64"] = song["song_b64"]
+    msg = db.add_message(conv_id, "assistant", line, extra=extra)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    want_voice = char.get("voice_id") and (
+        st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
+    )
+    if want_voice:
         try:
             st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
                 line, char["voice_id"], **_tts_kwargs(char))
@@ -1453,6 +1517,16 @@ def proactive_fragment(char_id, conv_id):
                     st.session_state[guard] = today
                     if _emit_memory_recall(char, conv_id):
                         fired = True
+
+    # "melodia zilei" — each morning the character picks a song from the playlist
+    if not fired and sched.get("song_of_day_on", True) and hasattr(db, "random_song"):
+        guard = f"songofday_{conv_id}"
+        if st.session_state.get(guard) != today and 360 <= now_min <= 660:
+            song = db.random_song(char["id"])
+            if song and song.get("song_b64"):
+                st.session_state[guard] = today
+                if _emit_song_of_day(char, conv_id, song):
+                    fired = True
 
     # spontaneous "melodia noastră" — occasionally the character dedicates a song from the playlist
     if not fired and sched.get("dedicate_on", True) and hasattr(db, "random_song"):
@@ -2013,6 +2087,8 @@ def render_chat(char):
                            key=f"fu_min_{char['id']}")
         ded_on = st.toggle("💝 «Melodia noastră» — din când în când îmi dedică o melodie din playlist",
                            value=sched.get("dedicate_on", True), key=f"ded_on_{char['id']}")
+        sod_on = st.toggle("🌅 «Melodia zilei» — în fiecare dimineață îmi alege o melodie din playlist",
+                           value=sched.get("song_of_day_on", True), key=f"sod_on_{char['id']}")
         if st.button("💾 Salvează programul", key=f"save_sched_{char['id']}", use_container_width=True):
             db.update_character(char["id"], {
                 "notif_theme": None if notif_theme == "Implicit" else notif_theme,
@@ -2029,6 +2105,7 @@ def render_chat(char):
                     "tone": tone if tone != "Normal" else None,
                     "followup_on": fu_on, "followup_min": fu_min,
                     "dedicate_on": ded_on,
+                    "song_of_day_on": sod_on,
                 },
             })
             st.success("Program salvat! Personajul îți va scrie la orele alese.")

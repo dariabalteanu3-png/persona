@@ -239,6 +239,29 @@ def favorite_lyrics(character, history, song_name):
     return get_reply(character, history, instr)
 
 
+def mood_playlist(character, history, song_names, mood):
+    """Character curates a mini-playlist from the user's songs for a chosen mood."""
+    lst = ", ".join(song_names[:20])
+    instr = (
+        f"(Din melodiile pe care le aveți în playlist ({lst}), alege-le pe cele care se potrivesc "
+        f"stării „{mood}” și fă-i utilizatorului un mini-playlist. Spune-i cald și în personaj ce "
+        "melodii ai ales (folosește EXACT numele din listă), în ce ordine să le asculte și de ce se "
+        "potrivesc. Dacă nici una nu se potrivește perfect, alege-le pe cele mai apropiate. "
+        "Maxim 5 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
+def song_of_the_day(character, history, song_name):
+    """Morning 'song of the day' pick from the shared playlist."""
+    instr = (
+        f"(E dimineață. Alegi din playlist-ul vostru «melodia zilei» de azi: „{song_name}”. "
+        "Dă-i utilizatorului un bună dimineața cald și spune-i de ce ai ales-o azi și cu ce stare "
+        "să înceapă ziua ascultând-o. În personaj. Maxim 3 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recall_memory(character, history, media_desc):
     """Character spontaneously recalls a photo/song the user shared before."""
     instr = (
