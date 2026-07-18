@@ -1049,10 +1049,16 @@ def _render_playlist(char, key_prefix="", readonly=False):
     for i, s in enumerate(songs):
         sid = s.get("id")
         confirm_key = f"confdel_{key_prefix}{sid}"
-        c1, c2 = st.columns([0.85, 0.15])
+        edit_key = f"editname_{key_prefix}{sid}"
+        c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
         c1.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
+        if sid and hasattr(db, "rename_song") and not readonly:
+            if c2.button("✏️", key=f"editsong_{key_prefix}{sid}",
+                         help="Schimbă numele melodiei"):
+                st.session_state[edit_key] = True
+                st.rerun()
         if sid and hasattr(db, "delete_song") and not readonly:
-            if c2.button("🗑️", key=f"delsong_{key_prefix}{sid}",
+            if c3.button("🗑️", key=f"delsong_{key_prefix}{sid}",
                          help="Scoate melodia din playlist"):
                 st.session_state[confirm_key] = True
                 st.rerun()
@@ -1060,6 +1066,20 @@ def _render_playlist(char, key_prefix="", readonly=False):
             st.audio(base64.b64decode(s["song_b64"]), format="audio/mp3")
         else:
             st.caption("_(fișierul audio nu a fost salvat — a rămas doar numele melodiei)_")
+        if st.session_state.get(edit_key):
+            new_nm = st.text_input("Nume nou pentru melodie", value=s.get("song_name", ""),
+                                   key=f"newname_{key_prefix}{sid}")
+            ec1, ec2 = st.columns(2)
+            if ec1.button("💾 Salvează numele", key=f"savename_{key_prefix}{sid}",
+                          use_container_width=True):
+                if new_nm.strip():
+                    db.rename_song(sid, new_nm.strip())
+                st.session_state.pop(edit_key, None)
+                st.rerun()
+            if ec2.button("✗ Renunță", key=f"cancelname_{key_prefix}{sid}",
+                          use_container_width=True):
+                st.session_state.pop(edit_key, None)
+                st.rerun()
         if st.session_state.get(confirm_key):
             st.warning(f"Sigur scoți «{s.get('song_name', 'melodia')}» din playlist?")
             cc1, cc2 = st.columns(2)

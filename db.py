@@ -443,6 +443,11 @@ def delete_song(message_id):
     messages.delete_one({"id": message_id})
 
 
+def rename_song(message_id, new_name):
+    """Change the display name of a single song in a playlist."""
+    messages.update_one({"id": message_id}, {"$set": {"song_name": new_name}})
+
+
 def random_song(character_id):
     """Pick a random song the user shared (prefer ones with stored audio) for «melodia noastră»."""
     songs = list_songs(character_id)
