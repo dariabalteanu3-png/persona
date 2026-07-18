@@ -685,11 +685,20 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Setează autocomplete corect pe câmpurile de login/parolă ca browserul
-    să nu mai completeze numele în câmpul de parolă și invers (bug autofill)."""
+    """Setează autocomplete corect pe câmpurile de login/parolă ȘI forțează Streamlit
+    să 'vadă' valoarea completată (inclusiv parola sugerată automat de telefon), altfel
+    parola poate apărea goală la trimitere ('minim 6 caractere')."""
     components.html(
         """
         <script>
+        function reactSet(inp){
+          try{
+            var proto = window.parent.HTMLInputElement.prototype;
+            var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            setter.call(inp, inp.value);
+            inp.dispatchEvent(new Event('input', {bubbles:true}));
+          }catch(e){}
+        }
         function fixAF(){
           try{
             var doc = window.parent.document;
@@ -706,12 +715,19 @@ def _fix_autofill_js():
                 inp.setAttribute('autocomplete','new-password');
                 inp.setAttribute('name','new-password');
               }
+              if (!inp.__pfix){
+                inp.__pfix = true;
+                ['change','blur','animationstart'].forEach(function(ev){
+                  inp.addEventListener(ev, function(){ reactSet(inp); });
+                });
+              }
             });
           }catch(e){}
         }
         fixAF();
         setTimeout(fixAF, 400);
         setTimeout(fixAF, 1200);
+        setTimeout(fixAF, 2500);
         </script>
         """,
         height=0,
