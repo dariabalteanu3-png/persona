@@ -218,6 +218,16 @@ def dedicate_song(character, history, song_name):
     return get_reply(character, history, instr)
 
 
+def favorite_lyrics(character, history, song_name):
+    """Character shares their favorite lines/verse from a song in the shared playlist."""
+    instr = (
+        f"(Alegi melodia „{song_name}” din playlist-ul vostru și îi spui utilizatorului care sunt "
+        "versurile/partea ta preferată din ea și de ce te ating. Dacă știi versurile, citează pe scurt "
+        "câteva rânduri; dacă nu, descrie momentul preferat. Cald, în personaj. Maxim 3-4 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recall_memory(character, history, media_desc):
     """Character spontaneously recalls a photo/song the user shared before."""
     instr = (

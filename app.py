@@ -993,6 +993,9 @@ def _render_playlist(char, key_prefix=""):
                 <button id="{pid}_all" aria-label="Ascultă tot playlist-ul de la început" style="{btn}">▶️ Ascultă tot</button>
                 <button id="{pid}_n" aria-label="Melodia următoare" style="{btn}">⏭️ Următoarea</button>
               </div>
+              <div style="margin-top:8px;">
+                <button id="{pid}_sh" aria-label="Amestecă și pornește melodiile într-o ordine surpriză" style="{btn}width:100%;">🔀 Amestecă (ordine surpriză)</button>
+              </div>
               <script>
               (function(){{
                 var tracks={tj},i=0;
@@ -1003,16 +1006,20 @@ def _render_playlist(char, key_prefix=""):
                   t.textContent="🎵 Se redă ("+(i+1)+"/"+tracks.length+"): "+tracks[i].name;
                   if(play){{var p=a.play(); if(p&&p.catch){{p.catch(function(){{}});}}}}
                 }}
+                function shuffle(){{
+                  for(var k=tracks.length-1;k>0;k--){{var j=Math.floor(Math.random()*(k+1));var tmp=tracks[k];tracks[k]=tracks[j];tracks[j]=tmp;}}
+                }}
                 document.getElementById("{pid}_all").onclick=function(){{load(0,true);}};
                 document.getElementById("{pid}_p").onclick=function(){{load(i-1,true);}};
                 document.getElementById("{pid}_n").onclick=function(){{load(i+1,true);}};
+                document.getElementById("{pid}_sh").onclick=function(){{shuffle();t.textContent="🔀 Ordine surpriză…";load(0,true);}};
                 a.addEventListener("ended",function(){{load(i+1,true);}});
                 load(0,false);
               }})();
               </script>
             </div>
             ''',
-            height=210,
+            height=270,
         )
     st.caption(f"🎵 Toate melodiile ({len(songs)})")
     for i, s in enumerate(songs):
@@ -1031,6 +1038,46 @@ def _render_playlist(char, key_prefix=""):
                 st.rerun()
             else:
                 st.info("Nu am putut pregăti dedicația acum. Mai încearcă puțin mai târziu.")
+
+    # favorite lyrics — the character tells their favorite lines, in their own voice
+    sel_song = st.selectbox("Alege o melodie pentru versuri", names,
+                            key=f"lyricsel_{key_prefix}{char['id']}")
+    if st.button(f"🎤 {char['name']} îmi spune versurile lui preferate (cu vocea lui)",
+                 key=f"lyricbtn_{key_prefix}{char['id']}", use_container_width=True):
+        song = next((s for s in songs if s.get("song_name", "melodie") == sel_song), None) or songs[0]
+        conv = active_conv_id(char)
+        if _emit_lyrics(char, conv, song):
+            st.session_state["notif_sound"] = True
+            select_char(char["id"])
+            st.rerun()
+        else:
+            st.info("Nu am putut pregăti versurile acum. Mai încearcă puțin mai târziu.")
+
+    # download the whole playlist in one place (single .zip)
+    downloadable = [s for s in songs if s.get("song_b64")]
+    if downloadable:
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            used = set()
+            for s in downloadable:
+                nm = (s.get("song_name") or "melodie").strip()
+                safe = "".join(c for c in nm if c.isalnum() or c in " -_").strip() or "melodie"
+                fn, k = safe, 1
+                while f"{fn}.mp3" in used:
+                    k += 1
+                    fn = f"{safe} ({k})"
+                used.add(f"{fn}.mp3")
+                zf.writestr(f"{fn}.mp3", base64.b64decode(s["song_b64"]))
+        st.download_button(
+            "⬇️ Descarcă toate melodiile (.zip)",
+            data=buf.getvalue(),
+            file_name=f"playlist-{char['name']}.zip",
+            mime="application/zip",
+            key=f"dlall_{key_prefix}{char['id']}",
+            use_container_width=True,
+        )
 
 
 def send_proactive(char, kind):
@@ -1150,6 +1197,30 @@ def _emit_song_dedication(char, conv_id):
     if char.get("voice_id") and (
         st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
     ):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _emit_lyrics(char, conv_id, song):
+    """Personajul spune versurile lui preferate dintr-o melodie din playlist (cu vocea lui)."""
+    sname = song.get("song_name", "melodia noastră")
+    try:
+        line = llm.favorite_lyrics(char, db.get_messages(conv_id), sname)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    extra = {"media_kind": "song", "song_name": sname, "dedication": True}
+    if song.get("song_b64"):
+        extra["song_b64"] = song["song_b64"]
+    msg = db.add_message(conv_id, "assistant", line, extra=extra)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
         try:
             st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
                 line, char["voice_id"], **_tts_kwargs(char))
