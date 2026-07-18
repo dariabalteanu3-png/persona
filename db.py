@@ -434,8 +434,13 @@ def list_songs(character_id):
         return []
     return list(messages.find(
         {"conversation_id": {"$in": conv_ids}, "media_kind": "song", "role": "user"},
-        {"_id": 0, "song_name": 1, "song_b64": 1, "created_at": 1},
+        {"_id": 0, "id": 1, "song_name": 1, "song_b64": 1, "created_at": 1},
     ).sort("created_at", 1))
+
+
+def delete_song(message_id):
+    """Remove a single song message from a playlist."""
+    messages.delete_one({"id": message_id})
 
 
 def random_song(character_id):

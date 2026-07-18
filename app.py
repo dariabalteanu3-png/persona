@@ -1026,7 +1026,13 @@ def _render_playlist(char, key_prefix=""):
         )
     st.caption(f"🎵 Toate melodiile ({len(songs)})")
     for i, s in enumerate(songs):
-        st.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
+        c1, c2 = st.columns([0.85, 0.15])
+        c1.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
+        if s.get("id") and hasattr(db, "delete_song"):
+            if c2.button("🗑️", key=f"delsong_{key_prefix}{s['id']}",
+                         help="Scoate melodia din playlist"):
+                db.delete_song(s["id"])
+                st.rerun()
         if s.get("song_b64"):
             st.audio(base64.b64decode(s["song_b64"]), format="audio/mp3")
         else:
@@ -1043,8 +1049,10 @@ def _render_playlist(char, key_prefix=""):
                 st.info("Nu am putut pregăti dedicația acum. Mai încearcă puțin mai târziu.")
 
     # favorite lyrics — the character tells their favorite lines, in their own voice
-    sel_song = st.selectbox("Alege o melodie pentru versuri", names,
-                            key=f"lyricsel_{key_prefix}{char['id']}")
+    lyrsel_key = f"lyricsel_{key_prefix}{char['id']}"
+    if st.session_state.get(lyrsel_key) not in names:
+        st.session_state.pop(lyrsel_key, None)
+    sel_song = st.selectbox("Alege o melodie pentru versuri", names, key=lyrsel_key)
     if st.button(f"🎤 {char['name']} îmi spune versurile lui preferate (cu vocea lui)",
                  key=f"lyricbtn_{key_prefix}{char['id']}", use_container_width=True):
         song = next((s for s in songs if s.get("song_name", "melodie") == sel_song), None) or songs[0]
