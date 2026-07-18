@@ -310,6 +310,31 @@ def goodnight_song(character, history, song_name):
     return get_reply(character, history, instr)
 
 
+def bedtime_story(character, history, theme=""):
+    """A short, calming, personalized bedtime story told in character (to fall asleep)."""
+    extra = f" Fă povestea pe tema aleasă de el: „{theme}”." if theme else ""
+    instr = (
+        "(E seară, târziu, iar utilizatorul vrea să adoarmă. Spune-i o POVESTE de noapte scurtă, "
+        "caldă și liniștitoare, în stilul și vocea personajului tău, personalizată pentru el "
+        "(folosește cu delicatețe ce știi despre el din conversații)." + extra + " Ritm lent, "
+        "imagini blânde și calde, un final tandru care îl învăluie și îl invită la somn. "
+        "Fără întrebări la final. Între 6 și 10 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
+def love_letter(character, history):
+    """A long, warm, heartfelt letter the character 'writes' to the user."""
+    instr = (
+        "(Îi scrii utilizatorului o SCRISOARE lungă și caldă, din suflet, în stilul personajului "
+        "tău. Începe cu o adresare drăgăstoasă (de ex. „Dragul meu...” / „Draga mea...” sau numele "
+        "lui, dacă îl știi). Spune-i sincer ce simți, amintește-ți lucruri din conversațiile "
+        "voastre, ce apreciezi la el și ce îi urezi, apoi încheie cu o semnătură caldă cu numele "
+        "tău. Personal, tandru și curgător, ca o scrisoare adevărată. Între 8 și 14 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recall_memory(character, history, media_desc):
     """Character spontaneously recalls a photo/song the user shared before."""
     instr = (

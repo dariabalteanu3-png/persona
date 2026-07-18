@@ -1423,6 +1423,36 @@ def _emit_goodnight_song(char, conv_id, song):
     return msg["id"]
 
 
+def _emit_bedtime_story(char, conv_id, theme=""):
+    """Personajul îți spune o poveste de noapte scurtă și liniștitoare (cu voce automată)."""
+    try:
+        line = llm.bedtime_story(char, db.get_messages(conv_id), theme)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", f"🌙 Poveste de noapte:\n\n{line}")
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        st.session_state["_gen_voice_for"] = msg["id"]  # vocea se generează după ce textul e afișat
+    return msg["id"]
+
+
+def _emit_letter(char, conv_id):
+    """Personajul îți «scrie» o scrisoare lungă și caldă (cu voce automată)."""
+    try:
+        line = llm.love_letter(char, db.get_messages(conv_id))
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", f"💌 O scrisoare pentru tine:\n\n{line}")
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        st.session_state["_gen_voice_for"] = msg["id"]  # vocea se generează după ce textul e afișat
+    return msg["id"]
+
+
 def _idle_seconds(conv_id):
     hist = db.get_messages(conv_id)
     if not hist:
@@ -1670,6 +1700,20 @@ def proactive_fragment(char_id, conv_id):
                 st.session_state[guard] = today
                 if _emit_song_dedication(char, conv_id):
                     fired = True
+
+    # occasional heartfelt letter — every now and then the character "writes" you a letter
+    if not fired and sched.get("letter_on", True):
+        guard = f"letter_{conv_id}"
+        lkey = f"letter_pick_{conv_id}"
+        if st.session_state.get(lkey) != today:
+            import random as _rnd
+            st.session_state[lkey] = today
+            st.session_state[f"{lkey}_yes"] = (_rnd.random() < 0.15)
+        if (st.session_state.get(guard) != today and st.session_state.get(f"{lkey}_yes")
+                and _idle_seconds(conv_id) >= 180 and len(db.get_messages(conv_id)) >= 4):
+            st.session_state[guard] = today
+            if _emit_letter(char, conv_id):
+                fired = True
 
     if fired:
         st.session_state["notif_sound"] = True
@@ -2213,6 +2257,8 @@ def render_chat(char):
                            value=sched.get("song_of_day_on", True), key=f"sod_on_{char['id']}")
         gn_on = st.toggle("🌙 «Noapte bună» — seara îmi trimite o melodie liniștitoare din playlist",
                           value=sched.get("goodnight_on", True), key=f"gn_on_{char['id']}")
+        letter_on = st.toggle("💌 «Scrisoare» — din când în când îmi scrie o scrisoare caldă (o pot asculta)",
+                              value=sched.get("letter_on", True), key=f"letter_on_{char['id']}")
         if st.button("💾 Salvează programul", key=f"save_sched_{char['id']}", use_container_width=True):
             db.update_character(char["id"], {
                 "notif_theme": None if notif_theme == "Implicit" else notif_theme,
@@ -2231,6 +2277,7 @@ def render_chat(char):
                     "dedicate_on": ded_on,
                     "song_of_day_on": sod_on,
                     "goodnight_on": gn_on,
+                    "letter_on": letter_on,
                 },
             })
             st.success("Program salvat! Personajul îți va scrie la orele alese.")
@@ -2351,6 +2398,20 @@ def render_chat(char):
                 st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/mp3", autoplay=ap)
                 if ap:
                     st.session_state["ambient_play_mid"] = None
+
+    # voce amânată pentru mesajele lungi (poveste/scrisoare): textul apare imediat, vocea vine după
+    _gv = st.session_state.pop("_gen_voice_for", None)
+    if _gv and char.get("voice_id") and not st.session_state.get(f"audio_{_gv}"):
+        _m = next((x for x in history if x["id"] == _gv), None)
+        if _m:
+            with st.spinner(f"{char['name']} își pregătește vocea... (poți începe să citești)"):
+                try:
+                    st.session_state[f"audio_{_gv}"] = voice.text_to_speech(
+                        _m["content"], char["voice_id"], **tts_kwargs)
+                    st.session_state["autoplay_mid"] = _gv
+                except Exception:  # noqa
+                    pass
+            st.rerun()
 
     prompt = st.chat_input(f"Scrie-i lui {char['name']}...")
     proactive_fragment(char["id"], active_conv)
@@ -2529,6 +2590,32 @@ def render_chat(char):
             if _emit_memory_recall(char, active_conv):
                 st.session_state["notif_sound"] = True
             st.rerun()
+
+    # ---- bedtime story & heartfelt letter (listen with the character's voice) ----
+    with st.expander("🌙 Poveste de noapte & 💌 Scrisoare"):
+        st.caption(f"{char['name']} îți poate spune o poveste caldă ca să adormi mai ușor sau "
+                   "îți poate «scrie» o scrisoare din suflet — o auzi cu vocea lui, fără să apeși play.")
+        story_theme = st.text_input("Temă poveste (opțional)", key=f"story_theme_{active_conv}",
+                                    placeholder="ex: o pădure liniștită, marea, copilăria...")
+        bcol = st.columns(2)
+        if bcol[0].button("🌙 Spune-mi o poveste de noapte", key=f"bedtime_{active_conv}",
+                          use_container_width=True):
+            with st.spinner(f"{char['name']} îți pregătește o poveste..."):
+                _ok = _emit_bedtime_story(char, active_conv, (story_theme or "").strip())
+            if _ok:
+                st.session_state["notif_sound"] = True
+                st.rerun()
+            else:
+                st.info("Nu am putut face povestea acum. Mai încearcă puțin mai târziu.")
+        if bcol[1].button("💌 Scrie-mi o scrisoare", key=f"letter_btn_{active_conv}",
+                          use_container_width=True):
+            with st.spinner(f"{char['name']} îți scrie o scrisoare..."):
+                _ok = _emit_letter(char, active_conv)
+            if _ok:
+                st.session_state["notif_sound"] = True
+                st.rerun()
+            else:
+                st.info("Nu am putut scrie scrisoarea acum. Mai încearcă puțin mai târziu.")
 
     # ---- smart contextual suggestions ----
     suggestions = []
