@@ -83,11 +83,21 @@ def _gh_load():
     import json as _json
     import base64 as _b64
     res = _gh_api("GET", _gh_url())
-    if not res or not res.get("content"):
+    if not res:
         return
+    content = res.get("content")
+    if not content:
+        # Fișierul e prea mare (>1MB) pentru API-ul Contents -> îl luăm prin API-ul Blobs (până la 100MB).
+        sha = res.get("sha")
+        if not sha:
+            return
+        blob = _gh_api("GET", f"https://api.github.com/repos/{_GH_REPO}/git/blobs/{sha}")
+        content = blob.get("content") if blob else None
+        if not content:
+            return
     try:
-        content = _b64.b64decode(res["content"]).decode()
-        data = _json.loads(content) if content.strip() else {}
+        raw = _b64.b64decode(content).decode()
+        data = _json.loads(raw) if raw.strip() else {}
     except Exception:  # noqa
         return
     for c in _GH_COLLECTIONS:
@@ -125,6 +135,10 @@ def _gh_autosave_loop():
     while True:
         _time.sleep(20)
         try:
+            # Protecție: nu suprascrie datele bune din GitHub cu o bază goală
+            # (ex: dacă încărcarea la pornire a eșuat). Evită pierderea conturilor/personajelor.
+            if users.count_documents({}) == 0 and characters.count_documents({}) == 0:
+                continue
             snap = _gh_serialize()
             if snap != _gh_last_snapshot:
                 _gh_save()
