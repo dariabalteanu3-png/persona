@@ -48,24 +48,62 @@ def _groq_messages(system, text):
     ]
 
 
+def _pollinations_text(system, text):
+    """Keyless free fallback (Pollinations) so chat keeps working if Groq fails."""
+    import requests
+    payload = {"model": "openai", "messages": _groq_messages(system, text)}
+    last = None
+    for attempt in range(4):
+        try:
+            if attempt % 2 == 0:
+                r = requests.post("https://text.pollinations.ai/", json=payload, timeout=30)
+                body = (r.text or "").strip()
+                if r.status_code == 200 and body and not body.lstrip().startswith("<"):
+                    return body
+                last = f"base HTTP {r.status_code}"
+            else:
+                r = requests.post("https://text.pollinations.ai/openai", json=payload, timeout=30)
+                if r.status_code == 200:
+                    c = (r.json()["choices"][0]["message"]["content"] or "").strip()
+                    if c:
+                        return c
+                last = f"openai HTTP {r.status_code}"
+        except Exception as e:  # noqa
+            last = type(e).__name__
+    raise RuntimeError(f"pollinations failed: {last}")
+
+
 def _groq_text(system, text):
-    resp = groq_client().chat.completions.create(
-        model=GROQ_TEXT_MODEL,
-        messages=_groq_messages(system, text),
-    )
-    return (resp.choices[0].message.content or "").strip()
+    try:
+        resp = groq_client().chat.completions.create(
+            model=GROQ_TEXT_MODEL,
+            messages=_groq_messages(system, text),
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        if not content:
+            raise RuntimeError("empty groq response")
+        return content
+    except Exception:  # noqa - Groq failed (bad key/model/quota) -> keyless fallback
+        return _pollinations_text(system, text)
 
 
 def _groq_stream(system, text):
-    stream = groq_client().chat.completions.create(
-        model=GROQ_TEXT_MODEL,
-        messages=_groq_messages(system, text),
-        stream=True,
-    )
-    for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    try:
+        stream = groq_client().chat.completions.create(
+            model=GROQ_TEXT_MODEL,
+            messages=_groq_messages(system, text),
+            stream=True,
+        )
+        got = False
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                got = True
+                yield delta
+        if not got:
+            yield _pollinations_text(system, text)
+    except Exception:  # noqa - Groq failed -> keyless fallback (whole reply at once)
+        yield _pollinations_text(system, text)
 
 
 def build_system(character, history, web_info=""):
