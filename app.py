@@ -2638,47 +2638,12 @@ def render_chat(char):
                 st.session_state["notif_sound"] = True
             st.rerun()
 
-    # ---- bedtime story & heartfelt letter (listen with the character's voice) ----
-    with st.expander("🌙 Poveste de noapte & 💌 Scrisoare"):
-        st.caption(f"{char['name']} îți poate spune o poveste caldă ca să adormi mai ușor sau "
-                   "îți poate «scrie» o scrisoare din suflet — o auzi cu vocea lui, fără să apeși play.")
-        saved_themes = char.get("story_themes") or []
-        if saved_themes:
-            st.caption("⭐ Temele tale salvate — apasă una ca s-o asculți:")
-            for i, th in enumerate(saved_themes):
-                tc = st.columns([5, 1])
-                if tc[0].button(f"🌙 {th}", key=f"savedtheme_{active_conv}_{i}",
-                                use_container_width=True):
-                    with st.spinner(f"{char['name']} îți pregătește o poveste..."):
-                        _ok = _emit_bedtime_story(char, active_conv, th)
-                    if _ok:
-                        _save_story_theme(char, th)
-                        st.session_state["notif_sound"] = True
-                        st.rerun()
-                    else:
-                        st.info("Nu am putut face povestea acum. Mai încearcă puțin mai târziu.")
-                if tc[1].button("✕", key=f"delsavedtheme_{active_conv}_{i}",
-                                use_container_width=True, help="Șterge tema salvată"):
-                    _remove_story_theme(char, th)
-                    st.rerun()
-        story_theme = st.text_input("Temă poveste nouă (opțional — o salvez pentru data viitoare)",
-                                    key=f"story_theme_{active_conv}",
-                                    placeholder="ex: o pădure liniștită, marea, copilăria...")
-        bcol = st.columns(2)
-        if bcol[0].button("🌙 Spune-mi o poveste de noapte", key=f"bedtime_{active_conv}",
-                          use_container_width=True):
-            _theme = (story_theme or "").strip()
-            with st.spinner(f"{char['name']} îți pregătește o poveste..."):
-                _ok = _emit_bedtime_story(char, active_conv, _theme)
-            if _ok:
-                if _theme:
-                    _save_story_theme(char, _theme)
-                st.session_state["notif_sound"] = True
-                st.rerun()
-            else:
-                st.info("Nu am putut face povestea acum. Mai încearcă puțin mai târziu.")
-        if bcol[1].button("💌 Scrie-mi o scrisoare", key=f"letter_btn_{active_conv}",
-                          use_container_width=True):
+    # ---- heartfelt letter (listen with the character's voice) ----
+    with st.expander("💌 Scrisoare"):
+        st.caption(f"{char['name']} îți poate «scrie» o scrisoare din suflet — "
+                   "o auzi cu vocea lui, fără să apeși play.")
+        if st.button("💌 Scrie-mi o scrisoare", key=f"letter_btn_{active_conv}",
+                     use_container_width=True):
             with st.spinner(f"{char['name']} îți scrie o scrisoare..."):
                 _ok = _emit_letter(char, active_conv)
             if _ok:
