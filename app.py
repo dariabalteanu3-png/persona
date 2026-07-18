@@ -256,9 +256,7 @@ def create_from_preset(p):
         "voice_id": vid, "voice_name": vname,
         "voice_stability": 0.5, "voice_similarity": 0.75, "voice_style": 0.0,
     }
-    _u = current_user()
-    if _u:
-        data["owner_id"] = _u["id"]
+    data["owner_id"] = _identity_id()
     char = db.create_character(data)
     st.session_state.active_id = char["id"]
     st.session_state.creating = False
@@ -289,6 +287,29 @@ st.session_state.setdefault("auth_user", None)
 st.session_state.setdefault("web_search", True)
 st.session_state.setdefault("theme_light", False)
 st.session_state.setdefault("manual_tz", "")
+st.session_state.setdefault("notify_on", False)
+st.session_state.setdefault("absence_on", False)
+st.session_state.setdefault("absence_min", 15)
+st.session_state.setdefault("birthday", "")
+st.session_state.setdefault("holidays_on", True)
+
+ROMANIAN_HOLIDAYS = {
+    "01-01": "Anul Nou",
+    "01-24": "Ziua Unirii Principatelor Române",
+    "02-14": "Ziua Îndrăgostiților",
+    "03-01": "Mărțișorul",
+    "03-08": "Ziua Femeii",
+    "05-01": "Ziua Muncii",
+    "06-01": "Ziua Copilului",
+    "08-15": "Sfânta Maria",
+    "11-30": "Sfântul Andrei",
+    "12-01": "Ziua Națională a României",
+    "12-06": "Moș Nicolae",
+    "12-24": "Ajunul Crăciunului",
+    "12-25": "Crăciunul",
+    "12-26": "A doua zi de Crăciun",
+    "12-31": "Revelionul",
+}
 
 _CF_KEYS = [
     "cf_name", "cf_pers", "cf_scen", "cf_avatar", "cf_avatar_img", "cf_amb", "cf_vis", "cf_mode",
@@ -325,6 +346,26 @@ def current_user():
     return None
 
 
+def _identity_id():
+    """Identitate stabilă: id-ul contului dacă e logat, altfel un id de „guest"
+    stocat în URL (gid). Astfel fiecare utilizator vede DOAR propriile personaje."""
+    u = current_user()
+    if u:
+        return u["id"]
+    try:
+        gid = st.query_params.get("gid")
+    except Exception:  # noqa
+        gid = None
+    if not gid:
+        import uuid
+        gid = "guest_" + uuid.uuid4().hex[:16]
+        try:
+            st.query_params["gid"] = gid
+        except Exception:  # noqa
+            pass
+    return gid
+
+
 def _set_cookie_js(token):
     try:
         st.query_params["sid"] = token
@@ -341,7 +382,22 @@ def _clear_cookie_js():
 
 
 def _login_user(u):
+    # Migrează personajele create ca vizitator (owner_id=guest_...) în noul cont,
+    # ca utilizatorul să nu piardă nimic la logare/înregistrare.
+    try:
+        gid = st.query_params.get("gid")
+    except Exception:  # noqa
+        gid = None
     st.session_state.auth_user = u
+    if gid and isinstance(gid, str) and gid.startswith("guest_"):
+        try:
+            db.reassign_owner(gid, u["id"])
+        except Exception:  # noqa
+            pass
+        try:
+            del st.query_params["gid"]
+        except Exception:  # noqa
+            pass
     tok = auth.create_session(u["id"])
     st.session_state.session_token = tok
     _set_cookie_js(tok)
@@ -429,6 +485,54 @@ def _write_sound_cookie(v):
         pass
 
 
+def _restore_notify():
+    if st.session_state.get("_notify_restored"):
+        return
+    st.session_state._notify_restored = True
+    try:
+        if st.query_params.get("ntf") == "1":
+            st.session_state.notify_on = True
+        av = st.query_params.get("abs")
+    except Exception:  # noqa
+        av = None
+    if av:
+        try:
+            st.session_state.absence_on = True
+            st.session_state.absence_min = int(av)
+        except Exception:  # noqa
+            pass
+    try:
+        bd = st.query_params.get("bd")
+        if bd and len(bd) == 5:
+            st.session_state.birthday = bd
+        if st.query_params.get("hol") == "0":
+            st.session_state.holidays_on = False
+    except Exception:  # noqa
+        pass
+
+
+def _write_notify_params():
+    try:
+        if st.session_state.get("notify_on"):
+            st.query_params["ntf"] = "1"
+        else:
+            st.query_params.pop("ntf", None)
+        if st.session_state.get("absence_on"):
+            st.query_params["abs"] = str(int(st.session_state.get("absence_min", 15)))
+        else:
+            st.query_params.pop("abs", None)
+        if st.session_state.get("birthday"):
+            st.query_params["bd"] = st.session_state.get("birthday")
+        else:
+            st.query_params.pop("bd", None)
+        if st.session_state.get("holidays_on", True):
+            st.query_params.pop("hol", None)
+        else:
+            st.query_params["hol"] = "0"
+    except Exception:  # noqa
+        pass
+
+
 def _send_code(email, purpose):
     try:
         code = auth.gen_code(email, purpose)
@@ -465,6 +569,17 @@ def _process_pic(raw, rot, square):
     im.thumbnail((400, 400))
     buf = io.BytesIO()
     im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _compress_photo(raw):
+    """Resize/compress an uploaded photo so it stays small enough to persist."""
+    from PIL import Image
+    import io
+    im = Image.open(io.BytesIO(raw)).convert("RGB")
+    im.thumbnail((900, 900))
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=82)
     return buf.getvalue()
 
 
@@ -549,8 +664,43 @@ def _render_reset():
         st.rerun()
 
 
+def _fix_autofill_js():
+    """Setează autocomplete corect pe câmpurile de login/parolă ca browserul
+    să nu mai completeze numele în câmpul de parolă și invers (bug autofill)."""
+    components.html(
+        """
+        <script>
+        function fixAF(){
+          try{
+            var doc = window.parent.document;
+            var inputs = doc.querySelectorAll('input');
+            inputs.forEach(function(inp){
+              var al = inp.getAttribute('aria-label') || '';
+              if (al === 'Nume utilizator'){
+                inp.setAttribute('autocomplete','username');
+                inp.setAttribute('name','username');
+              } else if (al === 'Parolă'){
+                inp.setAttribute('autocomplete','current-password');
+                inp.setAttribute('name','password');
+              } else if (al === 'Parolă (min. 6 caractere)'){
+                inp.setAttribute('autocomplete','new-password');
+                inp.setAttribute('name','new-password');
+              }
+            });
+          }catch(e){}
+        }
+        fixAF();
+        setTimeout(fixAF, 400);
+        setTimeout(fixAF, 1200);
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _render_login_register():
-    with st.expander("🔐 Autentificare", expanded=False):
+    _exp = bool(st.session_state.get("_open_auth_hint"))
+    with st.expander("🔐 Autentificare", expanded=_exp):
         st.markdown(
             '<div style="background:#0f1a12;border:1px solid #1f5130;border-radius:10px;'
             'padding:.6rem .7rem;font-size:.78rem;color:#8fdca8;margin-bottom:.7rem">'
@@ -613,6 +763,7 @@ def _render_login_register():
                 except ValueError as e:
                     st.error(str(e))
         st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
+        _fix_autofill_js()
 
 
 def _clear_form():
@@ -684,6 +835,65 @@ def play_ui_sound(name):
         f'<audio id="ns" autoplay><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
         f'<script>var a=document.getElementById("ns");if(a){{a.volume={vol};}}</script>',
         height=0,
+    )
+
+
+def _autoplay_voice(audio_bytes, uid):
+    """Redă automat vocea personajului în apel, cât mai fiabil pe telefon
+    (browserele mobile blochează uneori autoplay-ul; reîncercăm de câteva ori)."""
+    if not audio_bytes:
+        return
+    b64 = base64.b64encode(audio_bytes).decode()
+    components.html(
+        f'''
+        <audio id="cv_{uid}" autoplay playsinline preload="auto">
+          <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+        </audio>
+        <script>
+        (function(){{
+          var a=document.getElementById("cv_{uid}");
+          if(!a){{return;}}
+          a.volume=1.0;
+          function tryPlay(n){{
+            try{{
+              var p=a.play();
+              if(p&&p.catch){{p.catch(function(){{ if(n>0){{setTimeout(function(){{tryPlay(n-1);}},350);}} }});}}
+            }}catch(e){{ if(n>0){{setTimeout(function(){{tryPlay(n-1);}},350);}} }}
+          }}
+          tryPlay(6);
+        }})();
+        </script>
+        ''',
+        height=0,
+    )
+
+
+def _request_notify_permission_js():
+    components.html(
+        """
+        <script>
+        try {
+          var N = window.parent.Notification || window.Notification;
+          if (N && N.permission !== "granted") { N.requestPermission(); }
+        } catch(e) {}
+        </script>
+        """, height=0,
+    )
+
+
+def _browser_notify(title, body):
+    t = json.dumps(str(title)); bdy = json.dumps(str(body)[:180])
+    components.html(
+        f"""
+        <script>
+        try {{
+          var N = window.parent.Notification || window.Notification;
+          if (N && N.permission === "granted") {{
+            new N({t}, {{ body: {bdy} }});
+          }}
+        }} catch(e) {{}}
+        </script>
+        """, height=0,
     )
 
 
@@ -785,6 +995,7 @@ def _emit_proactive(char, conv_id, kind, tone=None, custom_instr=None):
     except Exception:  # noqa
         return None
     msg = db.add_message(conv_id, "assistant", line)
+    st.session_state["_pending_notify"] = (char["name"], line)
     want_voice = char.get("voice_id") and (
         st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
     )
@@ -793,6 +1004,43 @@ def _emit_proactive(char, conv_id, kind, tone=None, custom_instr=None):
             st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
                 line, char["voice_id"], **_tts_kwargs(char)
             )
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _emit_memory_recall(char, conv_id):
+    """Personajul își amintește din senin de o poză/melodie trimisă cândva."""
+    item = db.random_media(char["id"])
+    if not item:
+        return None
+    kind = item.get("media_kind")
+    if kind == "song":
+        desc = f"melodia „{item.get('song_name', 'o melodie')}” pe care ți-a trimis-o cândva"
+    elif kind == "video":
+        desc = "un videoclip pe care ți l-a trimis cândva"
+    else:
+        desc = "o poză pe care ți-a trimis-o cândva"
+    try:
+        line = llm.recall_memory(char, db.get_messages(conv_id), desc)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    extra = {"media_kind": kind}
+    if item.get("song_name"):
+        extra["song_name"] = item["song_name"]
+    if kind == "photo" and item.get("image_b64"):
+        extra["image_b64"] = item["image_b64"]
+    msg = db.add_message(conv_id, "assistant", line, extra=extra)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id") and (
+        st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
+    ):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
             st.session_state["autoplay_mid"] = msg["id"]
         except Exception:  # noqa
             pass
@@ -816,6 +1064,33 @@ def _parse_time(hhmm, default="08:00"):
     except Exception:  # noqa
         h, m = map(int, default.split(":"))
         return _time(h, m)
+
+
+def _orthodox_easter(year):
+    """Data Paștelui ortodox (calendar gregorian) — algoritmul Meeus (valid 1900–2099)."""
+    from datetime import date, timedelta
+    a = year % 4
+    b = year % 7
+    c = year % 19
+    d = (19 * c + 15) % 30
+    e = (2 * a + 4 * b - d + 34) % 7
+    month = (d + e + 114) // 31
+    day = ((d + e + 114) % 31) + 1
+    return date(year, month, day) + timedelta(days=13)
+
+
+def _movable_holidays(year):
+    """Sărbători cu dată mobilă, calculate față de Paștele ortodox."""
+    from datetime import timedelta
+    e = _orthodox_easter(year)
+    md = lambda dt: dt.strftime("%m-%d")
+    return {
+        md(e - timedelta(days=7)): "Floriile",
+        md(e - timedelta(days=2)): "Vinerea Mare",
+        md(e): "Paștele",
+        md(e + timedelta(days=1)): "A doua zi de Paște",
+        md(e + timedelta(days=49)): "Rusaliile",
+    }
 
 
 @st.fragment(run_every=20)
@@ -848,6 +1123,34 @@ def proactive_fragment(char_id, conv_id):
         _emit_proactive(char, conv_id, "checkin", tone, custom_instr=instr)
         fired = True
         break
+
+    # birthday — "La mulți ani!"
+    if not fired and st.session_state.get("birthday") and st.session_state.get("birthday") == md:
+        guard = f"bday_{conv_id}"
+        if st.session_state.get(guard) != today:
+            st.session_state[guard] = today
+            uname = (current_user() or {}).get("name") or st.session_state.get("profile_name") or ""
+            instr = (f"(Astăzi este ZIUA DE NAȘTERE a utilizatorului{(' ' + uname) if uname else ''}! "
+                     "Trimite-i un mesaj special, cald și plin de bucurie: urează-i „La mulți ani!”, "
+                     "spune-i cât de important e pentru tine și fă-i o urare frumoasă. Maxim 3 propoziții.)")
+            _emit_proactive(char, conv_id, "checkin", tone, custom_instr=instr)
+            fired = True
+
+    # Romanian holidays (fixed + movable, e.g. Paște)
+    if not fired and st.session_state.get("holidays_on", True):
+        _yr = now_local.year
+        if st.session_state.get("_mov_hol_year") != _yr:
+            st.session_state["_mov_hol_year"] = _yr
+            st.session_state["_mov_hol"] = _movable_holidays(_yr)
+        hol = ROMANIAN_HOLIDAYS.get(md) or (st.session_state.get("_mov_hol") or {}).get(md)
+        if hol:
+            guard = f"hol_{md}_{conv_id}"
+            if st.session_state.get(guard) != today:
+                st.session_state[guard] = today
+                instr = (f"(Astăzi este {hol}! Trimite-i utilizatorului un mesaj special de "
+                         "sărbătoare, cald și festiv, potrivit ocaziei, în stilul tău. Maxim 3 propoziții.)")
+                _emit_proactive(char, conv_id, "checkin", tone, custom_instr=instr)
+                fired = True
 
     days = sched.get("days")
     day_ok = (not days) or (now_local.weekday() in days)
@@ -925,9 +1228,69 @@ def proactive_fragment(char_id, conv_id):
                 _emit_proactive(char, conv_id, "followup", tone)
                 fired = True
 
+    # spontaneous "memory of the day" — recall a past photo/song once a day (after a short idle)
+    if not fired and sched.get("recall_on", True):
+        guard = f"recall_{conv_id}"
+        if st.session_state.get(guard) != today and db.has_media(char["id"]):
+            hist2 = db.get_messages(conv_id)
+            if hist2:
+                last2 = hist2[-1]
+                try:
+                    t2 = datetime.fromisoformat(last2["created_at"])
+                    if t2.tzinfo is None:
+                        t2 = t2.replace(tzinfo=timezone.utc)
+                    idle2 = (datetime.now(timezone.utc) - t2).total_seconds()
+                except Exception:  # noqa
+                    idle2 = 0
+                if idle2 >= 120:
+                    st.session_state[guard] = today
+                    if _emit_memory_recall(char, conv_id):
+                        fired = True
+
     if fired:
         st.session_state["notif_sound"] = True
         st.rerun(scope="app")
+
+
+@st.fragment(run_every=45)
+def absence_fragment():
+    """Dacă utilizatorul lipsește de o vreme, personajul cel mai recent îl caută
+    („mi-e dor de tine") + notificare în browser. Rulează pe orice pagină."""
+    if not st.session_state.get("absence_on"):
+        return
+    thr = max(1, int(st.session_state.get("absence_min", 15) or 15))
+    char = None
+    for cid in list(st.session_state.get("recent", [])):
+        c = db.get_character(cid)
+        if c:
+            char = c
+            break
+    if not char:
+        chs = db.list_characters(owner_id=_identity_id())
+        char = chs[0] if chs else None
+    if not char:
+        return
+    conv = active_conv_id(char)
+    hist = db.get_messages(conv)
+    if not hist:
+        return
+    last = hist[-1]
+    try:
+        t = datetime.fromisoformat(last["created_at"])
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        idle = (datetime.now(timezone.utc) - t).total_seconds()
+    except Exception:  # noqa
+        return
+    guard = f"absence_for_{conv}"
+    if idle >= thr * 60 and st.session_state.get(guard) != last["id"]:
+        st.session_state[guard] = last["id"]
+        instr = ("(Utilizatorul lipsește de o vreme și nu ați mai vorbit. Trimite-i un mesaj scurt, "
+                 "cald și personal prin care îi spui că ți-e dor de el/ea, că te-ai gândit la el/ea "
+                 "și că îl/o aștepți cu drag. Maxim 2 propoziții.)")
+        if _emit_proactive(char, conv, "checkin", custom_instr=instr):
+            st.session_state["notif_sound"] = True
+            st.rerun(scope="app")
 
 
 # ------------------------- sidebar -------------------------
@@ -935,6 +1298,7 @@ _restore_session()
 _restore_theme()
 _restore_tz()
 _restore_sound()
+_restore_notify()
 user = current_user()
 with st.sidebar:
     st.markdown('<div class="app-logo">🎭 Persona<span class="dot">.</span></div>', unsafe_allow_html=True)
@@ -947,7 +1311,12 @@ with st.sidebar:
             f'<div style="font-weight:700;font-size:.98rem">{user["name"]}</div></div>',
             unsafe_allow_html=True,
         )
-        # Profil, setări și deconectare s-au mutat în fila 👤 Profil (render_profil).
+        if st.button("🚪 Ieși din cont (schimbă utilizatorul)", key="sidebar_logout",
+                     use_container_width=True, type="primary",
+                     help="Te deconectează ca să se poată loga altcineva pe acest telefon"):
+            _logout_user()
+            st.session_state.nav = "personaje"
+            st.rerun()
     elif st.session_state.get("pending_verify_email"):
         _render_verify()
     elif st.session_state.get("pending_reset_email"):
@@ -1184,8 +1553,7 @@ def render_create():
             st.rerun()
 
         _u = current_user()
-        if _u:
-            data["owner_id"] = _u["id"]
+        data["owner_id"] = _identity_id()
         char = db.create_character(data)
         st.session_state.active_id = char["id"]
         st.session_state.creating = False
@@ -1196,6 +1564,13 @@ def render_create():
 
 
 # ------------------------- chat view -------------------------
+def _song_name(filename):
+    """Extract a human-friendly song name from an uploaded file name."""
+    base = os.path.splitext(os.path.basename(filename or "melodie"))[0]
+    name = base.replace("_", " ").replace("-", " – ").strip()
+    return name[:80] if name else "melodia mea"
+
+
 def render_chat(char):
     amb = AMBIANCES.get(char.get("ambiance", "Neutru"), AMBIANCES["Neutru"])
     st.markdown(
@@ -1218,6 +1593,18 @@ def render_chat(char):
         f'border-color:{amb["glow"]}55;background:{amb["glow"]}14">🔊 {voice_label}</span></div></div>',
         unsafe_allow_html=True,
     )
+
+    # ---- memento discret: invită vizitatorii să-și facă cont ca să nu piardă personajele ----
+    if not current_user():
+        mcol = st.columns([5, 2])
+        with mcol[0]:
+            st.caption("💾 Ești fără cont — personajele se salvează doar pe acest telefon. "
+                       "Fă-ți un cont gratuit ca să nu le pierzi.")
+        with mcol[1]:
+            if st.button("✨ Fă-ți cont", key="chat_save_reminder", use_container_width=True):
+                st.session_state["_open_auth_hint"] = True
+                st.session_state.nav = "personaje"
+                st.rerun()
 
     # ---- conversation threads ----
     convs = db.list_conversations(char["id"])
@@ -1489,6 +1876,13 @@ def render_chat(char):
             if m["role"] == "user" and m.get("audio_b64"):
                 st.caption("🎤 Mesaj vocal")
                 st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+            if m.get("media_kind") == "song" and m.get("song_b64"):
+                st.caption(f"🎵 {m.get('song_name', 'melodie')}")
+                st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
+            if m.get("media_kind") == "photo" and m.get("image_b64"):
+                st.image(base64.b64decode(m["image_b64"]), width=280)
+            if m.get("media_kind") == "video" and m.get("video_b64"):
+                st.video(base64.b64decode(m["video_b64"]))
             st.markdown(m["content"])
             _mid = m["id"]
             _react = m.get("reaction")
@@ -1536,27 +1930,151 @@ def render_chat(char):
     st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
     # ---- voice message (Messenger-style) ----
-    with st.popover("🎤 Mesaj vocal", use_container_width=False):
-        st.caption("Înregistrează un mesaj vocal, apoi oprește înregistrarea ca să-l trimiți.")
-        vm = st.audio_input("Mesaj vocal", label_visibility="collapsed", key=f"vm_{active_conv}")
-        if vm is not None:
-            vdata = vm.getvalue()
-            if vdata:
-                vh = hashlib.md5(vdata).hexdigest()
-                if st.session_state.get(f"vmrec_{active_conv}") != vh:
-                    st.session_state[f"vmrec_{active_conv}"] = vh
-                    with st.spinner("Transcriu mesajul vocal..."):
+    st.markdown("**🎤 Înregistrează un mesaj vocal**")
+    st.caption("📱 Apasă microfonul și vorbește. Prima dată, telefonul îți va cere "
+               "permisiunea pentru microfon — apasă „Permite”. Apoi oprește înregistrarea ca să-l trimiți.")
+    vm = st.audio_input("Mesaj vocal", label_visibility="collapsed", key=f"vm_{active_conv}")
+    if vm is not None:
+        vdata = vm.getvalue()
+        if vdata:
+            vh = hashlib.md5(vdata).hexdigest()
+            if st.session_state.get(f"vmrec_{active_conv}") != vh:
+                st.session_state[f"vmrec_{active_conv}"] = vh
+                with st.spinner("Transcriu mesajul vocal..."):
+                    try:
+                        vtext = stt.transcribe(vdata, "audio.wav")
+                    except Exception as e:  # noqa
+                        vtext = ""
+                        st.error(f"Nu am putut transcrie: {e}")
+                if vtext:
+                    st.session_state.pending_voice = {
+                        "text": vtext,
+                        "audio": base64.b64encode(vdata).decode(),
+                    }
+                    st.rerun()
+
+    # ---- send a favorite song ----
+    with st.expander("🎵 Trimite o melodie"):
+        st.caption(f"Încarcă o melodie preferată și {char['name']} îți spune părerea despre ea.")
+        song = st.file_uploader("Melodie", type=["mp3", "m4a", "wav", "ogg"],
+                                label_visibility="collapsed", key=f"song_{active_conv}")
+        if song is not None:
+            sdata = song.getvalue()
+            if sdata:
+                sh = hashlib.md5(sdata).hexdigest()
+                if st.session_state.get(f"songrec_{active_conv}") != sh:
+                    st.session_state[f"songrec_{active_conv}"] = sh
+                    sname = _song_name(song.name)
+                    sb64 = base64.b64encode(sdata).decode() if len(sdata) <= 1_400_000 else None
+                    with st.spinner(f"{char['name']} ascultă melodia..."):
                         try:
-                            vtext = stt.transcribe(vdata, "audio.wav")
-                        except Exception as e:  # noqa
-                            vtext = ""
-                            st.error(f"Nu am putut transcrie: {e}")
-                    if vtext:
-                        st.session_state.pending_voice = {
-                            "text": vtext,
-                            "audio": base64.b64encode(vdata).decode(),
-                        }
-                        st.rerun()
+                            scomment = llm.comment_on_song(char, history, sname)
+                        except Exception:  # noqa
+                            scomment = None
+                    extra = {"media_kind": "song", "song_name": sname}
+                    if sb64:
+                        extra["song_b64"] = sb64
+                    db.add_message(active_conv, "user",
+                                   f"🎵 Ți-am trimis melodia: **{sname}**", extra=extra)
+                    if scomment:
+                        amsg = db.add_message(active_conv, "assistant", scomment)
+                        st.session_state["notif_sound"] = True
+                        if st.session_state.get("auto_play") and char.get("voice_id"):
+                            try:
+                                st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
+                                    scomment, char["voice_id"], **tts_kwargs)
+                                st.session_state["autoplay_mid"] = amsg["id"]
+                            except Exception:  # noqa
+                                pass
+                    st.rerun()
+        if st.button("🎧 Recomandă-mi melodii noi", key=f"recsong_{active_conv}",
+                     use_container_width=True):
+            names = db.list_song_names(char["id"])
+            with st.spinner(f"{char['name']} alege melodii pentru tine..."):
+                try:
+                    rec = llm.recommend_songs(char, history, names)
+                except Exception:  # noqa
+                    rec = None
+            if rec:
+                amsg = db.add_message(active_conv, "assistant", "🎧 Recomandările mele:\n\n" + rec)
+                st.session_state["notif_sound"] = True
+                if char.get("voice_id"):
+                    try:
+                        st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
+                            rec, char["voice_id"], **tts_kwargs)
+                        st.session_state["autoplay_mid"] = amsg["id"]
+                    except Exception:  # noqa
+                        pass
+                st.rerun()
+
+    # ---- send a photo or video (gallery) ----
+    with st.expander("📷 Trimite o poză sau un videoclip"):
+        st.caption(f"Trimite o poză și {char['name']} se uită și îți spune părerea. "
+                   "Poți trimite și un videoclip scurt.")
+        media = st.file_uploader(
+            "Poză sau video",
+            type=["jpg", "jpeg", "png", "webp", "heic", "mp4", "mov", "webm"],
+            label_visibility="collapsed", key=f"media_{active_conv}",
+        )
+        if media is not None:
+            mdata = media.getvalue()
+            if mdata:
+                mh = hashlib.md5(mdata).hexdigest()
+                if st.session_state.get(f"mediarec_{active_conv}") != mh:
+                    st.session_state[f"mediarec_{active_conv}"] = mh
+                    ext = os.path.splitext(media.name or "")[1].lower()
+                    is_video = ext in (".mp4", ".mov", ".webm") or (media.type or "").startswith("video")
+                    react = None
+                    if is_video:
+                        vb64 = base64.b64encode(mdata).decode() if len(mdata) <= 4_000_000 else None
+                        extra = {"media_kind": "video"}
+                        if vb64:
+                            extra["video_b64"] = vb64
+                        note = "🎬 Ți-am trimis un videoclip." if vb64 else \
+                            "🎬 Ți-am trimis un videoclip (prea mare ca să-l salvez, dar l-am arătat)."
+                        db.add_message(active_conv, "user", note, extra=extra)
+                        with st.spinner(f"{char['name']} reacționează..."):
+                            try:
+                                react = llm.get_reply(
+                                    char, history,
+                                    "(Utilizatorul ți-a trimis un videoclip cu el/din viața lui. Nu poți "
+                                    "vedea conținutul, dar reacționează cald și curios în personaj: bucură-te "
+                                    "că ți-a trimis ceva și întreabă-l ce e în video. Maxim 2 propoziții.)",
+                                )
+                            except Exception:  # noqa
+                                react = None
+                    else:
+                        try:
+                            img = _compress_photo(mdata)
+                        except Exception:  # noqa
+                            img = mdata
+                        ib64 = base64.b64encode(img).decode()
+                        db.add_message(active_conv, "user", "📷 Ți-am trimis o poză.",
+                                       extra={"media_kind": "photo", "image_b64": ib64})
+                        with st.spinner(f"{char['name']} se uită la poză..."):
+                            try:
+                                react = llm.comment_on_photo(char, history, ib64, "image/jpeg")
+                            except Exception:  # noqa
+                                react = None
+                    if react:
+                        amsg = db.add_message(active_conv, "assistant", react)
+                        st.session_state["notif_sound"] = True
+                        if char.get("voice_id"):
+                            try:
+                                st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
+                                    react, char["voice_id"], **tts_kwargs)
+                                st.session_state["autoplay_mid"] = amsg["id"]
+                            except Exception:  # noqa
+                                pass
+                    st.rerun()
+
+    # ---- on-demand memory recall ----
+    if db.has_media(char["id"]):
+        if st.button("💭 Amintește-ți de o poză sau melodie", key=f"recall_btn_{active_conv}",
+                     use_container_width=True):
+            if _emit_memory_recall(char, active_conv):
+                st.session_state["notif_sound"] = True
+            st.rerun()
 
     # ---- smart contextual suggestions ----
     suggestions = []
@@ -1740,14 +2258,28 @@ def render_call(char):
     )
 
     if last_user:
-        st.markdown(f"🧑 **Tu:** {last_user['content']}")
+        st.markdown(
+            f'<div style="margin:.4rem 0;padding:.7rem 1rem;border-radius:14px;'
+            f'background:#141419;border:1px solid #23232b;font-size:1.02rem">'
+            f'🧑 <b>Tu:</b> {last_user["content"]}</div>',
+            unsafe_allow_html=True,
+        )
     if last_assistant:
-        st.markdown(f"🗣️ **{char['name']}:** {last_assistant['content']}")
+        st.markdown(
+            f'<div aria-live="polite" role="status" style="margin:.4rem 0 1rem;padding:1rem 1.15rem;'
+            f'border-radius:16px;background:{amb["grad"]};border:1px solid {glow}66;'
+            f'font-size:1.18rem;line-height:1.5;color:#ECECEC">'
+            f'🗣️ <b style="color:{glow}">{char["name"]} spune:</b><br>{last_assistant["content"]}</div>',
+            unsafe_allow_html=True,
+        )
         aid = last_assistant["id"]
-        if st.session_state.get(f"audio_{aid}"):
-            st.audio(st.session_state[f"audio_{aid}"], format="audio/mp3", autoplay=True)
+        _ab = st.session_state.get(f"audio_{aid}")
+        if _ab:
+            _autoplay_voice(_ab, aid)          # redare vocală automată (fiabilă pe telefon)
+            st.audio(_ab, format="audio/mp3")  # control de reascultare (fără autoplay dublu)
 
-    st.caption("🎤 Apasă microfonul, vorbește, apoi oprește înregistrarea:")
+    st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
+               "îți va cere permisiunea pentru microfon — apasă „Permite”.")
     audio = st.audio_input("Vorbește", label_visibility="collapsed", key=f"mic_{conv}")
     if audio is not None:
         data = audio.getvalue()
@@ -1814,8 +2346,7 @@ def clone_public_char(c):
         "voice_id", "voice_name", "voice_stability", "voice_similarity", "voice_style",
     )}
     data["visibility"] = "private"
-    if _u:
-        data["owner_id"] = _u["id"]
+    data["owner_id"] = _identity_id()
     new = db.create_character(data)
     try:
         db.increment_stat(c["id"], "clone_count")
@@ -1941,8 +2472,8 @@ def render_favorites():
 
 def render_public_gallery():
     _u = current_user()
-    my_id = _u["id"] if _u else None
-    favs = db.get_favorites(my_id) if my_id else None
+    my_id = _identity_id()
+    favs = db.get_favorites(my_id) if _u else None
     counts = db.favorite_counts()
     all_pubs = [c for c in db.list_public_characters() if c.get("owner_id") != my_id]
     if not all_pubs:
@@ -2053,7 +2584,7 @@ def render_gallery():
             unsafe_allow_html=True,
         )
     render_recent()
-    chars = db.list_characters(owner_id=_u["id"] if _u else None)
+    chars = db.list_characters(owner_id=_identity_id())
     if chars:
         st.markdown(
             '<div class="hero"><h1>Personajele <span class="accent">tale</span></h1>'
@@ -2132,8 +2663,7 @@ def render_gallery():
                     "memory": data.get("memory", ""),
                 }
                 _iu = current_user()
-                if _iu:
-                    new_data["owner_id"] = _iu["id"]
+                new_data["owner_id"] = _identity_id()
                 char = db.create_character(new_data)
                 st.session_state.active_id = char["id"]
                 st.session_state.nav = "chat"
@@ -2144,9 +2674,70 @@ def render_gallery():
 
 
 # ------------------------- navigation tabs -------------------------
+def render_amintiri():
+    st.markdown('<div class="hero"><h1>Amintirile <span class="accent">mele</span></h1></div>',
+                unsafe_allow_html=True)
+    st.caption("Toate pozele, melodiile și videoclipurile pe care le-ai trimis personajelor tale.")
+    media = db.list_media(_identity_id())
+    if not media:
+        st.info("Încă nu ai trimis nicio poză sau melodie. Deschide un personaj și trimite-i "
+                "ceva din chat — o poză 📷 sau o melodie 🎵.")
+        return
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for m in media:
+        groups.setdefault((m["char_id"], m["char_name"], m.get("char_avatar", "🎭")), []).append(m)
+    for (cid, cname, cav), items in groups.items():
+        st.markdown(f"### {cav} {cname}")
+        photos = [m for m in items if m["media_kind"] == "photo" and m.get("image_b64")]
+        songs = [m for m in items if m["media_kind"] == "song"]
+        videos = [m for m in items if m["media_kind"] == "video" and m.get("video_b64")]
+        if photos:
+            st.caption(f"📷 Poze ({len(photos)})")
+            pcols = st.columns(3)
+            for i, m in enumerate(photos):
+                with pcols[i % 3]:
+                    st.image(base64.b64decode(m["image_b64"]), use_container_width=True)
+        if songs:
+            st.caption(f"🎵 Melodii ({len(songs)})")
+            for j, m in enumerate(songs):
+                st.markdown(f"• **{m.get('song_name', 'melodie')}**")
+                if m.get("song_b64"):
+                    st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
+        if videos:
+            st.caption(f"🎬 Videoclipuri ({len(videos)})")
+            for m in videos:
+                st.video(base64.b64decode(m["video_b64"]))
+        if st.button(f"🎧 {cname} îmi recomandă melodii noi", key=f"rec_{cid}",
+                     use_container_width=True, type="primary"):
+            ch = db.get_character(cid)
+            if ch:
+                names = db.list_song_names(cid)
+                conv = active_conv_id(ch)
+                hist = db.get_messages(conv)
+                with st.spinner(f"{cname} alege melodii pentru tine..."):
+                    try:
+                        rec = llm.recommend_songs(ch, hist, names)
+                    except Exception:  # noqa
+                        rec = None
+                if rec:
+                    amsg = db.add_message(conv, "assistant", "🎧 Recomandările mele:\n\n" + rec)
+                    if ch.get("voice_id"):
+                        try:
+                            st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
+                                rec, ch["voice_id"], **_tts_kwargs(ch))
+                            st.session_state["autoplay_mid"] = amsg["id"]
+                        except Exception:  # noqa
+                            pass
+                    st.session_state.active_id = cid
+                    st.session_state.nav = "chat"
+                    st.rerun()
+        st.markdown("---")
+
+
 def _nav_bar():
     items = [("personaje", "🎭 Personaje"), ("exploreaza", "🌍 Explorează"),
-             ("favorite", "❤️ Favorite"), ("chat", "💬 Chat"), ("profil", "👤 Profil")]
+             ("amintiri", "🎞️ Amintiri"), ("chat", "💬 Chat"), ("profil", "👤 Profil")]
     cur = st.session_state.get("nav", "personaje")
     cols = st.columns(len(items))
     for i, (key, label) in enumerate(items):
@@ -2170,6 +2761,26 @@ def render_personaje():
             '<span style="opacity:.75">Aceasta e aplicația ta de personaje AI.</span></div>',
             unsafe_allow_html=True,
         )
+    else:
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#17171C,#20141a);'
+            'border:1px solid #FF7A5940;border-radius:14px;padding:1rem 1.15rem;'
+            'margin-bottom:.6rem;font-size:1.02rem">'
+            '👋 <b style="color:#FF7A59">Bun venit pe Persona!</b><br>'
+            '<span style="opacity:.85">Poți crea personaje și vorbi cu ele chiar și fără cont. '
+            'Dar dacă îți faci un cont gratuit, <b>personajele tale se salvează</b> și nu le pierzi, '
+            'iar le poți regăsi de pe orice telefon.</span></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("✨ Fă-ți cont gratuit (ca să nu-ți pierzi personajele)",
+                     key="onboard_signup", use_container_width=True, type="primary",
+                     help="Deschide formularul de creare cont din bara laterală"):
+            st.session_state["_open_auth_hint"] = True
+            st.rerun()
+        if st.session_state.get("_open_auth_hint"):
+            st.info("👈 Deschide **🔐 Autentificare** din bara laterală și alege fila "
+                    "**„Cont nou”** ca să-ți creezi contul. Personajele create acum vor trece "
+                    "automat în contul tău.")
     if st.button("＋  Personaj nou", use_container_width=True, type="primary", key="new-char-main"):
         _clear_form()
         st.session_state.creating = True
@@ -2177,7 +2788,7 @@ def render_personaje():
         st.session_state.active_id = None
         st.rerun()
     render_recent()
-    chars = db.list_characters(owner_id=_u["id"] if _u else None)
+    chars = db.list_characters(owner_id=_identity_id())
     if chars:
         st.markdown(
             '<div class="hero"><h1>Personajele <span class="accent">tale</span></h1>'
@@ -2344,6 +2955,75 @@ def render_profil():
             if _tc[2].button("📞 Apel", key="test_ring_sound", use_container_width=True):
                 play_sound("ringtone")
             st.markdown("---")
+            st.caption("🔔 Notificări & mesaje de absență")
+            st.session_state.notify_on = st.toggle(
+                "🔔 Notificări în browser",
+                value=st.session_state.get("notify_on", False),
+                key="notify_on_toggle",
+                help="Primești o notificare când un personaj îți scrie, chiar dacă ești în altă filă/aplicație.",
+            )
+            if st.session_state.notify_on:
+                _request_notify_permission_js()
+                st.caption("✅ Pornite. Merg cât timp aplicația e deschisă (și în fundal). "
+                           "Când închizi complet browserul nu pot ajunge.")
+            st.session_state.absence_on = st.toggle(
+                "💤 Mesaje de absență (personajele te caută dacă lipsești)",
+                value=st.session_state.get("absence_on", False),
+                key="absence_on_toggle",
+                help="Dacă nu mai vorbești o vreme, personajul tău cel mai recent îți trimite un mesaj cald („mi-e dor de tine”).",
+            )
+            _abs_opts = [5, 15, 30, 60, 120]
+            _abs_cur = st.session_state.get("absence_min", 15)
+            st.session_state.absence_min = st.select_slider(
+                "După cât timp de absență?",
+                options=_abs_opts,
+                value=_abs_cur if _abs_cur in _abs_opts else 15,
+                format_func=lambda x: f"{x} min",
+                key="absence_min_sel",
+            )
+            _write_notify_params()
+            if st.button("📩 Testează notificarea", key="test_browser_notify", use_container_width=True):
+                st.session_state.notify_on = True
+                _request_notify_permission_js()
+                _browser_notify("Persona 🎭", "Notificările funcționează! Personajele te vor anunța aici.")
+                st.toast("Am trimis o notificare de test 🔔")
+            st.markdown("---")
+            st.caption("🎂 Ziua ta & sărbători")
+            import datetime as _dtmod
+            _has_bd = bool(st.session_state.get("birthday"))
+            _bd_default = None
+            if _has_bd:
+                try:
+                    _mm, _dd = st.session_state.birthday.split("-")
+                    _bd_default = _dtmod.date(2000, int(_mm), int(_dd))
+                except Exception:  # noqa
+                    _bd_default = None
+            _set_bd = st.checkbox("Vreau să-mi urați ziua de naștere", value=_has_bd, key="bd_enable")
+            if _set_bd:
+                _bd = st.date_input(
+                    "🎂 Ziua ta de naștere",
+                    value=_bd_default or _dtmod.date(2000, 1, 1),
+                    min_value=_dtmod.date(1920, 1, 1),
+                    max_value=_dtmod.date(2020, 12, 31),
+                    format="DD.MM.YYYY",
+                    key="bd_input",
+                )
+                _new_bd = f"{_bd.month:02d}-{_bd.day:02d}"
+                if _new_bd != st.session_state.get("birthday"):
+                    st.session_state.birthday = _new_bd
+                    _write_notify_params()
+                st.caption("De ziua ta, personajele tale îți vor ura „La mulți ani!” 🎉")
+            elif st.session_state.get("birthday"):
+                st.session_state.birthday = ""
+                _write_notify_params()
+            st.session_state.holidays_on = st.toggle(
+                "🎉 Mesaje de sărbători (Crăciun, Anul Nou, Paște etc.)",
+                value=st.session_state.get("holidays_on", True),
+                key="holidays_on_toggle",
+                help="Personajele îți trimit un mesaj cald de sărbători, inclusiv Paștele, Floriile și Rusaliile (date calculate automat).",
+            )
+            _write_notify_params()
+            st.markdown("---")
             if st.checkbox("Vreau să-mi șterg contul", key="del_confirm"):
                 st.warning("Se șterg definitiv contul și toate personajele tale. Acțiunea e ireversibilă.")
                 typed = st.text_input("Scrie ȘTERGE pentru a confirma", key="del_typed")
@@ -2352,13 +3032,26 @@ def render_profil():
                     db.delete_user(user["id"])
                     _logout_user()
                     st.rerun()
-    if st.button("Deconectare", key="logout_btn", use_container_width=True):
+    st.markdown("---")
+    st.caption("Apasă aici ca să te deconectezi sau ca să se logheze altcineva pe acest telefon:")
+    if st.button("🚪 Ieși din cont (schimbă utilizatorul)", key="logout_btn",
+                 use_container_width=True, type="primary"):
         _logout_user()
+        st.session_state.nav = "personaje"
         st.rerun()
 
 
 # ------------------------- router -------------------------
 _handle_share_param()
+# fire a pending browser notification (proactive/absence message arrived)
+if st.session_state.get("notify_on") and st.session_state.get("_pending_notify"):
+    _pn = st.session_state.pop("_pending_notify")
+    _browser_notify(_pn[0], _pn[1])
+else:
+    st.session_state.pop("_pending_notify", None)
+# background: characters look for you if you've been away
+if st.session_state.get("absence_on"):
+    absence_fragment()
 try:
     if st.session_state.get("preview_id"):
         pv = db.get_character(st.session_state.preview_id)
@@ -2395,6 +3088,8 @@ try:
                 st.info("Niciun chat activ. Deschide un personaj din fila 🎭 Personaje.")
         elif _nav == "exploreaza":
             render_explore()
+        elif _nav == "amintiri":
+            render_amintiri()
         elif _nav == "profil":
             render_profil()
         else:

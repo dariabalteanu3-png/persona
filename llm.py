@@ -167,6 +167,98 @@ def get_reply(character, history, user_text, web_info=""):
     return asyncio.run(_reply(system, user_text, f"char-{character['id']}"))
 
 
+def comment_on_song(character, history, song_name):
+    """The character reacts to a favorite song the user shared."""
+    instr = (
+        f"(Utilizatorul tocmai ți-a trimis o melodie preferată de-a lui: „{song_name}”. "
+        "Reacționează cald și în personaj: spune-ți părerea despre această melodie sau artist "
+        "(dacă o cunoști — versuri, atmosferă, ce te face să simți) și de ce crezi că îi place lui. "
+        "Dacă nu o cunoști, spune sincer și întreabă-l ce înseamnă pentru el. Maxim 3 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
+def recommend_songs(character, history, songs):
+    """Character recommends new songs based on what the user shared."""
+    lst = ", ".join(songs[-20:]) if songs else ""
+    if lst:
+        instr = (
+            f"(Utilizatorul ți-a trimis până acum aceste melodii preferate: {lst}. "
+            "Pe baza gusturilor lui, recomandă-i 3 melodii NOI care crezi că i-ar plăcea. "
+            "Pentru fiecare spune scurt titlul, artistul și de ce ai ales-o, în stilul tău. "
+            "Cald și personal. Maxim 5 propoziții.)"
+        )
+    else:
+        instr = (
+            "(Utilizatorul nu ți-a trimis încă nicio melodie. Recomandă-i totuși 3 melodii pe "
+            "care le-ai asculta tu, în stilul personajului tău, și întreabă-l ce muzică îi place. "
+            "Maxim 5 propoziții.)"
+        )
+    return get_reply(character, history, instr)
+
+
+def recall_memory(character, history, media_desc):
+    """Character spontaneously recalls a photo/song the user shared before."""
+    instr = (
+        f"(Din senin, îți amintești cu drag de {media_desc}. Adu vorba despre asta într-un "
+        "mesaj scurt, cald și personal, ca și cum tocmai ți-ai adus aminte și te-a bucurat. "
+        "Maxim 2 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
+def comment_on_photo(character, history, image_b64, mime="image/jpeg"):
+    """The character 'looks' at a photo the user shared and gives an opinion (vision)."""
+    instr = (
+        "Utilizatorul tocmai ți-a trimis o poză cu el/ea sau din viața lui/ei. "
+        "Uită-te la poză și reacționează cald, sincer și ÎN PERSONAJ: spune-ți părerea, "
+        "remarcă detalii pe care le vezi (expresie, loc, atmosferă, culori, ținută) și fă un "
+        "compliment sincer sau o observație drăguță. Maxim 3 propoziții. NU descrie ca un robot."
+    )
+    system = build_system(character, history)
+    return _vision_reply(system, instr, image_b64, mime, f"photo-{character['id']}")
+
+
+def _strip_think(txt):
+    import re
+    txt = re.sub(r"<think>.*?</think>", "", txt or "", flags=re.DOTALL)
+    txt = re.sub(r"<think>.*$", "", txt, flags=re.DOTALL)
+    return txt.replace("</think>", "").strip()
+
+
+def _vision_reply(system, text, image_b64, mime, sid):
+    data_url = f"data:{mime};base64,{image_b64}"
+    if USE_GROQ:
+        from provider import GROQ_VISION_MODEL
+        resp = groq_client().chat.completions.create(
+            model=GROQ_VISION_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]},
+            ],
+        )
+        return _strip_think(resp.choices[0].message.content or "")
+    if USE_GEMINI:
+        from google.genai import types
+        img_bytes = __import__("base64").b64decode(image_b64)
+        resp = gemini_client().models.generate_content(
+            model=GEMINI_TEXT_MODEL,
+            contents=[types.Part.from_bytes(data=img_bytes, mime_type=mime), text],
+            config=types.GenerateContentConfig(system_instruction=system),
+        )
+        return (resp.text or "").strip()
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    chat = LlmChat(api_key=KEY, session_id=sid, system_message=system).with_model(
+        "openai", "gpt-4o"
+    )
+    return asyncio.run(chat.send_message(
+        UserMessage(text=text, file_contents=[ImageContent(image_base64=image_b64)])
+    ))
+
+
 def proactive_message(character, history, kind="text", tone=None):
     """Have the character reach out first (text/call opening/scheduled)."""
     instr = {

@@ -292,6 +292,13 @@ def list_characters(owner_id=None):
     return list(characters.find(q, {"_id": 0}).sort("created_at", -1))
 
 
+def reassign_owner(old_owner_id, new_owner_id):
+    """Mută toate personajele de la un proprietar la altul (ex: guest -> cont)."""
+    characters.update_many(
+        {"owner_id": old_owner_id}, {"$set": {"owner_id": new_owner_id}}
+    )
+
+
 def list_public_characters():
     return list(characters.find({"visibility": "public"}, {"_id": 0}).sort("created_at", -1))
 
@@ -350,7 +357,7 @@ def delete_conversation(conv_id):
 
 
 # ------------------------- messages -------------------------
-def add_message(conversation_id, role, content, audio_b64=None):
+def add_message(conversation_id, role, content, audio_b64=None, extra=None):
     doc = {
         "id": str(uuid.uuid4()),
         "conversation_id": conversation_id,
@@ -360,6 +367,8 @@ def add_message(conversation_id, role, content, audio_b64=None):
     }
     if audio_b64:
         doc["audio_b64"] = audio_b64
+    if extra:
+        doc.update(extra)
     messages.insert_one(doc)
     touch_conversation(conversation_id)
     doc.pop("_id", None)
@@ -370,6 +379,75 @@ def get_messages(conversation_id):
     return list(
         messages.find({"conversation_id": conversation_id}, {"_id": 0}).sort("created_at", 1)
     )
+
+
+def list_media(owner_id):
+    """All photos/songs/videos the user shared, newest first, with character info."""
+    out = []
+    for ch in list_characters(owner_id=owner_id):
+        conv_ids = [c["id"] for c in list_conversations(ch["id"])]
+        if not conv_ids:
+            continue
+        cur = messages.find(
+            {"conversation_id": {"$in": conv_ids},
+             "media_kind": {"$in": ["photo", "song", "video"]}},
+            {"_id": 0},
+        )
+        for m in cur:
+            out.append({
+                "char_id": ch["id"],
+                "char_name": ch.get("name", "Personaj"),
+                "char_avatar": ch.get("avatar", "🎭"),
+                "media_kind": m.get("media_kind"),
+                "song_name": m.get("song_name"),
+                "image_b64": m.get("image_b64"),
+                "song_b64": m.get("song_b64"),
+                "video_b64": m.get("video_b64"),
+                "created_at": m.get("created_at"),
+            })
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return out
+
+
+def list_song_names(character_id):
+    """Distinct song names the user shared with a character (order preserved)."""
+    conv_ids = [c["id"] for c in list_conversations(character_id)]
+    if not conv_ids:
+        return []
+    cur = messages.find(
+        {"conversation_id": {"$in": conv_ids}, "media_kind": "song"},
+        {"_id": 0, "song_name": 1, "created_at": 1},
+    ).sort("created_at", 1)
+    seen, out = set(), []
+    for m in cur:
+        n = m.get("song_name")
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def has_media(character_id):
+    conv_ids = [c["id"] for c in list_conversations(character_id)]
+    if not conv_ids:
+        return False
+    return messages.count_documents(
+        {"conversation_id": {"$in": conv_ids}, "media_kind": {"$in": ["photo", "song", "video"]}}
+    ) > 0
+
+
+def random_media(character_id):
+    conv_ids = [c["id"] for c in list_conversations(character_id)]
+    if not conv_ids:
+        return None
+    items = list(messages.find(
+        {"conversation_id": {"$in": conv_ids}, "media_kind": {"$in": ["photo", "song"]}},
+        {"_id": 0},
+    ))
+    if not items:
+        return None
+    import random
+    return random.choice(items)
 
 
 def clear_messages(conversation_id):
