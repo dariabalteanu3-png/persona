@@ -427,6 +427,27 @@ def list_song_names(character_id):
     return out
 
 
+def list_songs(character_id):
+    """All songs the user shared with a character, oldest first (for «playlist-ul nostru»)."""
+    conv_ids = [c["id"] for c in list_conversations(character_id)]
+    if not conv_ids:
+        return []
+    return list(messages.find(
+        {"conversation_id": {"$in": conv_ids}, "media_kind": "song", "role": "user"},
+        {"_id": 0, "song_name": 1, "song_b64": 1, "created_at": 1},
+    ).sort("created_at", 1))
+
+
+def random_song(character_id):
+    """Pick a random song the user shared (prefer ones with stored audio) for «melodia noastră»."""
+    songs = list_songs(character_id)
+    if not songs:
+        return None
+    import random
+    playable = [s for s in songs if s.get("song_b64")]
+    return random.choice(playable or songs)
+
+
 def has_media(character_id):
     conv_ids = [c["id"] for c in list_conversations(character_id)]
     if not conv_ids:

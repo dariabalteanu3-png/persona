@@ -950,6 +950,89 @@ def _tts_kwargs(char):
     )
 
 
+def _playlist_intro_text(char, names):
+    """Warm one-liner from the character introducing the shared playlist (cached per song count)."""
+    key = f"plintro_{char['id']}_{len(names)}"
+    if key not in st.session_state:
+        try:
+            st.session_state[key] = llm.playlist_intro(char, names)
+        except Exception:  # noqa
+            st.session_state[key] = None
+    return st.session_state.get(key)
+
+
+def _render_playlist(char, key_prefix=""):
+    """«Playlist-ul nostru» — toate melodiile trimise personajului, de ascultat oricând."""
+    songs = db.list_songs(char["id"]) if hasattr(db, "list_songs") else []
+    if not songs:
+        st.caption(f"🎵 Încă nu i-ai trimis nicio melodie lui {char['name']}. Trimite-i una din chat "
+                   "și va apărea aici, în „Playlist-ul nostru”.")
+        return
+    names = [s.get("song_name", "melodie") for s in songs]
+    intro = _playlist_intro_text(char, names)
+    if intro:
+        st.markdown(f"💬 *{intro}*")
+    playable = [s for s in songs if s.get("song_b64")]
+    if playable:
+        tracks = [{"name": s.get("song_name", "melodie"),
+                   "src": f"data:audio/mp3;base64,{s['song_b64']}"} for s in playable]
+        pid = "pl" + (key_prefix + char["id"]).replace("-", "").replace("_", "")
+        tj = json.dumps(tracks)
+        btn = ("background:#FF7A59;color:#12121a;border:none;border-radius:12px;"
+               "padding:12px 14px;font-weight:700;font-size:15px;cursor:pointer;flex:1;")
+        components.html(
+            f'''
+            <div style="font-family:Manrope,system-ui,sans-serif;background:#1a1a24;
+                        border:1px solid #2a2a38;border-radius:16px;padding:16px;color:#fff;">
+              <div id="{pid}_t" aria-live="polite" style="font-weight:600;margin-bottom:10px;font-size:15px;">
+                🎵 Playlist-ul nostru — {len(playable)} melodii
+              </div>
+              <audio id="{pid}_a" controls preload="none" style="width:100%;"></audio>
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button id="{pid}_p" aria-label="Melodia anterioară" style="{btn}">⏮️ Înapoi</button>
+                <button id="{pid}_all" aria-label="Ascultă tot playlist-ul de la început" style="{btn}">▶️ Ascultă tot</button>
+                <button id="{pid}_n" aria-label="Melodia următoare" style="{btn}">⏭️ Următoarea</button>
+              </div>
+              <script>
+              (function(){{
+                var tracks={tj},i=0;
+                var a=document.getElementById("{pid}_a"),t=document.getElementById("{pid}_t");
+                function load(idx,play){{
+                  if(idx<0)idx=tracks.length-1; if(idx>=tracks.length)idx=0; i=idx;
+                  a.src=tracks[i].src;
+                  t.textContent="🎵 Se redă ("+(i+1)+"/"+tracks.length+"): "+tracks[i].name;
+                  if(play){{var p=a.play(); if(p&&p.catch){{p.catch(function(){{}});}}}}
+                }}
+                document.getElementById("{pid}_all").onclick=function(){{load(0,true);}};
+                document.getElementById("{pid}_p").onclick=function(){{load(i-1,true);}};
+                document.getElementById("{pid}_n").onclick=function(){{load(i+1,true);}};
+                a.addEventListener("ended",function(){{load(i+1,true);}});
+                load(0,false);
+              }})();
+              </script>
+            </div>
+            ''',
+            height=210,
+        )
+    st.caption(f"🎵 Toate melodiile ({len(songs)})")
+    for i, s in enumerate(songs):
+        st.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
+        if s.get("song_b64"):
+            st.audio(base64.b64decode(s["song_b64"]), format="audio/mp3")
+        else:
+            st.caption("_(fișierul audio nu a fost salvat — a rămas doar numele melodiei)_")
+    if any(s.get("song_b64") for s in songs):
+        if st.button("💝 Dedică-mi «melodia noastră»", key=f"dedic_{key_prefix}{char['id']}",
+                     use_container_width=True, type="primary"):
+            conv = active_conv_id(char)
+            if _emit_song_dedication(char, conv):
+                st.session_state["notif_sound"] = True
+                select_char(char["id"])
+                st.rerun()
+            else:
+                st.info("Nu am putut pregăti dedicația acum. Mai încearcă puțin mai târziu.")
+
+
 def send_proactive(char, kind):
     """Character reaches out first (text or as a call opening). Returns the message id."""
     conv = active_conv_id(char)
@@ -1045,6 +1128,48 @@ def _emit_memory_recall(char, conv_id):
         except Exception:  # noqa
             pass
     return msg["id"]
+
+
+def _emit_song_dedication(char, conv_id):
+    """Personajul alege «melodia noastră» din playlist și ți-o dedică (cu redare)."""
+    song = db.random_song(char["id"]) if hasattr(db, "random_song") else None
+    if not song:
+        return None
+    sname = song.get("song_name", "melodia noastră")
+    try:
+        line = llm.dedicate_song(char, db.get_messages(conv_id), sname)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    extra = {"media_kind": "song", "song_name": sname, "dedication": True}
+    if song.get("song_b64"):
+        extra["song_b64"] = song["song_b64"]
+    msg = db.add_message(conv_id, "assistant", line, extra=extra)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id") and (
+        st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
+    ):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _idle_seconds(conv_id):
+    hist = db.get_messages(conv_id)
+    if not hist:
+        return 0
+    try:
+        t = datetime.fromisoformat(hist[-1]["created_at"])
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - t).total_seconds()
+    except Exception:  # noqa
+        return 0
 
 
 def _minutes(hhmm, default):
@@ -1246,6 +1371,21 @@ def proactive_fragment(char_id, conv_id):
                     st.session_state[guard] = today
                     if _emit_memory_recall(char, conv_id):
                         fired = True
+
+    # spontaneous "melodia noastră" — occasionally the character dedicates a song from the playlist
+    if not fired and sched.get("dedicate_on", True) and hasattr(db, "random_song"):
+        guard = f"dedicate_{conv_id}"
+        dkey = f"dedicate_pick_{conv_id}"
+        if st.session_state.get(dkey) != today:
+            import random as _rnd
+            st.session_state[dkey] = today
+            st.session_state[f"{dkey}_yes"] = (_rnd.random() < 0.4)
+        if st.session_state.get(guard) != today and st.session_state.get(f"{dkey}_yes"):
+            song = db.random_song(char["id"])
+            if song and song.get("song_b64") and _idle_seconds(conv_id) >= 180:
+                st.session_state[guard] = today
+                if _emit_song_dedication(char, conv_id):
+                    fired = True
 
     if fired:
         st.session_state["notif_sound"] = True
@@ -1789,6 +1929,8 @@ def render_chat(char):
                           key=f"fu_on_{char['id']}")
         fu_min = st.slider("După câte minute de tăcere", 1, 30, int(sched.get("followup_min", 1) or 1),
                            key=f"fu_min_{char['id']}")
+        ded_on = st.toggle("💝 «Melodia noastră» — din când în când îmi dedică o melodie din playlist",
+                           value=sched.get("dedicate_on", True), key=f"ded_on_{char['id']}")
         if st.button("💾 Salvează programul", key=f"save_sched_{char['id']}", use_container_width=True):
             db.update_character(char["id"], {
                 "notif_theme": None if notif_theme == "Implicit" else notif_theme,
@@ -1804,6 +1946,7 @@ def render_chat(char):
                     "days": sorted(_days.index(d) for d in sel_days),
                     "tone": tone if tone != "Normal" else None,
                     "followup_on": fu_on, "followup_min": fu_min,
+                    "dedicate_on": ded_on,
                 },
             })
             st.success("Program salvat! Personajul îți va scrie la orele alese.")
@@ -2006,6 +2149,13 @@ def render_chat(char):
                     except Exception:  # noqa
                         pass
                 st.rerun()
+
+    # ---- our shared playlist ----
+    if hasattr(db, "list_songs") and db.list_songs(char["id"]):
+        with st.expander("🎵 Playlist-ul nostru"):
+            st.caption(f"Toate melodiile pe care i le-ai trimis lui {char['name']} — "
+                       "ascultă-le oricând, una după alta.")
+            _render_playlist(char, key_prefix="chat")
 
     # ---- send a photo or video (gallery) ----
     with st.expander("📷 Trimite o poză sau un videoclip"):
@@ -2699,11 +2849,15 @@ def render_amintiri():
                 with pcols[i % 3]:
                     st.image(base64.b64decode(m["image_b64"]), use_container_width=True)
         if songs:
-            st.caption(f"🎵 Melodii ({len(songs)})")
-            for j, m in enumerate(songs):
-                st.markdown(f"• **{m.get('song_name', 'melodie')}**")
-                if m.get("song_b64"):
-                    st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
+            st.caption("🎵 Playlist-ul nostru")
+            ch_obj = db.get_character(cid)
+            if ch_obj and hasattr(db, "list_songs"):
+                _render_playlist(ch_obj, key_prefix="amt")
+            else:
+                for j, m in enumerate(songs):
+                    st.markdown(f"• **{m.get('song_name', 'melodie')}**")
+                    if m.get("song_b64"):
+                        st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
         if videos:
             st.caption(f"🎬 Videoclipuri ({len(videos)})")
             for m in videos:

@@ -197,6 +197,27 @@ def recommend_songs(character, history, songs):
     return get_reply(character, history, instr)
 
 
+def playlist_intro(character, songs):
+    """Warm one-liner introducing the shared «playlist-ul nostru» of songs the user sent."""
+    lst = ", ".join(songs[-12:]) if songs else ""
+    instr = (
+        f"(Tu și utilizatorul aveți un «playlist al nostru» făcut din melodiile pe care ți le-a "
+        f"trimis: {lst}. Spune O SINGURĂ propoziție caldă, în personaj, care introduce playlist-ul, "
+        "ca și cum i l-ai pregătit cu drag ca să-l asculte oricând. Fără liste, fără prea multe emoji.)"
+    )
+    return get_reply(character, [], instr)
+
+
+def dedicate_song(character, history, song_name):
+    """Character dedicates «our song» from the shared playlist to the user."""
+    instr = (
+        f"(Din tot playlist-ul vostru, alegi acum «melodia noastră»: „{song_name}”. Dedic-o "
+        "utilizatorului cu drag, într-un mesaj scurt și cald, în personaj — spune de ce ți-a rămas "
+        "la suflet și ce simți când o asculți împreună. Maxim 2-3 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recall_memory(character, history, media_desc):
     """Character spontaneously recalls a photo/song the user shared before."""
     instr = (
