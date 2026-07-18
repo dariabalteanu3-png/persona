@@ -1,3 +1,4 @@
+# deploy marker: 2026-06-18 (recuperare cont / reset parolă daria)
 import base64
 import hashlib
 import json
