@@ -988,6 +988,30 @@ def _render_playlist(char, key_prefix="", readonly=False):
         st.caption(f"🎵 Încă nu i-ai trimis nicio melodie lui {char['name']}. Trimite-i una din chat "
                    "și va apărea aici, în „Playlist-ul nostru”.")
         return
+    # playlist cover art in the character's style
+    cover = char.get("playlist_cover")
+    if cover:
+        st.markdown(
+            '<div style="text-align:center;margin-bottom:10px">'
+            f'<img src="data:image/png;base64,{cover}" alt="Coperta playlistului" '
+            'style="width:170px;height:170px;border-radius:18px;object-fit:cover;'
+            'display:inline-block;box-shadow:0 8px 24px rgba(0,0,0,.35)"/></div>',
+            unsafe_allow_html=True,
+        )
+    if not readonly:
+        clabel = "🔄 Regenerează coperta" if cover else "🎨 Creează coperta playlist-ului (în stilul personajului)"
+        if st.button(clabel, key=f"cover_{key_prefix}{char['id']}", use_container_width=True):
+            with st.spinner("Creez coperta în stilul personajului..."):
+                try:
+                    img = image_gen.generate_playlist_cover(
+                        char["name"], char.get("personality", ""), char.get("scenario", ""))
+                except Exception:  # noqa
+                    img = None
+            if img:
+                db.update_character(char["id"], {"playlist_cover": img})
+                st.rerun()
+            else:
+                st.info("Nu am putut crea coperta acum. Mai încearcă puțin mai târziu.")
     names = [s.get("song_name", "melodie") for s in songs]
     if not readonly:
         intro = _playlist_intro_text(char, names)
