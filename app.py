@@ -595,6 +595,18 @@ def _share_url(char_id):
     return f"{base}/?c={char_id}"
 
 
+def _playlist_share_url(char_id):
+    base = ""
+    try:
+        from urllib.parse import urlsplit
+        p = urlsplit(st.context.url or "")
+        if p.scheme and p.netloc:
+            base = f"{p.scheme}://{p.netloc}"
+    except Exception:  # noqa
+        base = ""
+    return f"{base}/?pl={char_id}"
+
+
 def _handle_share_param():
     try:
         cid = st.query_params.get("c")
@@ -605,6 +617,14 @@ def _handle_share_param():
         ch = db.get_character(cid)
         if ch and ch.get("visibility") == "public":
             st.session_state.preview_id = cid
+    try:
+        plid = st.query_params.get("pl")
+    except Exception:  # noqa
+        plid = None
+    if plid and st.session_state.get("_plshared_seen") != plid:
+        st.session_state._plshared_seen = plid
+        if db.get_character(plid):
+            st.session_state.playlist_share_id = plid
 
 
 def _user_avatar_html(u, size=42):
@@ -961,7 +981,7 @@ def _playlist_intro_text(char, names):
     return st.session_state.get(key)
 
 
-def _render_playlist(char, key_prefix=""):
+def _render_playlist(char, key_prefix="", readonly=False):
     """«Playlist-ul nostru» — toate melodiile trimise personajului, de ascultat oricând."""
     songs = db.list_songs(char["id"]) if hasattr(db, "list_songs") else []
     if not songs:
@@ -969,9 +989,10 @@ def _render_playlist(char, key_prefix=""):
                    "și va apărea aici, în „Playlist-ul nostru”.")
         return
     names = [s.get("song_name", "melodie") for s in songs]
-    intro = _playlist_intro_text(char, names)
-    if intro:
-        st.markdown(f"💬 *{intro}*")
+    if not readonly:
+        intro = _playlist_intro_text(char, names)
+        if intro:
+            st.markdown(f"💬 *{intro}*")
     playable = [s for s in songs if s.get("song_b64")]
     if playable:
         tracks = [{"name": s.get("song_name", "melodie"),
@@ -1030,7 +1051,7 @@ def _render_playlist(char, key_prefix=""):
         confirm_key = f"confdel_{key_prefix}{sid}"
         c1, c2 = st.columns([0.85, 0.15])
         c1.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
-        if sid and hasattr(db, "delete_song"):
+        if sid and hasattr(db, "delete_song") and not readonly:
             if c2.button("🗑️", key=f"delsong_{key_prefix}{sid}",
                          help="Scoate melodia din playlist"):
                 st.session_state[confirm_key] = True
@@ -1051,46 +1072,47 @@ def _render_playlist(char, key_prefix=""):
                           use_container_width=True):
                 st.session_state.pop(confirm_key, None)
                 st.rerun()
-    if any(s.get("song_b64") for s in songs):
-        if st.button("💝 Dedică-mi «melodia noastră»", key=f"dedic_{key_prefix}{char['id']}",
-                     use_container_width=True, type="primary"):
+    if not readonly:
+        if any(s.get("song_b64") for s in songs):
+            if st.button("💝 Dedică-mi «melodia noastră»", key=f"dedic_{key_prefix}{char['id']}",
+                         use_container_width=True, type="primary"):
+                conv = active_conv_id(char)
+                if _emit_song_dedication(char, conv):
+                    st.session_state["notif_sound"] = True
+                    select_char(char["id"])
+                    st.rerun()
+                else:
+                    st.info("Nu am putut pregăti dedicația acum. Mai încearcă puțin mai târziu.")
+
+        # favorite lyrics — the character tells their favorite lines, in their own voice
+        lyrsel_key = f"lyricsel_{key_prefix}{char['id']}"
+        if st.session_state.get(lyrsel_key) not in names:
+            st.session_state.pop(lyrsel_key, None)
+        sel_song = st.selectbox("Alege o melodie pentru versuri", names, key=lyrsel_key)
+        if st.button(f"🎤 {char['name']} îmi spune versurile lui preferate (cu vocea lui)",
+                     key=f"lyricbtn_{key_prefix}{char['id']}", use_container_width=True):
+            song = next((s for s in songs if s.get("song_name", "melodie") == sel_song), None) or songs[0]
             conv = active_conv_id(char)
-            if _emit_song_dedication(char, conv):
+            if _emit_lyrics(char, conv, song):
                 st.session_state["notif_sound"] = True
                 select_char(char["id"])
                 st.rerun()
             else:
-                st.info("Nu am putut pregăti dedicația acum. Mai încearcă puțin mai târziu.")
+                st.info("Nu am putut pregăti versurile acum. Mai încearcă puțin mai târziu.")
 
-    # favorite lyrics — the character tells their favorite lines, in their own voice
-    lyrsel_key = f"lyricsel_{key_prefix}{char['id']}"
-    if st.session_state.get(lyrsel_key) not in names:
-        st.session_state.pop(lyrsel_key, None)
-    sel_song = st.selectbox("Alege o melodie pentru versuri", names, key=lyrsel_key)
-    if st.button(f"🎤 {char['name']} îmi spune versurile lui preferate (cu vocea lui)",
-                 key=f"lyricbtn_{key_prefix}{char['id']}", use_container_width=True):
-        song = next((s for s in songs if s.get("song_name", "melodie") == sel_song), None) or songs[0]
-        conv = active_conv_id(char)
-        if _emit_lyrics(char, conv, song):
-            st.session_state["notif_sound"] = True
-            select_char(char["id"])
-            st.rerun()
-        else:
-            st.info("Nu am putut pregăti versurile acum. Mai încearcă puțin mai târziu.")
-
-    # mood mini-playlist — the character curates songs for a chosen mood
-    moods = ["🌙 Liniște", "⚡ Energie", "💔 Dor", "❤️ Iubire", "🎉 Bucurie", "🌧️ Melancolie"]
-    mood = st.selectbox("Fă-mi un mini-playlist pe o stare", moods,
-                        key=f"moodsel_{key_prefix}{char['id']}")
-    if st.button(f"🎚️ {char['name']} îmi face un playlist pe această stare",
-                 key=f"moodbtn_{key_prefix}{char['id']}", use_container_width=True):
-        conv = active_conv_id(char)
-        if _emit_mood_playlist(char, conv, mood):
-            st.session_state["notif_sound"] = True
-            select_char(char["id"])
-            st.rerun()
-        else:
-            st.info("Nu am putut face playlist-ul acum. Mai încearcă puțin mai târziu.")
+        # mood mini-playlist — the character curates songs for a chosen mood
+        moods = ["🌙 Liniște", "⚡ Energie", "💔 Dor", "❤️ Iubire", "🎉 Bucurie", "🌧️ Melancolie"]
+        mood = st.selectbox("Fă-mi un mini-playlist pe o stare", moods,
+                            key=f"moodsel_{key_prefix}{char['id']}")
+        if st.button(f"🎚️ {char['name']} îmi face un playlist pe această stare",
+                     key=f"moodbtn_{key_prefix}{char['id']}", use_container_width=True):
+            conv = active_conv_id(char)
+            if _emit_mood_playlist(char, conv, mood):
+                st.session_state["notif_sound"] = True
+                select_char(char["id"])
+                st.rerun()
+            else:
+                st.info("Nu am putut face playlist-ul acum. Mai încearcă puțin mai târziu.")
 
     # download the whole playlist in one place (single .zip)
     downloadable = [s for s in songs if s.get("song_b64")]
@@ -1117,6 +1139,23 @@ def _render_playlist(char, key_prefix=""):
             key=f"dlall_{key_prefix}{char['id']}",
             use_container_width=True,
         )
+
+    # share the playlist with a friend (owner only)
+    if not readonly and songs:
+        with st.expander("🔗 Partajează playlist-ul cu un prieten"):
+            from urllib.parse import quote
+            url = _playlist_share_url(char["id"])
+            st.caption("Trimite acest link — prietenul poate asculta playlist-ul fără cont:")
+            st.code(url, language=None)
+            _copy_button(url, f"plshare_{key_prefix}{char['id']}")
+            msg = quote(f"Ascultă playlist-ul lui {char['name']} pe Persona: {url}")
+            sc = st.columns(2)
+            sc[0].link_button("💬 WhatsApp", f"https://wa.me/?text={msg}", use_container_width=True)
+            sc[1].link_button(
+                "✈️ Telegram",
+                f"https://t.me/share/url?url={quote(url)}&text={quote('Ascultă playlist-ul lui ' + char['name'])}",
+                use_container_width=True,
+            )
 
 
 def send_proactive(char, kind):
@@ -2871,6 +2910,36 @@ def _exit_preview():
         pass
 
 
+def _exit_playlist_share():
+    st.session_state.pop("playlist_share_id", None)
+    st.session_state.pop("_plshared_seen", None)
+    try:
+        st.query_params.clear()
+    except Exception:  # noqa
+        pass
+    st.session_state.nav = "personaje"
+
+
+def render_playlist_share(char):
+    amb = AMBIANCES.get(char.get("ambiance", "Neutru"), AMBIANCES["Neutru"])
+    st.markdown(
+        f'<div class="char-header" style="background:{amb["grad"]};border-color:{amb["glow"]}44">'
+        f'<div class="avatar">{avatar_html(char, size=64, radius=16)}</div>'
+        f'<div><div class="name">🎵 Playlist-ul lui {char["name"]}</div>'
+        f'<div class="meta">Cineva ți-a partajat acest playlist</div></div></div>',
+        unsafe_allow_html=True,
+    )
+    songs = db.list_songs(char["id"]) if hasattr(db, "list_songs") else []
+    if not songs:
+        st.info("Acest playlist e gol deocamdată.")
+    else:
+        st.caption("Ascultă melodiile de mai jos. 🎧")
+        _render_playlist(char, key_prefix="share", readonly=True)
+    st.markdown("---")
+    st.button("← Deschide Persona (creează-ți propriile personaje)", key="plshare_back",
+              use_container_width=True, on_click=_exit_playlist_share)
+
+
 def render_preview(char):
     amb = AMBIANCES.get(char.get("ambiance", "Neutru"), AMBIANCES["Neutru"])
     desc = (char.get("personality") or "").strip() or "personaj"
@@ -3393,7 +3462,15 @@ else:
 if st.session_state.get("absence_on"):
     absence_fragment()
 try:
-    if st.session_state.get("preview_id"):
+    if st.session_state.get("playlist_share_id"):
+        _pl = db.get_character(st.session_state.playlist_share_id)
+        if _pl:
+            render_playlist_share(_pl)
+        else:
+            st.session_state.pop("playlist_share_id", None)
+            _nav_bar()
+            render_personaje()
+    elif st.session_state.get("preview_id"):
         pv = db.get_character(st.session_state.preview_id)
         if pv and pv.get("visibility") == "public":
             render_preview(pv)
