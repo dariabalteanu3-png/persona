@@ -1026,17 +1026,31 @@ def _render_playlist(char, key_prefix=""):
         )
     st.caption(f"🎵 Toate melodiile ({len(songs)})")
     for i, s in enumerate(songs):
+        sid = s.get("id")
+        confirm_key = f"confdel_{key_prefix}{sid}"
         c1, c2 = st.columns([0.85, 0.15])
         c1.markdown(f"**{i + 1}. {s.get('song_name', 'melodie')}**")
-        if s.get("id") and hasattr(db, "delete_song"):
-            if c2.button("🗑️", key=f"delsong_{key_prefix}{s['id']}",
+        if sid and hasattr(db, "delete_song"):
+            if c2.button("🗑️", key=f"delsong_{key_prefix}{sid}",
                          help="Scoate melodia din playlist"):
-                db.delete_song(s["id"])
+                st.session_state[confirm_key] = True
                 st.rerun()
         if s.get("song_b64"):
             st.audio(base64.b64decode(s["song_b64"]), format="audio/mp3")
         else:
             st.caption("_(fișierul audio nu a fost salvat — a rămas doar numele melodiei)_")
+        if st.session_state.get(confirm_key):
+            st.warning(f"Sigur scoți «{s.get('song_name', 'melodia')}» din playlist?")
+            cc1, cc2 = st.columns(2)
+            if cc1.button("✅ Da, șterge", key=f"confyes_{key_prefix}{sid}",
+                          use_container_width=True):
+                db.delete_song(sid)
+                st.session_state.pop(confirm_key, None)
+                st.rerun()
+            if cc2.button("✗ Nu, păstrează", key=f"confno_{key_prefix}{sid}",
+                          use_container_width=True):
+                st.session_state.pop(confirm_key, None)
+                st.rerun()
     if any(s.get("song_b64") for s in songs):
         if st.button("💝 Dedică-mi «melodia noastră»", key=f"dedic_{key_prefix}{char['id']}",
                      use_container_width=True, type="primary"):
