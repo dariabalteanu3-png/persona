@@ -2356,10 +2356,17 @@ def render_chat(char):
     proactive_fragment(char["id"], active_conv)
     st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
-    # ---- voice message (Messenger-style) ----
-    st.markdown("**🎤 Înregistrează un mesaj vocal**")
-    st.caption("📱 Apasă microfonul și vorbește. Prima dată, telefonul îți va cere "
-               "permisiunea pentru microfon — apasă „Permite”. Apoi oprește înregistrarea ca să-l trimiți.")
+    # ---- talk instead of type (hands-free voice) ----
+    st.markdown(f"### 🎤 Vorbește cu {char['name']} (în loc să scrii)")
+    if char.get("voice_id"):
+        st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea. "
+                   f"{char['name']} îți răspunde imediat și vei auzi răspunsul cu vocea lui — "
+                   "nu trebuie să apeși niciun buton de redare. Prima dată telefonul îți cere "
+                   "permisiunea pentru microfon — apasă „Permite”.")
+    else:
+        st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea și "
+                   f"{char['name']} îți răspunde imediat. Prima dată telefonul îți cere "
+                   "permisiunea pentru microfon — apasă „Permite”.")
     vm = st.audio_input("Mesaj vocal", label_visibility="collapsed", key=f"vm_{active_conv}")
     if vm is not None:
         vdata = vm.getvalue()
@@ -2590,7 +2597,7 @@ def render_chat(char):
             cur = titles.get(active_conv, "")
             if cur.startswith("Conversație"):
                 db.rename_conversation(active_conv, prompt.strip()[:32])
-            if st.session_state.get("auto_play") and char.get("voice_id"):
+            if (st.session_state.get("auto_play") or user_audio) and char.get("voice_id"):
                 try:
                     st.session_state[f"audio_{assistant_msg['id']}"] = voice.text_to_speech(
                         reply, char["voice_id"], **tts_kwargs
@@ -3155,11 +3162,98 @@ def render_gallery():
 
 
 # ------------------------- navigation tabs -------------------------
+def _build_backup_zip(owner_id):
+    """Împachetează toate personajele, conversațiile și media utilizatorului într-un singur .zip."""
+    import io
+    import zipfile
+
+    def _safe(name, fallback="fara-nume"):
+        s = "".join(c for c in (name or "") if c.isalnum() or c in " -_").strip()
+        return (s or fallback)[:60]
+
+    buf = io.BytesIO()
+    n_chars = n_msgs = n_photos = n_songs = n_videos = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for ch in db.list_characters(owner_id=owner_id):
+            n_chars += 1
+            cname = _safe(ch.get("name"), "personaj")
+            for conv in db.list_conversations(ch["id"]):
+                lines = [f"Conversație: {conv.get('title', '')}",
+                         f"Personaj: {ch.get('name', '')}", "=" * 40, ""]
+                photo_i = song_i = video_i = 0
+                for m in db.get_messages(conv["id"]):
+                    role = "Tu" if m.get("role") == "user" else ch.get("name", "Personaj")
+                    ts = (str(m.get("created_at") or ""))[:19].replace("T", " ")
+                    kind = m.get("media_kind")
+                    lines.append(f"[{ts}] {role}: {m.get('content', '')}")
+                    n_msgs += 1
+                    try:
+                        if kind == "photo" and m.get("image_b64"):
+                            photo_i += 1; n_photos += 1
+                            zf.writestr(f"poze/{cname}/{cname}-poza-{photo_i}.jpg",
+                                        base64.b64decode(m["image_b64"]))
+                        elif kind == "song" and m.get("song_b64"):
+                            song_i += 1; n_songs += 1
+                            sn = _safe(m.get("song_name"), f"melodie-{song_i}")
+                            zf.writestr(f"melodii/{cname}/{sn}.mp3",
+                                        base64.b64decode(m["song_b64"]))
+                        elif kind == "video" and m.get("video_b64"):
+                            video_i += 1; n_videos += 1
+                            zf.writestr(f"videoclipuri/{cname}/{cname}-video-{video_i}.mp4",
+                                        base64.b64decode(m["video_b64"]))
+                    except Exception:  # noqa
+                        pass
+                ctitle = _safe(conv.get("title"), "conversatie")
+                zf.writestr(f"conversatii/{cname}/{ctitle}.txt",
+                            ("\n".join(lines)).encode("utf-8"))
+        readme = (
+            "BACKUP PERSONA\n==============\n\n"
+            f"Data: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+            f"Personaje: {n_chars}\nMesaje: {n_msgs}\nPoze: {n_photos}\n"
+            f"Melodii: {n_songs}\nVideoclipuri: {n_videos}\n\n"
+            "Ce găsești aici:\n"
+            "- conversatii/  = toate discuțiile tale, pe personaje (fișiere .txt)\n"
+            "- poze/         = toate pozele trimise, pe personaje\n"
+            "- melodii/      = toate melodiile trimise, pe personaje (.mp3)\n"
+            "- videoclipuri/ = videoclipurile trimise, pe personaje\n\n"
+            "Păstrează acest fișier în siguranță (pe telefon, pe email sau în cloud).\n"
+        )
+        zf.writestr("CITESTE-MA.txt", readme.encode("utf-8"))
+    return buf.getvalue()
+
+
 def render_amintiri():
     st.markdown('<div class="hero"><h1>Amintirile <span class="accent">mele</span></h1></div>',
                 unsafe_allow_html=True)
     st.caption("Toate pozele, melodiile și videoclipurile pe care le-ai trimis personajelor tale.")
-    media = db.list_media(_identity_id())
+    _oid = _identity_id()
+
+    # ---- backup: descarcă tot într-un singur fișier ----
+    if db.list_characters(owner_id=_oid):
+        with st.expander("💾 Descarcă tot (backup) — poze, melodii și mesaje"):
+            st.caption("Salvează într-un singur fișier .zip toate conversațiile, pozele și "
+                       "melodiile tale, ca să nu le pierzi niciodată. Îl poți păstra pe telefon, "
+                       "pe email sau în cloud.")
+            if st.button("📦 Pregătește backup-ul", key="prep_backup",
+                         use_container_width=True, type="primary"):
+                with st.spinner("Adun toate amintirile într-un fișier..."):
+                    try:
+                        st.session_state["_backup_zip"] = _build_backup_zip(_oid)
+                    except Exception as e:  # noqa
+                        st.session_state["_backup_zip"] = None
+                        st.error(f"Nu am putut crea backup-ul: {e}")
+            if st.session_state.get("_backup_zip"):
+                st.success("Backup-ul e gata! Apasă mai jos ca să-l descarci.")
+                st.download_button(
+                    "⬇️ Descarcă backup-ul (.zip)",
+                    data=st.session_state["_backup_zip"],
+                    file_name=f"persona-backup-{datetime.now().strftime('%Y-%m-%d')}.zip",
+                    mime="application/zip",
+                    key="dl_backup",
+                    use_container_width=True,
+                )
+
+    media = db.list_media(_oid)
     if not media:
         st.info("Încă nu ai trimis nicio poză sau melodie. Deschide un personaj și trimite-i "
                 "ceva din chat — o poză 📷 sau o melodie 🎵.")
