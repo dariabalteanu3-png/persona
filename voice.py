@@ -8,7 +8,9 @@ from elevenlabs import ElevenLabs, VoiceSettings
 
 load_dotenv(Path(__file__).parent / ".env")
 
-_api = os.environ.get("ELEVENLABS_API_KEY")
+from provider import clean_key
+
+_api = clean_key(os.environ.get("ELEVENLABS_API_KEY"), "sk_")
 _client = ElevenLabs(api_key=_api)
 
 # Emoji -> ElevenLabs v3 audio tag / emotion cue

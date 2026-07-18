@@ -1,12 +1,30 @@
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+
+def clean_key(raw, prefix=None):
+    """Repair a possibly-corrupted secret where two keys got glued together with a
+    quote or whitespace (e.g. 'gsk_AAA"gsk_BBB'). Returns the first well-formed token,
+    preferring one that starts with `prefix`. Safe no-op for a single clean key."""
+    if not raw:
+        return raw
+    parts = [p for p in re.split(r'["\'\s]+', raw.strip()) if p]
+    if not parts:
+        return raw.strip()
+    if prefix:
+        for p in parts:
+            if p.startswith(prefix):
+                return p
+    return parts[0]
+
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_API_KEY = clean_key(os.environ.get("GROQ_API_KEY"), "gsk_")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
 # Provider selection (highest priority first):

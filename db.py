@@ -8,6 +8,12 @@ from pymongo import MongoClient
 
 load_dotenv(Path(__file__).parent / ".env")
 
+from provider import clean_key as _clean_key
+
+
+def _clean_tok(raw):
+    return _clean_key(raw, "gh") if raw else raw
+
 _mongo_url = os.environ.get("MONGO_URL")
 if _mongo_url:
     _client = MongoClient(_mongo_url)
@@ -36,7 +42,7 @@ except Exception:  # noqa
 # Când NU există MONGO_URL, dar sunt setate GITHUB_TOKEN + GITHUB_DATA_REPO în secrets,
 # datele (conturi, personaje, conversații, mesaje) se salvează automat într-un fișier JSON
 # dintr-un repo GitHub privat, ca să rămână salvate chiar și după ce Streamlit repornește.
-_GH_TOKEN = os.environ.get("GITHUB_TOKEN")
+_GH_TOKEN = _clean_tok(os.environ.get("GITHUB_TOKEN"))
 _GH_REPO = os.environ.get("GITHUB_DATA_REPO")
 _GH_FILE = os.environ.get("GITHUB_DATA_FILE", "persona_db.json")
 _GH_COLLECTIONS = ["characters", "messages", "conversations", "users", "sessions", "email_codes"]
