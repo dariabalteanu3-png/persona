@@ -1453,6 +1453,22 @@ def _emit_letter(char, conv_id):
     return msg["id"]
 
 
+def _save_story_theme(char, theme):
+    """Reține o temă de poveste preferată (cele mai recente primele, max 8)."""
+    theme = (theme or "").strip()
+    if not theme:
+        return
+    themes = [t for t in (char.get("story_themes") or []) if t.lower() != theme.lower()]
+    themes.insert(0, theme)
+    db.update_character(char["id"], {"story_themes": themes[:8]})
+
+
+def _remove_story_theme(char, theme):
+    """Șterge o temă de poveste salvată."""
+    themes = [t for t in (char.get("story_themes") or []) if t.lower() != (theme or "").strip().lower()]
+    db.update_character(char["id"], {"story_themes": themes})
+
+
 def _idle_seconds(conv_id):
     hist = db.get_messages(conv_id)
     if not hist:
@@ -2358,6 +2374,19 @@ def render_chat(char):
             if m.get("media_kind") == "video" and m.get("video_b64"):
                 st.video(base64.b64decode(m["video_b64"]))
             st.markdown(m["content"])
+            if m["role"] == "assistant" and (
+                    m["content"].startswith("💌 O scrisoare pentru tine:")
+                    or m["content"].startswith("🌙 Poveste de noapte:")):
+                _isletter = m["content"].startswith("💌")
+                _knd = "scrisoarea" if _isletter else "povestea"
+                _fnk = "scrisoare" if _isletter else "poveste"
+                st.download_button(
+                    f"⬇️ Salvează {_knd} (.txt)",
+                    data=m["content"],
+                    file_name=f"{_fnk}-{char['name']}-{(str(m.get('created_at') or ''))[:10]}.txt",
+                    mime="text/plain",
+                    key=f"dlmsg_{m['id']}",
+                )
             _mid = m["id"]
             _react = m.get("reaction")
             rcols = st.columns([7, 1])
@@ -2595,14 +2624,37 @@ def render_chat(char):
     with st.expander("🌙 Poveste de noapte & 💌 Scrisoare"):
         st.caption(f"{char['name']} îți poate spune o poveste caldă ca să adormi mai ușor sau "
                    "îți poate «scrie» o scrisoare din suflet — o auzi cu vocea lui, fără să apeși play.")
-        story_theme = st.text_input("Temă poveste (opțional)", key=f"story_theme_{active_conv}",
+        saved_themes = char.get("story_themes") or []
+        if saved_themes:
+            st.caption("⭐ Temele tale salvate — apasă una ca s-o asculți:")
+            for i, th in enumerate(saved_themes):
+                tc = st.columns([5, 1])
+                if tc[0].button(f"🌙 {th}", key=f"savedtheme_{active_conv}_{i}",
+                                use_container_width=True):
+                    with st.spinner(f"{char['name']} îți pregătește o poveste..."):
+                        _ok = _emit_bedtime_story(char, active_conv, th)
+                    if _ok:
+                        _save_story_theme(char, th)
+                        st.session_state["notif_sound"] = True
+                        st.rerun()
+                    else:
+                        st.info("Nu am putut face povestea acum. Mai încearcă puțin mai târziu.")
+                if tc[1].button("✕", key=f"delsavedtheme_{active_conv}_{i}",
+                                use_container_width=True, help="Șterge tema salvată"):
+                    _remove_story_theme(char, th)
+                    st.rerun()
+        story_theme = st.text_input("Temă poveste nouă (opțional — o salvez pentru data viitoare)",
+                                    key=f"story_theme_{active_conv}",
                                     placeholder="ex: o pădure liniștită, marea, copilăria...")
         bcol = st.columns(2)
         if bcol[0].button("🌙 Spune-mi o poveste de noapte", key=f"bedtime_{active_conv}",
                           use_container_width=True):
+            _theme = (story_theme or "").strip()
             with st.spinner(f"{char['name']} îți pregătește o poveste..."):
-                _ok = _emit_bedtime_story(char, active_conv, (story_theme or "").strip())
+                _ok = _emit_bedtime_story(char, active_conv, _theme)
             if _ok:
+                if _theme:
+                    _save_story_theme(char, _theme)
                 st.session_state["notif_sound"] = True
                 st.rerun()
             else:
