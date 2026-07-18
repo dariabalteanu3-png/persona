@@ -2423,13 +2423,14 @@ def render_chat(char):
                             st.session_state[f"audio_{mid}"] = voice.text_to_speech(
                                 m["content"], char["voice_id"], **tts_kwargs
                             )
+                        st.session_state["autoplay_mid"] = mid
                     except Exception as e:  # noqa
                         st.error(f"Redarea vocii a eșuat: {e}")
                 if st.session_state.get(f"audio_{mid}"):
-                    auto = st.session_state.get("autoplay_mid") == mid
-                    st.audio(st.session_state[f"audio_{mid}"], format="audio/mp3", autoplay=auto)
-                    if auto:
+                    if st.session_state.get("autoplay_mid") == mid:
+                        _autoplay_voice(st.session_state[f"audio_{mid}"], mid)  # redare fiabilă pe telefon
                         st.session_state["autoplay_mid"] = None
+                    st.audio(st.session_state[f"audio_{mid}"], format="audio/mp3")
                     st.download_button(
                         "⬇️ Descarcă MP3",
                         data=st.session_state[f"audio_{mid}"],
@@ -3435,11 +3436,14 @@ def render_amintiri():
                                 _ch = db.get_character(L["char_id"])
                                 st.session_state[f"jaudio_{L['id']}"] = voice.text_to_speech(
                                     _body, L["voice_id"], **_tts_kwargs(_ch))
+                                st.session_state["jautoplay"] = L["id"]
                             except Exception:  # noqa
                                 st.error("Nu am putut genera vocea acum. Mai încearcă mai târziu.")
                     if st.session_state.get(f"jaudio_{L['id']}"):
-                        st.audio(st.session_state[f"jaudio_{L['id']}"], format="audio/mp3",
-                                 autoplay=True)
+                        if st.session_state.get("jautoplay") == L["id"]:
+                            _autoplay_voice(st.session_state[f"jaudio_{L['id']}"], f"j{L['id']}")
+                            st.session_state["jautoplay"] = None
+                        st.audio(st.session_state[f"jaudio_{L['id']}"], format="audio/mp3")
         st.markdown("---")
 
     if not media:
