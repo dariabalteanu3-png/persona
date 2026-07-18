@@ -1365,10 +1365,7 @@ def _emit_song_of_day(char, conv_id, song):
         extra["song_b64"] = song["song_b64"]
     msg = db.add_message(conv_id, "assistant", line, extra=extra)
     st.session_state["_pending_notify"] = (char["name"], line)
-    want_voice = char.get("voice_id") and (
-        st.session_state.get("auto_play") or (char.get("schedule") or {}).get("voice_on")
-    )
-    if want_voice:
+    if char.get("voice_id"):  # «melodia zilei» pornește automat vocea, dacă personajul are voce
         try:
             st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
                 line, char["voice_id"], **_tts_kwargs(char))
