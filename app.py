@@ -1836,14 +1836,8 @@ def render_create():
                 )
             st.rerun()
 
-    st.session_state.setdefault("cf_vis", "private")
-    visibility = st.radio(
-        "🔒 Vizibilitate",
-        ["private", "public"],
-        format_func=lambda v: "🔒 Privat (doar tu)" if v == "private" else "🌍 Public (etichetă)",
-        horizontal=True,
-        key="cf_vis",
-    )
+    # toate personajele sunt private (aplicație personală, fără galerie publică)
+    visibility = "private"
 
     st.markdown("**🖼️ Portret AI** (opțional)")
     pc1, pc2 = st.columns([2, 3])
@@ -3068,6 +3062,10 @@ def render_gallery():
         )
     render_recent()
     chars = db.list_characters(owner_id=_identity_id())
+    for _c in chars:
+        if _c.get("visibility") != "private":
+            db.update_character(_c["id"], {"visibility": "private"})
+            _c["visibility"] = "private"
     if chars:
         st.markdown(
             '<div class="hero"><h1>Personajele <span class="accent">tale</span></h1>'
@@ -3223,7 +3221,7 @@ def render_amintiri():
 
 
 def _nav_bar():
-    items = [("personaje", "🎭 Personaje"), ("exploreaza", "🌍 Explorează"),
+    items = [("personaje", "🎭 Personaje"),
              ("amintiri", "🎞️ Amintiri"), ("chat", "💬 Chat"), ("profil", "👤 Profil")]
     cur = st.session_state.get("nav", "personaje")
     cols = st.columns(len(items))
@@ -3276,6 +3274,10 @@ def render_personaje():
         st.rerun()
     render_recent()
     chars = db.list_characters(owner_id=_identity_id())
+    for _c in chars:
+        if _c.get("visibility") != "private":
+            db.update_character(_c["id"], {"visibility": "private"})
+            _c["visibility"] = "private"
     if chars:
         st.markdown(
             '<div class="hero"><h1>Personajele <span class="accent">tale</span></h1>'
@@ -3554,9 +3556,9 @@ try:
             render_preview(pv)
         else:
             st.session_state.pop("preview_id", None)
-            st.session_state.nav = "exploreaza"
+            st.session_state.nav = "personaje"
             _nav_bar()
-            render_explore()
+            render_personaje()
     elif st.session_state.get("call_char"):
         call_c = db.get_character(st.session_state.call_char)
         if call_c:
@@ -3582,7 +3584,7 @@ try:
             else:
                 st.info("Niciun chat activ. Deschide un personaj din fila 🎭 Personaje.")
         elif _nav == "exploreaza":
-            render_explore()
+            render_personaje()
         elif _nav == "amintiri":
             render_amintiri()
         elif _nav == "profil":
