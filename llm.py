@@ -300,6 +300,16 @@ def song_of_the_day(character, history, song_name):
     return get_reply(character, history, instr)
 
 
+def goodnight_song(character, history, song_name):
+    """Evening goodnight with a calming song from the shared playlist."""
+    instr = (
+        f"(E seară / noapte. Îi urezi utilizatorului noapte bună, cald și în personaj, și îi trimiți "
+        f"o melodie liniștitoare din playlist-ul vostru: „{song_name}”. Spune-i să se relaxeze și "
+        "s-o asculte înainte de culcare. Maxim 3 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recall_memory(character, history, media_desc):
     """Character spontaneously recalls a photo/song the user shared before."""
     instr = (

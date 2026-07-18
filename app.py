@@ -1375,6 +1375,30 @@ def _emit_song_of_day(char, conv_id, song):
     return msg["id"]
 
 
+def _emit_goodnight_song(char, conv_id, song):
+    """Seara, personajul îți urează noapte bună cu o melodie liniștitoare (cu voce automată)."""
+    sname = song.get("song_name", "o melodie liniștitoare")
+    try:
+        line = llm.goodnight_song(char, db.get_messages(conv_id), sname)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    extra = {"media_kind": "song", "song_name": sname, "dedication": True}
+    if song.get("song_b64"):
+        extra["song_b64"] = song["song_b64"]
+    msg = db.add_message(conv_id, "assistant", line, extra=extra)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
 def _idle_seconds(conv_id):
     hist = db.get_messages(conv_id)
     if not hist:
@@ -1596,6 +1620,16 @@ def proactive_fragment(char_id, conv_id):
             if song and song.get("song_b64"):
                 st.session_state[guard] = today
                 if _emit_song_of_day(char, conv_id, song):
+                    fired = True
+
+    # "noapte bună" — each evening the character sends a calming song from the playlist
+    if not fired and sched.get("goodnight_on", True) and hasattr(db, "random_song"):
+        guard = f"goodnight_{conv_id}"
+        if st.session_state.get(guard) != today and 1200 <= now_min <= 1439:
+            song = db.random_song(char["id"])
+            if song and song.get("song_b64"):
+                st.session_state[guard] = today
+                if _emit_goodnight_song(char, conv_id, song):
                     fired = True
 
     # spontaneous "melodia noastră" — occasionally the character dedicates a song from the playlist
@@ -2159,6 +2193,8 @@ def render_chat(char):
                            value=sched.get("dedicate_on", True), key=f"ded_on_{char['id']}")
         sod_on = st.toggle("🌅 «Melodia zilei» — în fiecare dimineață îmi alege o melodie din playlist",
                            value=sched.get("song_of_day_on", True), key=f"sod_on_{char['id']}")
+        gn_on = st.toggle("🌙 «Noapte bună» — seara îmi trimite o melodie liniștitoare din playlist",
+                          value=sched.get("goodnight_on", True), key=f"gn_on_{char['id']}")
         if st.button("💾 Salvează programul", key=f"save_sched_{char['id']}", use_container_width=True):
             db.update_character(char["id"], {
                 "notif_theme": None if notif_theme == "Implicit" else notif_theme,
@@ -2176,6 +2212,7 @@ def render_chat(char):
                     "followup_on": fu_on, "followup_min": fu_min,
                     "dedicate_on": ded_on,
                     "song_of_day_on": sod_on,
+                    "goodnight_on": gn_on,
                 },
             })
             st.success("Program salvat! Personajul îți va scrie la orele alese.")
