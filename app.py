@@ -993,8 +993,9 @@ def _render_playlist(char, key_prefix=""):
                 <button id="{pid}_all" aria-label="Ascultă tot playlist-ul de la început" style="{btn}">▶️ Ascultă tot</button>
                 <button id="{pid}_n" aria-label="Melodia următoare" style="{btn}">⏭️ Următoarea</button>
               </div>
-              <div style="margin-top:8px;">
-                <button id="{pid}_sh" aria-label="Amestecă și pornește melodiile într-o ordine surpriză" style="{btn}width:100%;">🔀 Amestecă (ordine surpriză)</button>
+              <div style="margin-top:8px;display:flex;gap:8px;">
+                <button id="{pid}_sh" aria-label="Amestecă și pornește melodiile într-o ordine surpriză" style="{btn}">🔀 Amestecă</button>
+                <button id="{pid}_rp" aria-label="Repetă melodia curentă la nesfârșit" aria-pressed="false" style="{btn}">🔁 Repetă: Off</button>
               </div>
               <script>
               (function(){{
@@ -1013,6 +1014,8 @@ def _render_playlist(char, key_prefix=""):
                 document.getElementById("{pid}_p").onclick=function(){{load(i-1,true);}};
                 document.getElementById("{pid}_n").onclick=function(){{load(i+1,true);}};
                 document.getElementById("{pid}_sh").onclick=function(){{shuffle();t.textContent="🔀 Ordine surpriză…";load(0,true);}};
+                var rp=document.getElementById("{pid}_rp");
+                rp.onclick=function(){{a.loop=!a.loop;rp.setAttribute("aria-pressed",a.loop?"true":"false");rp.textContent=a.loop?"🔁 Repetă: On":"🔁 Repetă: Off";if(a.loop&&a.paused){{var p=a.play();if(p&&p.catch){{p.catch(function(){{}});}}}}}};
                 a.addEventListener("ended",function(){{load(i+1,true);}});
                 load(0,false);
               }})();
@@ -2169,38 +2172,51 @@ def render_chat(char):
 
     # ---- send a favorite song ----
     with st.expander("🎵 Trimite o melodie"):
-        st.caption(f"Încarcă o melodie preferată și {char['name']} îți spune părerea despre ea.")
-        song = st.file_uploader("Melodie", type=["mp3", "m4a", "wav", "ogg"],
-                                label_visibility="collapsed", key=f"song_{active_conv}")
-        if song is not None:
-            sdata = song.getvalue()
-            if sdata:
+        st.caption(f"Încarcă una sau mai multe melodii preferate și {char['name']} îți spune "
+                   "părerea despre ele.")
+        songs_up = st.file_uploader("Melodie", type=["mp3", "m4a", "wav", "ogg"],
+                                    label_visibility="collapsed", accept_multiple_files=True,
+                                    key=f"song_{active_conv}")
+        if songs_up:
+            done = st.session_state.setdefault(f"songset_{active_conv}", set())
+            new_names = []
+            for song in songs_up:
+                sdata = song.getvalue()
+                if not sdata:
+                    continue
                 sh = hashlib.md5(sdata).hexdigest()
-                if st.session_state.get(f"songrec_{active_conv}") != sh:
-                    st.session_state[f"songrec_{active_conv}"] = sh
-                    sname = _song_name(song.name)
-                    sb64 = base64.b64encode(sdata).decode() if len(sdata) <= 1_400_000 else None
-                    with st.spinner(f"{char['name']} ascultă melodia..."):
+                if sh in done:
+                    continue
+                done.add(sh)
+                sname = _song_name(song.name)
+                sb64 = base64.b64encode(sdata).decode() if len(sdata) <= 1_400_000 else None
+                extra = {"media_kind": "song", "song_name": sname}
+                if sb64:
+                    extra["song_b64"] = sb64
+                db.add_message(active_conv, "user",
+                               f"🎵 Ți-am trimis melodia: **{sname}**", extra=extra)
+                new_names.append(sname)
+            if new_names:
+                spin = "melodia" if len(new_names) == 1 else f"cele {len(new_names)} melodii"
+                with st.spinner(f"{char['name']} ascultă {spin}..."):
+                    try:
+                        if len(new_names) == 1:
+                            scomment = llm.comment_on_song(char, history, new_names[0])
+                        else:
+                            scomment = llm.comment_on_songs(char, history, new_names)
+                    except Exception:  # noqa
+                        scomment = None
+                if scomment:
+                    amsg = db.add_message(active_conv, "assistant", scomment)
+                    st.session_state["notif_sound"] = True
+                    if st.session_state.get("auto_play") and char.get("voice_id"):
                         try:
-                            scomment = llm.comment_on_song(char, history, sname)
+                            st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
+                                scomment, char["voice_id"], **tts_kwargs)
+                            st.session_state["autoplay_mid"] = amsg["id"]
                         except Exception:  # noqa
-                            scomment = None
-                    extra = {"media_kind": "song", "song_name": sname}
-                    if sb64:
-                        extra["song_b64"] = sb64
-                    db.add_message(active_conv, "user",
-                                   f"🎵 Ți-am trimis melodia: **{sname}**", extra=extra)
-                    if scomment:
-                        amsg = db.add_message(active_conv, "assistant", scomment)
-                        st.session_state["notif_sound"] = True
-                        if st.session_state.get("auto_play") and char.get("voice_id"):
-                            try:
-                                st.session_state[f"audio_{amsg['id']}"] = voice.text_to_speech(
-                                    scomment, char["voice_id"], **tts_kwargs)
-                                st.session_state["autoplay_mid"] = amsg["id"]
-                            except Exception:  # noqa
-                                pass
-                    st.rerun()
+                            pass
+                st.rerun()
         if st.button("🎧 Recomandă-mi melodii noi", key=f"recsong_{active_conv}",
                      use_container_width=True):
             names = db.list_song_names(char["id"])

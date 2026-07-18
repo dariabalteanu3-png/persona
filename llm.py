@@ -178,6 +178,17 @@ def comment_on_song(character, history, song_name):
     return get_reply(character, history, instr)
 
 
+def comment_on_songs(character, history, names):
+    """The character reacts to several songs shared at once (a small collection)."""
+    lst = ", ".join(names[:12])
+    instr = (
+        f"(Utilizatorul tocmai ți-a trimis mai multe melodii preferate deodată: {lst}. "
+        "Reacționează cald și în personaj la întreaga colecție — spune ce părere ai, ce ți-a atras "
+        "atenția și ce spun aceste alegeri despre el. Maxim 3-4 propoziții.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def recommend_songs(character, history, songs):
     """Character recommends new songs based on what the user shared."""
     lst = ", ".join(songs[-20:]) if songs else ""
