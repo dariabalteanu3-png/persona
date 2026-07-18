@@ -415,6 +415,33 @@ def list_media(owner_id):
     return out
 
 
+def list_letters(owner_id):
+    """All 'letters' characters wrote to the user, newest first, with character info."""
+    out = []
+    for ch in list_characters(owner_id=owner_id):
+        conv_ids = [c["id"] for c in list_conversations(ch["id"])]
+        if not conv_ids:
+            continue
+        cur = messages.find(
+            {"conversation_id": {"$in": conv_ids}, "role": "assistant"},
+            {"_id": 0},
+        )
+        for m in cur:
+            content = m.get("content") or ""
+            if content.startswith("💌 O scrisoare pentru tine:"):
+                out.append({
+                    "id": m.get("id"),
+                    "char_id": ch["id"],
+                    "char_name": ch.get("name", "Personaj"),
+                    "char_avatar": ch.get("avatar", "🎭"),
+                    "voice_id": ch.get("voice_id"),
+                    "content": content,
+                    "created_at": m.get("created_at"),
+                })
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return out
+
+
 def list_song_names(character_id):
     """Distinct song names the user shared with a character (order preserved)."""
     conv_ids = [c["id"] for c in list_conversations(character_id)]

@@ -3393,9 +3393,42 @@ def render_amintiri():
                 )
 
     media = db.list_media(_oid)
+    letters = db.list_letters(_oid)
+
+    # ---- letters journal (Colecția de scrisori) ----
+    if letters:
+        st.markdown("### 💌 Scrisorile mele")
+        st.caption("Toate scrisorile pe care ți le-au scris personajele — jurnalul tău de amintiri.")
+        for L in letters:
+            _body = L["content"].split("\n\n", 1)[1] if "\n\n" in L["content"] else L["content"]
+            _date = (str(L.get("created_at") or ""))[:10]
+            with st.container(border=True):
+                st.markdown(f"**{L['char_avatar']} {L['char_name']}** · {_date}")
+                st.markdown(_body)
+                _lc = st.columns(2)
+                _lc[0].download_button("⬇️ Salvează (.txt)", data=L["content"],
+                                       file_name=f"scrisoare-{L['char_name']}-{_date}.txt",
+                                       mime="text/plain", key=f"jdl_{L['id']}",
+                                       use_container_width=True)
+                if L.get("voice_id"):
+                    if _lc[1].button("🔊 Ascultă", key=f"jlisten_{L['id']}",
+                                     use_container_width=True):
+                        with st.spinner("Generez vocea..."):
+                            try:
+                                _ch = db.get_character(L["char_id"])
+                                st.session_state[f"jaudio_{L['id']}"] = voice.text_to_speech(
+                                    _body, L["voice_id"], **_tts_kwargs(_ch))
+                            except Exception:  # noqa
+                                st.error("Nu am putut genera vocea acum. Mai încearcă mai târziu.")
+                    if st.session_state.get(f"jaudio_{L['id']}"):
+                        st.audio(st.session_state[f"jaudio_{L['id']}"], format="audio/mp3",
+                                 autoplay=True)
+        st.markdown("---")
+
     if not media:
-        st.info("Încă nu ai trimis nicio poză sau melodie. Deschide un personaj și trimite-i "
-                "ceva din chat — o poză 📷 sau o melodie 🎵.")
+        if not letters:
+            st.info("Încă nu ai trimis nicio poză sau melodie. Deschide un personaj și trimite-i "
+                    "ceva din chat — o poză 📷 sau o melodie 🎵.")
         return
     from collections import OrderedDict
     groups = OrderedDict()
