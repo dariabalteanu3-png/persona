@@ -1229,7 +1229,7 @@ def proactive_fragment(char_id, conv_id):
                 fired = True
 
     # spontaneous "memory of the day" — recall a past photo/song once a day (after a short idle)
-    if not fired and sched.get("recall_on", True):
+    if not fired and sched.get("recall_on", True) and hasattr(db, "has_media"):
         guard = f"recall_{conv_id}"
         if st.session_state.get(guard) != today and db.has_media(char["id"]):
             hist2 = db.get_messages(conv_id)
@@ -2069,7 +2069,7 @@ def render_chat(char):
                     st.rerun()
 
     # ---- on-demand memory recall ----
-    if db.has_media(char["id"]):
+    if hasattr(db, "has_media") and db.has_media(char["id"]):
         if st.button("💭 Amintește-ți de o poză sau melodie", key=f"recall_btn_{active_conv}",
                      use_container_width=True):
             if _emit_memory_recall(char, active_conv):
