@@ -1839,18 +1839,31 @@ def proactive_fragment(char_id, conv_id):
     tone = sched.get("tone")
 
     # ⏰ alarmă blândă de trezire — prioritate maximă (merge chiar și cu „nu mă deranja")
+    # amânare („încă 5 minute"): dacă ai apăsat snooze, personajul te trezește din nou blând
+    _snooze_key = f"alarm_snooze_{conv_id}"
+    _snooze_until = st.session_state.get(_snooze_key)
+    if _snooze_until and time.time() >= _snooze_until:
+        st.session_state.pop(_snooze_key, None)
+        if _emit_wakeup(char, conv_id):
+            st.session_state[f"alarm_ring_{conv_id}"] = True
+            st.session_state["notif_sound"] = True
+            st.rerun(scope="app")
+        return
     if sched.get("alarm_on"):
-        guard = f"sched_alarm_{conv_id}"
-        if st.session_state.get(guard) != today:
-            delta = now_min - _minutes(sched.get("alarm"), "07:30")
-            if 0 <= delta <= 15:
-                st.session_state[guard] = today
-                if _emit_wakeup(char, conv_id):
-                    st.session_state["notif_sound"] = True
-                    st.rerun(scope="app")
-                return
-            if delta > 15:
-                st.session_state[guard] = today  # ratată pe azi, marchează ca gata
+        a_days = sched.get("alarm_days")  # gol/None = în fiecare zi
+        if (not a_days) or (now_local.weekday() in a_days):
+            guard = f"sched_alarm_{conv_id}"
+            if st.session_state.get(guard) != today:
+                delta = now_min - _minutes(sched.get("alarm"), "07:30")
+                if 0 <= delta <= 15:
+                    st.session_state[guard] = today
+                    if _emit_wakeup(char, conv_id):
+                        st.session_state[f"alarm_ring_{conv_id}"] = True
+                        st.session_state["notif_sound"] = True
+                        st.rerun(scope="app")
+                    return
+                if delta > 15:
+                    st.session_state[guard] = today  # ratată pe azi, marchează ca gata
 
     if sched.get("dnd"):
         return  # "nu mă deranja" — no automated messages
@@ -2882,14 +2895,44 @@ def render_chat(char):
             key=f"alarm_t_{char['id']}",
         )
         _new_alarm = _alarm_t.strftime("%H:%M")
-        if _alarm_on != _asched.get("alarm_on", False) or _new_alarm != (_asched.get("alarm") or "07:30"):
+        _adow = ["Lun", "Mar", "Mie", "Joi", "Vin", "Sâm", "Dum"]
+        _cur_adays = _asched.get("alarm_days")
+        _def_adays = [_adow[i] for i in _cur_adays] if _cur_adays else _adow
+        _sel_adays = st.multiselect(
+            "📅 În ce zile să sune alarma",
+            _adow, default=_def_adays, key=f"alarm_days_{char['id']}",
+            help="Alege zilele (ex: doar Lun–Vin, fără weekend). Gol sau toate = în fiecare zi.",
+        )
+        # gol sau toate cele 7 zile -> stocăm listă goală („în fiecare zi")
+        _stored_adays = [] if (not _sel_adays or len(_sel_adays) == 7) else sorted(_adow.index(d) for d in _sel_adays)
+        if (_alarm_on != _asched.get("alarm_on", False)
+                or _new_alarm != (_asched.get("alarm") or "07:30")
+                or _stored_adays != (_asched.get("alarm_days") or [])):
             _merged = dict(_asched)
             _merged["alarm_on"] = _alarm_on
             _merged["alarm"] = _new_alarm
+            _merged["alarm_days"] = _stored_adays
             db.update_character(char["id"], {"schedule": _merged})
         if _alarm_on:
-            st.caption(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, "
-                       "cât timp aplicația e deschisă.")
+            _when = ("în zilele: " + ", ".join(_adow[i] for i in _stored_adays)) if _stored_adays else "în fiecare zi"
+            st.caption(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, {_when} "
+                       "(cât timp aplicația e deschisă). Poți amâna cu «😴 Încă 5 minute».")
+
+    # ⏰ alarmă activă: butoane „încă 5 minute" (amânare) / „m-am trezit"
+    if st.session_state.get(f"alarm_ring_{active_conv}"):
+        st.info("⏰ Bună dimineața! Te-am trezit cu drag. Vrei să te mai las puțin?")
+        _acols = st.columns(2)
+        if _acols[0].button("😴 Încă 5 minute", key=f"alarm_snooze_btn_{active_conv}",
+                            use_container_width=True):
+            st.session_state[f"alarm_snooze_{active_conv}"] = time.time() + 300
+            st.session_state.pop(f"alarm_ring_{active_conv}", None)
+            st.toast("😴 Bine, te mai trezesc în 5 minute.")
+            st.rerun()
+        if _acols[1].button("☀️ M-am trezit", key=f"alarm_wake_btn_{active_conv}",
+                            use_container_width=True, type="primary"):
+            st.session_state.pop(f"alarm_ring_{active_conv}", None)
+            st.session_state.pop(f"alarm_snooze_{active_conv}", None)
+            st.rerun()
 
     # buton de OPRIRE mereu vizibil (în afara expanderului) cât timp «Adoarme cu mine» e activ
     if st.session_state.get("sleep_mode"):
