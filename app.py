@@ -690,25 +690,22 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Setează autocomplete corect pe câmpurile de login/parolă ȘI forțează Streamlit
-    să 'vadă' valoarea completată (inclusiv parola sugerată automat de telefon), altfel
-    parola poate apărea goală la trimitere ('minim 6 caractere')."""
+    """Setează DOAR atribute pe câmpurile de login/parolă (autocomplete corect + direcție
+    text stânga→dreapta). NU mai rescrie valoarea inputului la tastare — asta putea reseta
+    cursorul și inversa literele („daria"→„airad") cu cititorul de ecran / tastatura de telefon,
+    blocând autentificarea."""
     components.html(
         """
         <script>
-        function reactSet(inp){
-          try{
-            var proto = window.parent.HTMLInputElement.prototype;
-            var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            setter.call(inp, inp.value);
-            inp.dispatchEvent(new Event('input', {bubbles:true}));
-          }catch(e){}
-        }
         function fixAF(){
           try{
             var doc = window.parent.document;
-            var inputs = doc.querySelectorAll('input');
+            var inputs = doc.querySelectorAll('input, textarea');
             inputs.forEach(function(inp){
+              inp.setAttribute('dir','ltr');
+              inp.style.direction = 'ltr';
+              inp.style.textAlign = 'left';
+              inp.style.unicodeBidi = 'plaintext';
               var al = inp.getAttribute('aria-label') || '';
               if (al === 'Nume utilizator'){
                 inp.setAttribute('autocomplete','username');
@@ -719,12 +716,6 @@ def _fix_autofill_js():
               } else if (al === 'Parolă (min. 6 caractere)'){
                 inp.setAttribute('autocomplete','new-password');
                 inp.setAttribute('name','new-password');
-              }
-              if (!inp.__pfix){
-                inp.__pfix = true;
-                ['change','blur','animationstart'].forEach(function(ev){
-                  inp.addEventListener(ev, function(){ reactSet(inp); });
-                });
               }
             });
           }catch(e){}
