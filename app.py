@@ -293,6 +293,7 @@ st.session_state.setdefault("call_incoming", False)
 st.session_state.setdefault("call_opened", None)
 st.session_state.setdefault("auth_user", None)
 st.session_state.setdefault("web_search", True)
+st.session_state.setdefault("chat_brain", "fast")
 st.session_state.setdefault("theme_light", False)
 st.session_state.setdefault("manual_tz", "")
 st.session_state.setdefault("notify_on", False)
@@ -489,6 +490,25 @@ def _restore_sound():
 def _write_sound_cookie(v):
     try:
         st.query_params["snd"] = v
+    except Exception:  # noqa
+        pass
+
+
+def _restore_brain():
+    if st.session_state.get("_brain_restored"):
+        return
+    st.session_state._brain_restored = True
+    try:
+        v = st.query_params.get("brain")
+    except Exception:  # noqa
+        v = None
+    if isinstance(v, str) and v in ("fast", "smart"):
+        st.session_state.chat_brain = v
+
+
+def _write_brain_cookie(v):
+    try:
+        st.query_params["brain"] = v
     except Exception:  # noqa
         pass
 
@@ -2101,6 +2121,7 @@ _restore_session()
 _restore_theme()
 _restore_tz()
 _restore_sound()
+_restore_brain()
 _restore_notify()
 user = current_user()
 with st.sidebar:
@@ -2685,6 +2706,7 @@ def render_chat(char):
                     "(Utilizatorul tocmai a deschis conversația. Salută-l scurt și cald, "
                     "în personaj, și invită-l să înceapă discuția. Maxim 2 propoziții.)",
                     tries=1,
+                    smart=(st.session_state.get("chat_brain") == "smart"),
                 )
             except Exception:  # noqa
                 greeting = None
@@ -2783,7 +2805,8 @@ def render_chat(char):
                     _wi = ""
             with st.spinner(f"{char['name']} încearcă din nou..."):
                 try:
-                    _parts = llm.burst_reply(char, _hist, _prompt, web_info=_wi)
+                    _parts = llm.burst_reply(char, _hist, _prompt, web_info=_wi,
+                                             smart=(st.session_state.get("chat_brain") == "smart"))
                 except Exception:  # noqa
                     _log.exception("burst_reply failed (retry button)")
                     _parts = []
@@ -3247,7 +3270,8 @@ def render_chat(char):
             except Exception:  # noqa
                 web_info = ""
         try:
-            parts = llm.burst_reply(char, history, prompt, web_info=web_info)
+            parts = llm.burst_reply(char, history, prompt, web_info=web_info,
+                                     smart=(st.session_state.get("chat_brain") == "smart"))
         except Exception:  # noqa
             _log.exception("burst_reply failed (chat send)")
             parts = []
@@ -3441,7 +3465,8 @@ def render_call(char):
                     db.add_message(conv, "user", text)
                     with st.spinner(f"{char['name']} vorbește..."):
                         try:
-                            reply = llm.get_reply(char, hist, text)
+                            reply = llm.get_reply(char, hist, text,
+                                                   smart=(st.session_state.get("chat_brain") == "smart"))
                         except Exception as e:  # noqa
                             reply = None
                             st.error(f"Eroare: {e}")
@@ -4213,6 +4238,25 @@ def render_profil():
                 st.rerun()
             st.markdown("---")
             st.caption("⚙️ Setări")
+            _brain_opts = ["fast", "smart"]
+            _brain_labels = {
+                "fast": "⚡ Rapid — răspunsuri iuți, gratuite",
+                "smart": "💎 Inteligent — răspunsuri mai bogate (folosește puțin credit)",
+            }
+            _cur_brain = st.session_state.get("chat_brain", "fast")
+            st.session_state.chat_brain = st.radio(
+                "🧠 Creierul chatului",
+                _brain_opts,
+                index=_brain_opts.index(_cur_brain) if _cur_brain in _brain_opts else 0,
+                format_func=lambda b: _brain_labels[b],
+                key="chat_brain_radio",
+                help="⚡ Rapid = răspunsuri iuți și gratuite (recomandat). 💎 Inteligent = personajul "
+                     "răspunde mai atent și mai bogat, folosind un «creier» mai puternic (consumă puțin "
+                     "credit la fiecare mesaj).",
+            )
+            _write_brain_cookie(st.session_state.chat_brain)
+            if st.session_state.chat_brain == "smart":
+                st.caption("💎 Mod inteligent activ — răspunsuri mai bogate (folosește credit la fiecare mesaj).")
             st.session_state.auto_play = st.toggle(
                 "🔊 Auto-redare voce",
                 value=st.session_state.auto_play,

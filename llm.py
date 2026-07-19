@@ -278,7 +278,13 @@ def web_lookup(user_text):
     return f"[Căutare web pentru: {q}]\n{results}"
 
 
-async def _reply(system, text, sid):
+async def _reply(system, text, sid, smart=False):
+    # „💎 Inteligent": folosește rezerva fiabilă Emergent (Claude) ca principal, dacă e configurată
+    if smart and _emergent_key():
+        try:
+            return _emergent_text(system, text)
+        except Exception:  # noqa
+            _log.exception("emergent (smart) primary failed -> Groq")
     if USE_GROQ:
         return _groq_text(system, text)
     if USE_GEMINI:
@@ -292,13 +298,13 @@ async def _reply(system, text, sid):
     return await chat.send_message(UserMessage(text=text))
 
 
-def _run_reply(system, text, sid, tries=2):
+def _run_reply(system, text, sid, tries=2, smart=False):
     """Run a one-shot reply with a light automatic retry on transient failures."""
     last = None
     n = max(1, tries)
     for attempt in range(n):
         try:
-            out = asyncio.run(_reply(system, text, sid))
+            out = asyncio.run(_reply(system, text, sid, smart=smart))
             if out and out.strip():
                 return out
         except Exception as e:  # noqa
@@ -310,9 +316,9 @@ def _run_reply(system, text, sid, tries=2):
     return ""
 
 
-def get_reply(character, history, user_text, web_info="", tries=2):
+def get_reply(character, history, user_text, web_info="", tries=2, smart=False):
     system = build_system(character, history, web_info)
-    return _run_reply(system, user_text, f"char-{character['id']}", tries=tries)
+    return _run_reply(system, user_text, f"char-{character['id']}", tries=tries, smart=smart)
 
 
 BURST_SEP = "|||"
@@ -335,7 +341,7 @@ def _split_burst(raw):
     return [g for g in groups if g][:4]
 
 
-def burst_reply(character, history, user_text, web_info=""):
+def burst_reply(character, history, user_text, web_info="", smart=False):
     """Reply as 3-4 short messages sent one after another (natural texting style).
     Returns a list of message strings. Does NOT shorten the overall content."""
     system = build_system(character, history, web_info)
@@ -346,7 +352,7 @@ def burst_reply(character, history, user_text, web_info=""):
         f"Separă fiecare mesaj EXACT prin „{BURST_SEP}” (trei linii verticale) și cu NIMIC altceva. "
         f"Nu pune „{BURST_SEP}” la început sau la sfârșit și nu explica formatul."
     )
-    raw = _run_reply(system, user_text, f"char-{character['id']}")
+    raw = _run_reply(system, user_text, f"char-{character['id']}", smart=smart)
     return _split_burst(raw)
 
 
@@ -693,9 +699,15 @@ def action_sound_cue(actions):
     return r.strip().strip('"').strip("`").strip()[:120]
 
 
-def stream_reply(character, history, user_text, web_info=""):
+def stream_reply(character, history, user_text, web_info="", smart=False):
     """Sync generator yielding text chunks as the model streams the response."""
     system = build_system(character, history, web_info)
+    if smart and _emergent_key():
+        try:
+            yield _emergent_text(system, user_text)
+            return
+        except Exception:  # noqa
+            _log.exception("emergent (smart) stream failed -> Groq")
     if USE_GROQ:
         yield from _groq_stream(system, user_text)
         return
