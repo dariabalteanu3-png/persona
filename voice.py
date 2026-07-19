@@ -86,10 +86,13 @@ def expressify(text):
     return text or "..."
 
 
-def sound_effect(prompt, duration=6.0):
-    """Generate an ambient sound effect (mp3 bytes) from a text description."""
+def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
+    """Generate a layered ambient/scene sound effect (mp3 bytes) from a text description.
+    Higher prompt_influence follows the description more literally (better for rich scenes)."""
     audio = _client.text_to_sound_effects.convert(
-        text=prompt, duration_seconds=float(duration)
+        text=prompt,
+        duration_seconds=float(duration),
+        prompt_influence=float(prompt_influence),
     )
     data = b""
     for chunk in audio:

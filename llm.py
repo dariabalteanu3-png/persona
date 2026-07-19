@@ -2,6 +2,7 @@ import os
 import asyncio
 import queue
 import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -53,7 +54,7 @@ def _pollinations_text(system, text):
     import requests
     payload = {"model": "openai", "messages": _groq_messages(system, text)}
     last = None
-    for attempt in range(4):
+    for attempt in range(2):
         try:
             if attempt % 2 == 0:
                 r = requests.post("https://text.pollinations.ai/", json=payload, timeout=30)
@@ -209,9 +210,27 @@ async def _reply(system, text, sid):
     return await chat.send_message(UserMessage(text=text))
 
 
-def get_reply(character, history, user_text, web_info=""):
+def _run_reply(system, text, sid, tries=2):
+    """Run a one-shot reply with a light automatic retry on transient failures."""
+    last = None
+    n = max(1, tries)
+    for attempt in range(n):
+        try:
+            out = asyncio.run(_reply(system, text, sid))
+            if out and out.strip():
+                return out
+        except Exception as e:  # noqa
+            last = e
+        if attempt < n - 1:
+            time.sleep(0.5)
+    if last:
+        raise last
+    return ""
+
+
+def get_reply(character, history, user_text, web_info="", tries=2):
     system = build_system(character, history, web_info)
-    return asyncio.run(_reply(system, user_text, f"char-{character['id']}"))
+    return _run_reply(system, user_text, f"char-{character['id']}", tries=tries)
 
 
 BURST_SEP = "|||"
@@ -245,35 +264,59 @@ def burst_reply(character, history, user_text, web_info=""):
         f"Separă fiecare mesaj EXACT prin „{BURST_SEP}” (trei linii verticale) și cu NIMIC altceva. "
         f"Nu pune „{BURST_SEP}” la început sau la sfârșit și nu explica formatul."
     )
-    raw = asyncio.run(_reply(system, user_text, f"char-{character['id']}"))
+    raw = _run_reply(system, user_text, f"char-{character['id']}")
     return _split_burst(raw)
 
 
+def daily_journal(character, history):
+    """A warm first-person 'journal of the day' reflection on today's conversation, with voice."""
+    instr = (
+        "(Scrie un scurt „jurnal al zilei” — o reflecție caldă, la persoana întâi, despre ce ați "
+        "vorbit azi și cum te-ai simțit alături de utilizator. Menționează 1-2 momente care ți-au "
+        "plăcut și încheie cu o urare blândă pentru restul zilei sau pentru seară. "
+        "Maxim 4 propoziții, fără liste.)"
+    )
+    return get_reply(character, history, instr)
+
+
 def ambient_cue(character, text):
-    """Short English description of the CONTINUOUS background ambience implied by the
-    scene (a loopable room-tone), or '' if truly none."""
+    """Rich, layered (and possibly evolving) sound-scene description in English for the
+    ElevenLabs sound-effects generator, or '' if truly none. Captures ALL simultaneous
+    sounds implied by the scene + the concrete actions (with their stages) + any changes."""
     scenario = (character.get("scenario") or "").strip()
     prompt = (
-        "Pe baza replicii personajului și a contextului, descrie SUNETUL DE FUNDAL CONTINUU "
-        "(ambianță care se poate reda în buclă) potrivit locului unde se află personajul acum. "
-        "Chiar dacă spune doar că stă în cameră/pat, dă o ambianță blândă (ex: liniște de cameră "
-        "cu scârțâit ușor de pat, ticăit discret de ceas). Alege ambientul potrivit locului "
-        "menționat sau din scenariu. Exemple: 'quiet cozy bedroom room tone, soft bed creaks', "
-        "'busy restaurant chatter and cutlery', 'television playing softly in background', "
-        "'gentle rain on the window', 'park birds and light wind', 'crackling fireplace', "
-        "'city street traffic ambience'. Returnează DOAR o descriere SCURTĂ în engleză "
-        "(max 8 cuvinte) pentru un ambient continuu de redat în buclă. Dacă chiar nu se poate "
-        "deduce niciun loc/ambient, returnează exact 'NONE'.\n\n"
+        "Ești designer de sunet pentru scene imersive. Pe baza replicii personajului și a "
+        "contextului, descrie TOATE sunetele care s-ar auzi în scenă, ca un PEISAJ SONOR BOGAT, "
+        "cu mai multe straturi SIMULTANE și, dacă e cazul, EVOLUȚIE în timp. Include:\n"
+        "• ambianța locului (cameră/parc/bucătărie/stradă/etc.);\n"
+        "• acțiunile concrete menționate, cu TOATE etapele lor "
+        "(ex: spălat vase → apă curgând, burete care freacă vasul, clinchet de farfurii, "
+        "jet de detergent, apă care se scurge; mers prin parc → pași pe alee, păsări, foșnet de "
+        "frunze, vânt ușor);\n"
+        "• orice schimbare din scenă (ex: brusc începe ploaia → ploaie ușoară care crește "
+        "treptat, tunet îndepărtat).\n"
+        "Chiar dacă spune doar că stă în cameră, dă o ambianță bogată și subtilă (room tone, "
+        "ticăit de ceas, mici trosnete). Returnează DOAR o descriere în ENGLEZĂ, o singură frază "
+        "densă cu elementele separate prin virgulă (max ~35 de cuvinte), potrivită pentru un "
+        "generator de efecte sonore layered. Dacă chiar nu se poate deduce niciun sunet, "
+        "returnează exact 'NONE'.\n\n"
+        "Exemple:\n"
+        "- 'park path footsteps on gravel, birds chirping, rustling leaves, light wind, then "
+        "soft rain starts pattering and grows steadier'\n"
+        "- 'kitchen sink running water, sponge scrubbing a plate, dishes clinking, a squirt of "
+        "dish soap, water splashing and draining'\n"
+        "- 'cozy quiet bedroom room tone, faint clock ticking, occasional soft bed creak, muffled "
+        "night city outside'\n\n"
         f"Context/scenariu: {scenario or '(necunoscut)'}\n"
         f"Replică: {text}"
     )
     try:
-        r = asyncio.run(_reply("Ești un designer de sunet ambiental.", prompt, "ambient")).strip()
+        r = asyncio.run(_reply("Ești un designer de sunet imersiv, layered.", prompt, "ambient")).strip()
     except Exception:  # noqa
         return ""
     if not r or "NONE" in r.upper():
         return ""
-    return r.strip().strip('"').strip("`").strip()[:120]
+    return r.strip().strip('"').strip("`").strip()[:280]
 
 
 def recap_recent(character, history):

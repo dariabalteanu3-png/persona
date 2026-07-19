@@ -277,6 +277,8 @@ st.session_state.setdefault("pending_prompt", None)
 st.session_state.setdefault("pending_voice", None)
 st.session_state.setdefault("ambient_fx", True)
 st.session_state.setdefault("ambient_volume", 25)
+st.session_state.setdefault("voice_volume", 100)
+st.session_state.setdefault("voice_speed", 1.0)
 st.session_state.setdefault("call_muted", False)
 st.session_state.setdefault("sound_theme", "iPhone")
 st.session_state.setdefault("notif_volume", 70)
@@ -856,8 +858,16 @@ def maybe_ambient(char, msg_id, text):
             actions = voice.extract_actions(text)
             cue = llm.action_sound_cue(actions) if actions else llm.sound_cue(text)
         if cue:
-            # ambient mai lung, ca să se poată reda în buclă pe toată durata mesajului
-            st.session_state[f"sfx_{msg_id}"] = voice.sound_effect(cue, duration=12.0)
+            # peisaj sonor bogat, mai lung (until 20s); reține sunetele deja create (cache pe scenă)
+            cache = st.session_state.setdefault("_sfx_cache", {})
+            ckey = " ".join(cue.lower().split())
+            data = cache.get(ckey)
+            if data is None:
+                data = voice.sound_effect(cue, duration=20.0)
+                cache[ckey] = data
+                if len(cache) > 24:
+                    cache.pop(next(iter(cache)))
+            st.session_state[f"sfx_{msg_id}"] = data
             st.session_state[f"sfxcue_{msg_id}"] = cue
     except Exception:  # noqa
         pass
@@ -923,7 +933,9 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
     srcs = ["data:audio/mp3;base64," + base64.b64encode(v).decode() for v in voices]
     srcs_js = json.dumps(srcs)
     vol = max(0.0, min(1.0, int(st.session_state.get("ambient_volume", 25)) / 100.0))
-    vvol = max(0.0, min(1.0, float(voice_vol)))
+    base_v = max(0.0, min(1.0, int(st.session_state.get("voice_volume", 100)) / 100.0))
+    vvol = max(0.0, min(1.0, float(voice_vol) * base_v))
+    spd = max(0.5, min(1.5, float(st.session_state.get("voice_speed", 1.0))))
     amb_html = ""
     if ambient_bytes:
         amb_b64 = base64.b64encode(ambient_bytes).decode()
@@ -951,6 +963,8 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
           function playIdx(idx, tries){{
             if(!v||idx>=srcs.length){{ stopAmb(); return; }}
             v.src=srcs[idx]; v.volume={vvol};
+            try{{ v.preservesPitch=true; v.mozPreservesPitch=true; v.webkitPreservesPitch=true; }}catch(e){{}}
+            v.playbackRate={spd};
             var p=v.play();
             if(p&&p.catch){{p.catch(function(){{ if(tries>0){{setTimeout(function(){{playIdx(idx,tries-1);}},350);}} }});}}
           }}
@@ -1340,6 +1354,43 @@ def _emit_proactive(char, conv_id, kind, tone=None, custom_instr=None):
     return msg["id"]
 
 
+def _emit_wakeup(char, conv_id):
+    """Alarmă blândă: personajul te trezește dimineața cu vocea lui, cald și lin."""
+    hist = db.get_messages(conv_id)
+    instr = (
+        "(E dimineață și e ora la care utilizatorul a cerut să fie trezit. Trezește-l BLÂND și "
+        "cald, cu vocea ta: spune-i „bună dimineața”, invită-l ușor și dulce să se trezească "
+        "(nu brusc, cu un ton liniștitor) și adaugă un gând frumos pentru începutul zilei. "
+        "Maxim 3 propoziții.)"
+    )
+    try:
+        line = llm.get_reply(char, hist, instr, tries=1)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", "⏰ " + line)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if st.session_state.get("ambient_fx"):
+        try:
+            st.session_state[f"sfx_{msg['id']}"] = voice.sound_effect(
+                "gentle soft morning wake ambience, birds chirping softly, warm sunrise room tone",
+                duration=12.0)
+            st.session_state[f"sfxcue_{msg['id']}"] = "dimineață blândă"
+        except Exception:  # noqa
+            pass
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], tone="Voce blândă", **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    elif st.session_state.get(f"sfx_{msg['id']}"):
+        st.session_state["ambient_play_mid"] = msg["id"]
+    return msg["id"]
+
+
 def _emit_memory_recall(char, conv_id):
     """Personajul își amintește din senin de o poză/melodie trimisă cândva."""
     item = db.random_media(char["id"])
@@ -1537,9 +1588,52 @@ MOODS = [
     "protectoare și grijulie", "relaxată și mulțumită",
 ]
 
+# stări speciale de sărbători — schimbă tonul personajului în acele zile
+SPECIAL_MOODS = {
+    "Ajunul Crăciunului": "cuprinsă de magia Ajunului de Crăciun, caldă și emoționată 🎄",
+    "Crăciunul": "plină de spiritul Crăciunului — caldă, sărbătorească și fericită 🎄",
+    "A doua zi de Crăciun": "încă în atmosfera caldă de Crăciun, molcomă și fericită 🎄",
+    "Revelionul": "entuziasmată și sărbătorească, cu gândul la Revelion 🥂",
+    "Anul Nou": "veselă și plină de speranțe pentru noul an ✨",
+    "Ziua Îndrăgostiților": "romantică și tare tandră de Ziua Îndrăgostiților 💛",
+    "Mărțișorul": "primăvăratică, gingașă și veselă de Mărțișor 🌸",
+    "Ziua Femeii": "caldă, admirativă și galantă de Ziua Femeii 💐",
+    "Ziua Copilului": "jucăușă și copilăroasă de Ziua Copilului 🎈",
+    "Moș Nicolae": "jucăușă și plină de surprize de Moș Nicolae 👢",
+    "Ziua Națională a României": "mândră și sărbătorească de Ziua Națională 🇷🇴",
+    "Floriile": "senină și blândă, în atmosfera Floriilor 🌿",
+    "Vinerea Mare": "liniștită, blândă și gânditoare de Vinerea Mare 🕯️",
+    "Paștele": "luminată și liniștită, plină de bucuria Paștelui 🐣",
+    "A doua zi de Paște": "molcomă și fericită, în continuarea Paștelui 🐣",
+    "Rusaliile": "senină și caldă în atmosfera Rusaliilor 🕊️",
+}
+
+
+def _special_mood():
+    """Starea specială de azi (ziua ta sau o sărbătoare), sau '' dacă e o zi obișnuită."""
+    now = _local_now()
+    md = now.strftime("%m-%d")
+    # ziua ta de naștere are prioritate
+    if st.session_state.get("birthday") and st.session_state.get("birthday") == md:
+        return "extrem de fericită și emoționată — azi e ziua ta de naștere! 🎂"
+    if st.session_state.get("holidays_on", True):
+        _yr = now.year
+        if st.session_state.get("_mov_hol_year") != _yr:
+            st.session_state["_mov_hol_year"] = _yr
+            st.session_state["_mov_hol"] = _movable_holidays(_yr)
+        hol = ROMANIAN_HOLIDAYS.get(md) or (st.session_state.get("_mov_hol") or {}).get(md)
+        if hol:
+            return SPECIAL_MOODS.get(
+                hol, f"cuprinsă de atmosfera zilei de {hol}, caldă și sărbătorească 🎉")
+    return ""
+
 
 def _char_mood(char):
-    """Starea de azi a personajului (o alege o dată pe zi, stabilă pentru toată ziua)."""
+    """Starea de azi a personajului. În zile speciale (ziua ta / sărbători) starea se schimbă;
+    altfel alege o stare obișnuită, stabilă pentru toată ziua."""
+    special = _special_mood()
+    if special:
+        return special
     today = _local_now().strftime("%Y-%m-%d")
     key = f"mood_{char['id']}_{today}"
     if key not in st.session_state:
@@ -1568,6 +1662,28 @@ def _emit_recap(char, conv_id):
         except Exception:  # noqa
             pass
     return msg["id"]
+
+
+def _emit_journal(char, conv_id):
+    """Jurnalul zilei — o reflecție caldă a personajului despre ziua voastră, cu voce."""
+    hist = db.get_messages(conv_id)
+    try:
+        line = llm.daily_journal(char, hist)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", "📔 Jurnalul zilei:\n\n" + line)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], tone=char.get("voice_tone"), **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
 
 
 def _emit_sleep_line(char, conv_id, step, total):
@@ -1721,6 +1837,20 @@ def proactive_fragment(char_id, conv_id):
     now_min = now_local.hour * 60 + now_local.minute
     sched = char.get("schedule") or {}
     tone = sched.get("tone")
+
+    # ⏰ alarmă blândă de trezire — prioritate maximă (merge chiar și cu „nu mă deranja")
+    if sched.get("alarm_on"):
+        guard = f"sched_alarm_{conv_id}"
+        if st.session_state.get(guard) != today:
+            delta = now_min - _minutes(sched.get("alarm"), "07:30")
+            if 0 <= delta <= 15:
+                st.session_state[guard] = today
+                if _emit_wakeup(char, conv_id):
+                    st.session_state["notif_sound"] = True
+                    st.rerun(scope="app")
+                return
+            if delta > 15:
+                st.session_state[guard] = today  # ratată pe azi, marchează ca gata
 
     if sched.get("dnd"):
         return  # "nu mă deranja" — no automated messages
@@ -2016,7 +2146,7 @@ def render_create():
         st.session_state.cf_scen = edit_char.get("scenario", "")
         st.session_state.cf_amb = edit_char.get("ambiance", "Neutru")
         st.session_state.cf_vis = edit_char.get("visibility", "private")
-        st.session_state.cf_mode = "Voce existentă"
+        st.session_state.cf_mode = "Voce existentă" if edit_char.get("voice_id") else "🗑️ Fără voce (doar text)"
         st.session_state.cf_stab = float(edit_char.get("voice_stability", 0.5))
         st.session_state.cf_sim = float(edit_char.get("voice_similarity", 0.75))
         st.session_state.cf_style = float(edit_char.get("voice_style", 0.0))
@@ -2114,7 +2244,7 @@ def render_create():
 
     mode = st.radio(
         "Sursă voce",
-        ["Voce existentă", "Clonează o voce (upload sample)"],
+        ["Voce existentă", "Clonează o voce (upload sample)", "🗑️ Fără voce (doar text)"],
         horizontal=True,
         label_visibility="collapsed",
         key="cf_mode",
@@ -2145,6 +2275,9 @@ def render_create():
                 st.audio(st.session_state[f"sample_{chosen_voice_id}"], format="audio/mp3")
         else:
             st.info("Nu există voci disponibile momentan.")
+    elif mode.startswith("🗑️"):
+        st.info("🔇 Personajul va comunica DOAR prin text, fără voce. "
+                "Poți adăuga oricând o voce editând personajul.")
     else:
         clone_name = st.text_input(
             "Nume voce clonată", placeholder="ex. Vocea lui Marlow", key="cf_clone_name"
@@ -2173,7 +2306,9 @@ def render_create():
             return
 
         voice_id, voice_name = chosen_voice_id, chosen_voice_name
-        if mode.startswith("Clonează"):
+        if mode.startswith("🗑️"):
+            voice_id, voice_name = None, None
+        elif mode.startswith("Clonează"):
             if not clone_file or not (clone_name or "").strip():
                 st.error("Pentru clonare ai nevoie de un nume și un fișier audio.")
                 return
@@ -2542,6 +2677,7 @@ def render_chat(char):
                     char, [],
                     "(Utilizatorul tocmai a deschis conversația. Salută-l scurt și cald, "
                     "în personaj, și invită-l să înceapă discuția. Maxim 2 propoziții.)",
+                    tries=1,
                 )
             except Exception:  # noqa
                 greeting = None
@@ -2664,8 +2800,26 @@ def render_chat(char):
         if _sel_tone != _cur_tone:
             db.update_character(char["id"], {"voice_tone": _sel_tone})
             st.rerun()
+        # 🔊 probă la ton — auzi o mostră scurtă cu vocea în tonul ales
+        if char.get("voice_id"):
+            if st.button("🔊 Ascultă proba de ton", key=f"tone_prev_btn_{char['id']}",
+                         use_container_width=True,
+                         help="Auzi o mostră scurtă cu vocea în tonul ales, înainte s-o folosești"):
+                with st.spinner("Generez o mostră..."):
+                    try:
+                        st.session_state[f"toneprev_{char['id']}"] = voice.text_to_speech(
+                            f"Bună, sunt {char['name']}. Așa sună vocea mea acum. 😊",
+                            char["voice_id"], tone=char.get("voice_tone"), **_tts_kwargs(char))
+                        st.session_state[f"toneprev_play_{char['id']}"] = True
+                    except Exception:  # noqa
+                        st.warning("Nu am putut genera mostra acum.")
+            _tp = st.session_state.get(f"toneprev_{char['id']}")
+            if _tp:
+                st.audio(_tp, format="audio/mp3")
+                if st.session_state.pop(f"toneprev_play_{char['id']}", False):
+                    _play_voice_ambient([_tp], None, "toneprev_" + char["id"][:6])
 
-        if len(history) >= 3:
+        if len(history) >= 2:
             if st.button("🗓️ Ce am vorbit data trecută", key=f"recap_{active_conv}",
                          use_container_width=True):
                 with st.spinner(f"{char['name']} își amintește..."):
@@ -2675,18 +2829,67 @@ def render_chat(char):
                     st.rerun()
                 else:
                     st.info("Nu am putut face rezumatul acum. Mai încearcă puțin mai târziu.")
+            if st.button("📔 Jurnalul zilei", key=f"journal_{active_conv}",
+                         use_container_width=True,
+                         help="Personajul scrie o reflecție caldă, cu voce, despre ziua voastră"):
+                with st.spinner(f"{char['name']} scrie în jurnal..."):
+                    _jok = _emit_journal(char, active_conv)
+                if _jok:
+                    st.session_state["notif_sound"] = True
+                    st.rerun()
+                else:
+                    st.info("Nu am putut scrie jurnalul acum. Mai încearcă puțin mai târziu.")
 
         if not st.session_state.get("sleep_mode"):
+            _sleep_opts = [3, 5, 8, 10, 15, 20, 30, 45]
+            _cur_min = char.get("sleep_minutes") or st.session_state.get("sleep_minutes", 8)
+            _mins = st.selectbox(
+                "⏱️ Se oprește singur după (minute)",
+                _sleep_opts,
+                index=_sleep_opts.index(_cur_min) if _cur_min in _sleep_opts else 2,
+                key=f"sleep_min_{active_conv}",
+                help="După câte minute se oprește singur modul „Adoarme cu mine”. Se ține minte "
+                     "pentru acest personaj.",
+            )
+            st.session_state["sleep_minutes"] = _mins
+            if _mins != (char.get("sleep_minutes") or 8):
+                db.update_character(char["id"], {"sleep_minutes": _mins})
             if st.button("😴 Adoarme cu mine", key=f"sleep_start_{active_conv}",
                          use_container_width=True):
                 st.session_state["sleep_mode"] = {
-                    "conv": active_conv, "step": 0, "total": 10, "last": 0,
+                    "conv": active_conv, "step": 0,
+                    "total": max(2, round(_mins * 60 / 40)), "last": 0,
                 }
                 st.rerun()
             st.caption(f"{char['name']} îți vorbește tot mai blând, cu fundal liniștitor, "
-                       "până adormi (se oprește singur după un timp).")
+                       f"până adormi (se oprește singur după ~{_mins} min).")
         else:
             st.caption("😴 Modul de somn e pornit — butonul mare de oprire e mai jos.")
+
+        # ⏰ alarmă blândă de trezire — personajul te trezește dimineața cu vocea lui
+        st.markdown("---")
+        _asched = char.get("schedule") or {}
+        _alarm_on = st.toggle(
+            "⏰ Alarmă blândă de trezire",
+            value=_asched.get("alarm_on", False),
+            key=f"alarm_on_{char['id']}",
+            help="Personajul te trezește dimineața cu vocea lui, la ora aleasă "
+                 "(funcționează cât timp aplicația e deschisă).",
+        )
+        _alarm_t = st.time_input(
+            "Ora de trezire",
+            value=_parse_time(_asched.get("alarm"), "07:30"),
+            key=f"alarm_t_{char['id']}",
+        )
+        _new_alarm = _alarm_t.strftime("%H:%M")
+        if _alarm_on != _asched.get("alarm_on", False) or _new_alarm != (_asched.get("alarm") or "07:30"):
+            _merged = dict(_asched)
+            _merged["alarm_on"] = _alarm_on
+            _merged["alarm"] = _new_alarm
+            db.update_character(char["id"], {"schedule": _merged})
+        if _alarm_on:
+            st.caption(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, "
+                       "cât timp aplicația e deschisă.")
 
     # buton de OPRIRE mereu vizibil (în afara expanderului) cât timp «Adoarme cu mine» e activ
     if st.session_state.get("sleep_mode"):
@@ -2925,6 +3128,12 @@ def render_chat(char):
         prompt = st.session_state.pop("pending_prompt")
 
     if prompt:
+        # persistă IMEDIAT mesajul utilizatorului (înainte de apelul LLM) ca să NU se piardă
+        # la o deconectare / eroare temporară; astfel istoricul crește sigur.
+        db.add_message(active_conv, "user", prompt, audio_b64=user_audio)
+        cur = titles.get(active_conv, "")
+        if cur.startswith("Conversație"):
+            db.rename_conversation(active_conv, prompt.strip()[:32])
         with st.chat_message("user", avatar="🧑"):
             if user_audio:
                 st.caption("🎤 Mesaj vocal")
@@ -2968,13 +3177,8 @@ def render_chat(char):
         if parts:
             reply = " ".join(parts)
             haptic(25)
-            db.add_message(active_conv, "user", prompt, audio_b64=user_audio)
             msgs = [db.add_message(active_conv, "assistant", p) for p in parts]
             st.session_state["notif_sound"] = True
-            # auto-title new conversations from first user message
-            cur = titles.get(active_conv, "")
-            if cur.startswith("Conversație"):
-                db.rename_conversation(active_conv, prompt.strip()[:32])
             # fundal ambiental pentru toată rafala (pe baza întregului text)
             if st.session_state.get("ambient_fx"):
                 with st.spinner("Creez ambianța..."):
@@ -3118,7 +3322,8 @@ def render_call(char):
         _ab = st.session_state.get(f"audio_{aid}")
         if _ab:
             if st.session_state.get("ambient_fx"):
-                maybe_ambient(char, aid, last_assistant["content"])  # fundal continuu potrivit locului
+                with st.spinner("Pregătesc fundalul sonor..."):
+                    maybe_ambient(char, aid, last_assistant["content"])  # fundal continuu potrivit locului
             # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
             _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid)
             st.audio(_ab, format="audio/mp3")  # control de reascultare (fără autoplay dublu)
@@ -3931,6 +4136,23 @@ def render_profil():
                 0, 100, int(st.session_state.get("ambient_volume", 25)),
                 help="Cât de tare se aude sunetul de fundal sub vocea personajului",
                 key="ambient_volume_slider",
+            )
+            st.session_state.voice_volume = st.slider(
+                "🔊 Volum voce",
+                0, 100, int(st.session_state.get("voice_volume", 100)),
+                help="Cât de tare se aude vocea personajului (separat de fundal)",
+                key="voice_volume_slider",
+            )
+            _spd_opts = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+            _csp = float(st.session_state.get("voice_speed", 1.0))
+            st.session_state.voice_speed = st.select_slider(
+                "🏃 Viteza vocii",
+                options=_spd_opts,
+                value=_csp if _csp in _spd_opts else 1.0,
+                format_func=lambda s: ("normal" if s == 1.0 else
+                                       (f"{s:g}× mai rar" if s < 1 else f"{s:g}× mai rapid")),
+                help="Cât de repede vorbește personajul",
+                key="voice_speed_slider",
             )
             st.session_state.web_search = st.toggle(
                 "🌐 Căutare web",
