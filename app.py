@@ -2,10 +2,13 @@
 import base64
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
 from datetime import datetime, timezone
+
+_log = logging.getLogger("persona")
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -2763,6 +2766,48 @@ def render_chat(char):
                 if ap:
                     st.session_state["ambient_play_mid"] = None
 
+    # 🔄 „Încearcă din nou" — dacă ultimul mesaj e al utilizatorului și n-a primit răspuns
+    # (generarea a eșuat), oferă un buton care regenerează răspunsul, fără a rescrie mesajul.
+    if history and history[-1]["role"] == "user":
+        st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
+        if st.button("🔄 Încearcă din nou", key=f"regen_{active_conv}",
+                     use_container_width=True, type="primary"):
+            _last = history[-1]
+            _hist = history[:-1]
+            _prompt = _last.get("content") or ""
+            _wi = ""
+            if st.session_state.get("web_search"):
+                try:
+                    _wi = llm.web_lookup(_prompt)
+                except Exception:  # noqa
+                    _wi = ""
+            with st.spinner(f"{char['name']} încearcă din nou..."):
+                try:
+                    _parts = llm.burst_reply(char, _hist, _prompt, web_info=_wi)
+                except Exception:  # noqa
+                    _log.exception("burst_reply failed (retry button)")
+                    _parts = []
+            if not _parts:
+                st.error("Tot nu a mers. Mai încearcă în câteva secunde. 💛")
+            else:
+                _reply = " ".join(_parts)
+                _new = [db.add_message(active_conv, "assistant", p) for p in _parts]
+                st.session_state["notif_sound"] = True
+                if st.session_state.get("ambient_fx"):
+                    maybe_ambient(char, _new[0]["id"], _reply)
+                if st.session_state.get("auto_play") and char.get("voice_id"):
+                    for _m in _new:
+                        try:
+                            st.session_state[f"audio_{_m['id']}"] = voice.text_to_speech(
+                                _m["content"], char["voice_id"], **tts_kwargs)
+                        except Exception:  # noqa
+                            pass
+                    st.session_state["autoplay_burst"] = {
+                        "ids": [_m["id"] for _m in _new],
+                        "uid": "burst_" + _new[-1]["id"][:8],
+                    }
+                st.rerun()
+
     # redare în rafală: mai multe voci una după alta, cu fundal ambiental continuu sub ele
     _burst = st.session_state.pop("autoplay_burst", None)
     if _burst and char.get("voice_id"):
@@ -3204,11 +3249,13 @@ def render_chat(char):
         try:
             parts = llm.burst_reply(char, history, prompt, web_info=web_info)
         except Exception:  # noqa
+            _log.exception("burst_reply failed (chat send)")
             parts = []
         gen_ph.empty()
         if not parts:
-            with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
-                st.error("Ne cerem scuze, avem probleme tehnice și le vom rezolva.")
+            # generarea a eșuat: mesajul userului rămâne salvat → reîncărcăm ca să apară
+            # butonul „🔄 Încearcă din nou" (de sub mesaje), în loc de o eroare trecătoare.
+            st.rerun()
         else:
             # bulele apar UNA CÂTE UNA, cu o mică pauză + „scrie..." între ele (ca un om real)
             for _i, _p in enumerate(parts):
