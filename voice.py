@@ -116,9 +116,22 @@ def clone_voice(name, file_bytes, filename, description=""):
     return voice.voice_id
 
 
-def text_to_speech(text, voice_id, stability=0.5, similarity_boost=0.75, style=0.0, expressive=True):
+TONE_TAGS = {
+    "Șoaptă": "[whispers] ",
+    "Voce de somn": "[whispering softly] ",
+    "Voce veselă": "[cheerfully] ",
+    "Voce blândă": "[gently] ",
+}
+
+
+def text_to_speech(text, voice_id, stability=0.5, similarity_boost=0.75, style=0.0, expressive=True, tone=None):
     """Generate expressive speech (mp3) using ElevenLabs v3 audio tags."""
     spoken = expressify(text) if expressive else text
+    tag = TONE_TAGS.get(tone or "")
+    if tag:
+        spoken = tag + spoken
+        if tone in ("Șoaptă", "Voce de somn", "Voce blândă"):
+            stability = max(float(stability), 0.7)
     audio = _client.text_to_speech.convert(
         text=spoken,
         voice_id=voice_id,

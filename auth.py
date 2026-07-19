@@ -107,7 +107,8 @@ def reset_password(email, new_password):
 
 def create_session(user_id):
     token = secrets.token_urlsafe(32)
-    db.create_session(token, user_id, expires_days=30)
+    # Sesiune permanentă (~10 ani) ca utilizatorul să rămână conectat.
+    db.create_session(token, user_id, expires_days=3650)
     return token
 
 

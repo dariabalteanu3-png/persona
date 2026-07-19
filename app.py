@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from datetime import datetime, timezone
 
 import streamlit as st
@@ -275,6 +276,7 @@ st.session_state.setdefault("autoplay_mid", None)
 st.session_state.setdefault("pending_prompt", None)
 st.session_state.setdefault("pending_voice", None)
 st.session_state.setdefault("ambient_fx", True)
+st.session_state.setdefault("ambient_volume", 25)
 st.session_state.setdefault("call_muted", False)
 st.session_state.setdefault("sound_theme", "iPhone")
 st.session_state.setdefault("notif_volume", 70)
@@ -836,18 +838,26 @@ def avatar_html(char, size=56, radius=14):
     return f'<span style="font-size:{int(size * 0.62)}px;line-height:1">{char.get("avatar", "🎭")}</span>'
 
 
-def maybe_ambient(msg_id, text):
-    """Generate + cache an ambient sound effect matching the reply (if any)."""
+def maybe_ambient(char, msg_id, text):
+    """Generate + cache a CONTINUOUS ambient sound bed matching the scene (if any)."""
     if not st.session_state.get("ambient_fx"):
         return
     if st.session_state.get(f"sfxdone_{msg_id}"):
         return
     st.session_state[f"sfxdone_{msg_id}"] = True
     try:
-        actions = voice.extract_actions(text)
-        cue = llm.action_sound_cue(actions) if actions else llm.sound_cue(text)
+        cue = ""
+        if hasattr(llm, "ambient_cue"):
+            try:
+                cue = llm.ambient_cue(char, text)
+            except Exception:  # noqa
+                cue = ""
+        if not cue:
+            actions = voice.extract_actions(text)
+            cue = llm.action_sound_cue(actions) if actions else llm.sound_cue(text)
         if cue:
-            st.session_state[f"sfx_{msg_id}"] = voice.sound_effect(cue, duration=6.0)
+            # ambient mai lung, ca să se poată reda în buclă pe toată durata mesajului
+            st.session_state[f"sfx_{msg_id}"] = voice.sound_effect(cue, duration=12.0)
             st.session_state[f"sfxcue_{msg_id}"] = cue
     except Exception:  # noqa
         pass
@@ -903,6 +913,57 @@ def _autoplay_voice(audio_bytes, uid):
         ''',
         height=0,
     )
+
+def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
+    """Redă una sau mai multe voci una după alta, cu un fundal ambiental (buclă) care
+    se aude pe TOATĂ durata și se oprește când se termină ultima voce. Fiabil pe mobil."""
+    voices = [v for v in (voices or []) if v]
+    if not voices and not ambient_bytes:
+        return
+    srcs = ["data:audio/mp3;base64," + base64.b64encode(v).decode() for v in voices]
+    srcs_js = json.dumps(srcs)
+    vol = max(0.0, min(1.0, int(st.session_state.get("ambient_volume", 25)) / 100.0))
+    vvol = max(0.0, min(1.0, float(voice_vol)))
+    amb_html = ""
+    if ambient_bytes:
+        amb_b64 = base64.b64encode(ambient_bytes).decode()
+        amb_html = (
+            f'<audio id="amb_{uid}" loop preload="auto">'
+            f'<source src="data:audio/mp3;base64,{amb_b64}" type="audio/mp3"></audio>'
+        )
+    components.html(
+        f'''
+        <audio id="v_{uid}" playsinline preload="auto"></audio>
+        {amb_html}
+        <script>
+        (function(){{
+          var srcs={srcs_js};
+          var v=document.getElementById("v_{uid}");
+          var amb=document.getElementById("amb_{uid}");
+          function stopAmb(){{ if(amb){{ try{{amb.pause();}}catch(e){{}} }} }}
+          function playAmb(n){{
+            if(!amb){{return;}}
+            amb.volume={vol};
+            var p=amb.play();
+            if(p&&p.catch){{p.catch(function(){{ if(n>0){{setTimeout(function(){{playAmb(n-1);}},350);}} }});}}
+          }}
+          var i=0;
+          function playIdx(idx, tries){{
+            if(!v||idx>=srcs.length){{ stopAmb(); return; }}
+            v.src=srcs[idx]; v.volume={vvol};
+            var p=v.play();
+            if(p&&p.catch){{p.catch(function(){{ if(tries>0){{setTimeout(function(){{playIdx(idx,tries-1);}},350);}} }});}}
+          }}
+          if(v){{ v.addEventListener("ended", function(){{ i++; playIdx(i,4); }}); }}
+          playAmb(6);
+          if(srcs.length){{ playIdx(0,6); }}
+        }})();
+        </script>
+        ''',
+        height=0,
+    )
+
+
 
 
 def _request_notify_permission_js():
@@ -1468,6 +1529,110 @@ def _emit_letter(char, conv_id):
     if char.get("voice_id"):
         st.session_state["_gen_voice_for"] = msg["id"]  # vocea se generează după ce textul e afișat
     return msg["id"]
+
+
+MOODS = [
+    "veselă și energică", "gânditoare și calmă", "cu dor de tine", "jucăușă și hazlie",
+    "romantică și tandră", "nostalgică și visătoare", "curioasă și plină de întrebări",
+    "protectoare și grijulie", "relaxată și mulțumită",
+]
+
+
+def _char_mood(char):
+    """Starea de azi a personajului (o alege o dată pe zi, stabilă pentru toată ziua)."""
+    today = _local_now().strftime("%Y-%m-%d")
+    key = f"mood_{char['id']}_{today}"
+    if key not in st.session_state:
+        seed = f"{char['id']}-{today}".encode("utf-8")
+        idx = int(hashlib.md5(seed).hexdigest(), 16) % len(MOODS)
+        st.session_state[key] = MOODS[idx]
+    return st.session_state[key]
+
+
+def _emit_recap(char, conv_id):
+    """Rezumat cald al conversațiilor recente («ce am vorbit data trecută»), cu voce."""
+    hist = db.get_messages(conv_id)
+    try:
+        line = llm.recap_recent(char, hist)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", "🗓️ Ce am vorbit data trecută:\n\n" + line)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], tone=char.get("voice_tone"), **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    return msg["id"]
+
+
+def _emit_sleep_line(char, conv_id, step, total):
+    """O replică din ce în ce mai blândă pentru «Adoarme cu mine» (voce de somn, tot mai încet)."""
+    hist = db.get_messages(conv_id)
+    try:
+        line = llm.sleep_whisper(char, hist, step, total)
+    except Exception:  # noqa
+        return None
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", line)
+    st.session_state["_pending_notify"] = (char["name"], line)
+    # fundal liniștitor + voce de somn, volum descrescător pe măsură ce te apropii de somn
+    if st.session_state.get("ambient_fx"):
+        try:
+            st.session_state[f"sfx_{msg['id']}"] = voice.sound_effect(
+                "very soft calming sleep ambience, gentle warm room tone", duration=12.0)
+            st.session_state[f"sfxcue_{msg['id']}"] = "liniște de somn"
+        except Exception:  # noqa
+            pass
+    # volum voce descrescător pe măsură ce te apropii de somn: 0.9 -> 0.4
+    vvol = max(0.4, 0.9 - step * 0.08)
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], tone="Voce de somn", **_tts_kwargs(char))
+            st.session_state[f"sleepvvol_{msg['id']}"] = vvol
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
+    elif st.session_state.get(f"sfx_{msg['id']}"):
+        st.session_state["ambient_play_mid"] = msg["id"]
+    return msg["id"]
+
+
+@st.fragment(run_every=8)
+def sleep_fragment(char_id, conv_id):
+    """Cât timp «Adoarme cu mine» e activ, personajul îți șoptește câte o replică blândă
+    la fiecare ~40s, tot mai încet, până la un număr de pași sau până oprești tu."""
+    sm = st.session_state.get("sleep_mode")
+    if not sm or sm.get("conv") != conv_id:
+        return
+    char = db.get_character(char_id)
+    if not char:
+        return
+    total = int(sm.get("total", 10))
+    step = int(sm.get("step", 0))
+    now = time.time()
+    # prima replică imediat, apoi la fiecare ~40s
+    if now - sm.get("last", 0) < (0 if step == 0 else 40):
+        return
+    if step >= total:
+        st.session_state.pop("sleep_mode", None)
+        return
+    sm["step"] = step + 1
+    sm["last"] = now
+    st.session_state["sleep_mode"] = sm
+    mid = _emit_sleep_line(char, conv_id, step, total)
+    if sm["step"] >= total:
+        st.session_state.pop("sleep_mode", None)
+    if mid:
+        # re-randează întreaga pagină ca noua replică (bulă + voce de somn) să apară imediat
+        st.rerun(scope="app")
+
 
 
 def _save_story_theme(char, theme):
@@ -2360,6 +2525,12 @@ def render_chat(char):
         similarity_boost=char.get("voice_similarity", 0.75),
         style=char.get("voice_style", 0.0),
     )
+    # 🎭 dispoziția de azi a personajului (o alege o dată pe zi) — influențează răspunsurile
+    char["_mood_today"] = _char_mood(char)
+    # 🎨 tonul vocii salvat pe personaj (șoaptă / somn / veselă...) — se ține minte
+    _tone = char.get("voice_tone") or "Normal"
+    if _tone and _tone != "Normal":
+        tts_kwargs["tone"] = _tone
 
     history = db.get_messages(active_conv)
     if st.session_state.pop("notif_sound", False):
@@ -2428,7 +2599,13 @@ def render_chat(char):
                         st.error(f"Redarea vocii a eșuat: {e}")
                 if st.session_state.get(f"audio_{mid}"):
                     if st.session_state.get("autoplay_mid") == mid:
-                        _autoplay_voice(st.session_state[f"audio_{mid}"], mid)  # redare fiabilă pe telefon
+                        # redare fiabilă pe telefon + fundal ambiental sub voce (dacă există)
+                        _play_voice_ambient(
+                            [st.session_state[f"audio_{mid}"]],
+                            st.session_state.get(f"sfx_{mid}"),
+                            mid,
+                            voice_vol=st.session_state.get(f"sleepvvol_{mid}", 1.0),
+                        )
                         st.session_state["autoplay_mid"] = None
                     st.audio(st.session_state[f"audio_{mid}"], format="audio/mp3")
                     st.download_button(
@@ -2445,6 +2622,13 @@ def render_chat(char):
                 st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/mp3", autoplay=ap)
                 if ap:
                     st.session_state["ambient_play_mid"] = None
+
+    # redare în rafală: mai multe voci una după alta, cu fundal ambiental continuu sub ele
+    _burst = st.session_state.pop("autoplay_burst", None)
+    if _burst and char.get("voice_id"):
+        _voices = [st.session_state.get(f"audio_{i}") for i in _burst["ids"]]
+        _amb = st.session_state.get(f"sfx_{_burst['ids'][0]}")
+        _play_voice_ambient(_voices, _amb, _burst["uid"])
 
     # voce amânată pentru mesajele lungi (poveste/scrisoare): textul apare imediat, vocea vine după
     _gv = st.session_state.pop("_gen_voice_for", None)
@@ -2464,8 +2648,70 @@ def render_chat(char):
     proactive_fragment(char["id"], active_conv)
     st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
+    # 🎭 dispoziția de azi + 🎨 tonul vocii + 🗓️ recap + 😴 adoarme cu mine
+    st.caption(f"🎭 Azi {char['name']} e {char.get('_mood_today', '')}.")
+    with st.expander("🎨 Vocea, 🗓️ ce am vorbit & 😴 adormit"):
+        _tone_opts = ["Normal", "Voce blândă", "Șoaptă", "Voce de somn", "Voce veselă"]
+        _cur_tone = char.get("voice_tone") or "Normal"
+        _sel_tone = st.selectbox(
+            "🎨 Tonul vocii",
+            _tone_opts,
+            index=_tone_opts.index(_cur_tone) if _cur_tone in _tone_opts else 0,
+            key=f"tone_sel_{char['id']}",
+            help="Cum sună vocea personajului: normal, blând, în șoaptă, somnoros sau vesel. "
+                 "Se ține minte pentru acest personaj.",
+        )
+        if _sel_tone != _cur_tone:
+            db.update_character(char["id"], {"voice_tone": _sel_tone})
+            st.rerun()
+
+        if len(history) >= 3:
+            if st.button("🗓️ Ce am vorbit data trecută", key=f"recap_{active_conv}",
+                         use_container_width=True):
+                with st.spinner(f"{char['name']} își amintește..."):
+                    _ok = _emit_recap(char, active_conv)
+                if _ok:
+                    st.session_state["notif_sound"] = True
+                    st.rerun()
+                else:
+                    st.info("Nu am putut face rezumatul acum. Mai încearcă puțin mai târziu.")
+
+        if not st.session_state.get("sleep_mode"):
+            if st.button("😴 Adoarme cu mine", key=f"sleep_start_{active_conv}",
+                         use_container_width=True):
+                st.session_state["sleep_mode"] = {
+                    "conv": active_conv, "step": 0, "total": 10, "last": 0,
+                }
+                st.rerun()
+            st.caption(f"{char['name']} îți vorbește tot mai blând, cu fundal liniștitor, "
+                       "până adormi (se oprește singur după un timp).")
+        else:
+            st.caption("😴 Modul de somn e pornit — butonul mare de oprire e mai jos.")
+
+    # buton de OPRIRE mereu vizibil (în afara expanderului) cât timp «Adoarme cu mine» e activ
+    if st.session_state.get("sleep_mode"):
+        st.info("😴 Modul „Adoarme cu mine” e pornit — ascultă și lasă-te purtat spre somn.")
+        if st.button("🛑 Oprește (m-am trezit)", key=f"sleep_stop_{active_conv}",
+                     use_container_width=True, type="primary"):
+            st.session_state.pop("sleep_mode", None)
+            st.rerun()
+
+    # rulează „Adoarme cu mine" (șoapte periodice, tot mai încet)
+    sleep_fragment(char["id"], active_conv)
+
     # ---- talk instead of type (hands-free voice) ----
     st.markdown(f"### 🎤 Vorbește cu {char['name']} (în loc să scrii)")
+    _cont = st.toggle(
+        "🔄 Conversație continuă (mâini libere)",
+        value=st.session_state.get(f"cont_{char['id']}", False),
+        key=f"cont_toggle_{char['id']}",
+        help="După ce personajul termină de vorbit, microfonul e gata imediat — apeși o dată "
+             "și continui să vorbești, fără să scrii.",
+    )
+    st.session_state[f"cont_{char['id']}"] = _cont
+    if _cont:
+        st.caption("🎤 E rândul tău — apasă microfonul și spune mai departe. "
+                   f"{char['name']} îți răspunde imediat cu vocea și microfonul rămâne pregătit.")
     if char.get("voice_id"):
         st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea. "
                    f"{char['name']} îți răspunde imediat și vei auzi răspunsul cu vocea lui — "
@@ -2687,51 +2933,71 @@ def render_chat(char):
         haptic(15)
         play_sound("send", char.get("notif_theme"))
         reply = None
-        with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
-            typing = st.empty()
-            typing.markdown(TYPING_HTML, unsafe_allow_html=True)
-            web_info = ""
-            if st.session_state.get("web_search"):
-                try:
-                    web_info = llm.web_lookup(prompt)
-                except Exception:  # noqa
-                    web_info = ""
-
-            def _typing_stream():
-                cleared = False
-                for chunk in llm.stream_reply(char, history, prompt, web_info=web_info):
-                    if not cleared:
-                        typing.empty()
-                        cleared = True
-                    yield chunk
-
+        parts = []
+        # generăm răspunsul (indicator „scrie...")
+        gen_ph = st.empty()
+        with gen_ph.container():
+            with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
+                st.markdown(TYPING_HTML, unsafe_allow_html=True)
+        web_info = ""
+        if st.session_state.get("web_search"):
             try:
-                reply = st.write_stream(_typing_stream())
+                web_info = llm.web_lookup(prompt)
             except Exception:  # noqa
-                typing.empty()
+                web_info = ""
+        try:
+            parts = llm.burst_reply(char, history, prompt, web_info=web_info)
+        except Exception:  # noqa
+            parts = []
+        gen_ph.empty()
+        if not parts:
+            with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
                 st.error("Ne cerem scuze, avem probleme tehnice și le vom rezolva.")
-        if reply:
+        else:
+            # bulele apar UNA CÂTE UNA, cu o mică pauză + „scrie..." între ele (ca un om real)
+            for _i, _p in enumerate(parts):
+                if _i > 0:
+                    _tph = st.empty()
+                    with _tph.container():
+                        with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
+                            st.markdown(TYPING_HTML, unsafe_allow_html=True)
+                    time.sleep(min(1.3, 0.5 + len(_p) / 80.0))
+                    _tph.empty()
+                with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
+                    st.markdown(_p)
+        if parts:
+            reply = " ".join(parts)
             haptic(25)
             db.add_message(active_conv, "user", prompt, audio_b64=user_audio)
-            assistant_msg = db.add_message(active_conv, "assistant", reply)
+            msgs = [db.add_message(active_conv, "assistant", p) for p in parts]
             st.session_state["notif_sound"] = True
             # auto-title new conversations from first user message
             cur = titles.get(active_conv, "")
             if cur.startswith("Conversație"):
                 db.rename_conversation(active_conv, prompt.strip()[:32])
-            if (st.session_state.get("auto_play") or user_audio) and char.get("voice_id"):
-                try:
-                    st.session_state[f"audio_{assistant_msg['id']}"] = voice.text_to_speech(
-                        reply, char["voice_id"], **tts_kwargs
-                    )
-                    st.session_state["autoplay_mid"] = assistant_msg["id"]
-                except Exception:  # noqa
-                    pass
+            # fundal ambiental pentru toată rafala (pe baza întregului text)
             if st.session_state.get("ambient_fx"):
                 with st.spinner("Creez ambianța..."):
-                    maybe_ambient(assistant_msg["id"], reply)
-                if st.session_state.get(f"sfx_{assistant_msg['id']}"):
-                    st.session_state["ambient_play_mid"] = assistant_msg["id"]
+                    maybe_ambient(char, msgs[0]["id"], reply)
+            # voce pentru fiecare mesaj (se redau unul după altul, cu ambient sub ele)
+            did_voice = False
+            if (st.session_state.get("auto_play") or user_audio) and char.get("voice_id"):
+                with st.spinner(f"{char['name']} vorbește..."):
+                    for _m in msgs:
+                        try:
+                            st.session_state[f"audio_{_m['id']}"] = voice.text_to_speech(
+                                _m["content"], char["voice_id"], **tts_kwargs
+                            )
+                        except Exception:  # noqa
+                            pass
+                st.session_state["autoplay_burst"] = {
+                    "ids": [_m["id"] for _m in msgs],
+                    "uid": "burst_" + msgs[-1]["id"][:8],
+                }
+                did_voice = True
+            # dacă nu redăm voce, ambientul pornește singur pe primul mesaj
+            if not did_voice and st.session_state.get(f"sfx_{msgs[0]['id']}"):
+                st.session_state["ambient_play_mid"] = msgs[0]["id"]
             # refresh long-term memory in the background (non-blocking)
             full = db.get_messages(active_conv)
             if len(full) % 6 == 0:
@@ -2851,7 +3117,10 @@ def render_call(char):
         aid = last_assistant["id"]
         _ab = st.session_state.get(f"audio_{aid}")
         if _ab:
-            _autoplay_voice(_ab, aid)          # redare vocală automată (fiabilă pe telefon)
+            if st.session_state.get("ambient_fx"):
+                maybe_ambient(char, aid, last_assistant["content"])  # fundal continuu potrivit locului
+            # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
+            _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid)
             st.audio(_ab, format="audio/mp3")  # control de reascultare (fără autoplay dublu)
 
     st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
@@ -3656,6 +3925,12 @@ def render_profil():
                 value=st.session_state.ambient_fx,
                 help="Redă sunete de fundal potrivite acțiunii (ex: vase, parc, ploaie)",
                 key="ambient_fx_toggle",
+            )
+            st.session_state.ambient_volume = st.slider(
+                "🎚️ Volum fundal (sub voce)",
+                0, 100, int(st.session_state.get("ambient_volume", 25)),
+                help="Cât de tare se aude sunetul de fundal sub vocea personajului",
+                key="ambient_volume_slider",
             )
             st.session_state.web_search = st.toggle(
                 "🌐 Căutare web",

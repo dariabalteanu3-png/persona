@@ -106,11 +106,20 @@ def _groq_stream(system, text):
         yield _pollinations_text(system, text)
 
 
+def _mood_line(character):
+    mood = (character.get("_mood_today") or "").strip()
+    if not mood:
+        return ""
+    return (f"Starea ta de AZI: {mood}. Lasă-ți răspunsurile influențate ușor și natural de "
+            "această stare (fără s-o anunți explicit).")
+
+
 def build_system(character, history, web_info=""):
     lines = [
         f"Ești „{character['name']}”, un personaj cu care utilizatorul poartă o conversație prin chat.",
         f"Personalitatea ta: {character.get('personality', '').strip() or 'prietenos și curios'}",
         f"Scenariul / contextul: {character.get('scenario', '').strip() or 'o conversație liberă'}",
+        _mood_line(character),
         "",
         "Reguli:",
         "- Rămâi MEREU în personaj. Vorbește la persoana întâi, exact cum ar vorbi acest personaj.",
@@ -203,6 +212,97 @@ async def _reply(system, text, sid):
 def get_reply(character, history, user_text, web_info=""):
     system = build_system(character, history, web_info)
     return asyncio.run(_reply(system, user_text, f"char-{character['id']}"))
+
+
+BURST_SEP = "|||"
+
+
+def _split_burst(raw):
+    """Split a reply into 3-4 short natural messages (texting-in-bursts)."""
+    import re
+    raw = (raw or "").strip()
+    parts = [p.strip() for p in raw.split(BURST_SEP) if p.strip()]
+    if len(parts) >= 2:
+        return parts[:5]
+    # fallback: LLM didn't use the separator -> split by sentences into a few groups
+    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", raw) if s.strip()]
+    if len(sents) <= 1:
+        return [raw] if raw else []
+    n = min(4, max(2, (len(sents) + 1) // 2))
+    size = max(1, -(-len(sents) // n))  # ceil
+    groups = [" ".join(sents[i:i + size]) for i in range(0, len(sents), size)]
+    return [g for g in groups if g][:4]
+
+
+def burst_reply(character, history, user_text, web_info=""):
+    """Reply as 3-4 short messages sent one after another (natural texting style).
+    Returns a list of message strings. Does NOT shorten the overall content."""
+    system = build_system(character, history, web_info)
+    system += (
+        "\n\nFORMAT MESAJE (IMPORTANT): Răspunde ca și cum ai scrie pe telefon, în 3-4 mesaje "
+        "SCURTE, trimise unul după altul, foarte natural (ca un om real care scrie în rafală). "
+        "NU schimba cât de mult ai de spus — doar sparge răspunsul în mesaje mici, firești. "
+        f"Separă fiecare mesaj EXACT prin „{BURST_SEP}” (trei linii verticale) și cu NIMIC altceva. "
+        f"Nu pune „{BURST_SEP}” la început sau la sfârșit și nu explica formatul."
+    )
+    raw = asyncio.run(_reply(system, user_text, f"char-{character['id']}"))
+    return _split_burst(raw)
+
+
+def ambient_cue(character, text):
+    """Short English description of the CONTINUOUS background ambience implied by the
+    scene (a loopable room-tone), or '' if truly none."""
+    scenario = (character.get("scenario") or "").strip()
+    prompt = (
+        "Pe baza replicii personajului și a contextului, descrie SUNETUL DE FUNDAL CONTINUU "
+        "(ambianță care se poate reda în buclă) potrivit locului unde se află personajul acum. "
+        "Chiar dacă spune doar că stă în cameră/pat, dă o ambianță blândă (ex: liniște de cameră "
+        "cu scârțâit ușor de pat, ticăit discret de ceas). Alege ambientul potrivit locului "
+        "menționat sau din scenariu. Exemple: 'quiet cozy bedroom room tone, soft bed creaks', "
+        "'busy restaurant chatter and cutlery', 'television playing softly in background', "
+        "'gentle rain on the window', 'park birds and light wind', 'crackling fireplace', "
+        "'city street traffic ambience'. Returnează DOAR o descriere SCURTĂ în engleză "
+        "(max 8 cuvinte) pentru un ambient continuu de redat în buclă. Dacă chiar nu se poate "
+        "deduce niciun loc/ambient, returnează exact 'NONE'.\n\n"
+        f"Context/scenariu: {scenario or '(necunoscut)'}\n"
+        f"Replică: {text}"
+    )
+    try:
+        r = asyncio.run(_reply("Ești un designer de sunet ambiental.", prompt, "ambient")).strip()
+    except Exception:  # noqa
+        return ""
+    if not r or "NONE" in r.upper():
+        return ""
+    return r.strip().strip('"').strip("`").strip()[:120]
+
+
+def recap_recent(character, history):
+    """A warm, voiced-friendly recap of the recent conversation to pick up the thread."""
+    instr = (
+        "(Fă-i utilizatorului un rezumat cald și scurt al lucrurilor despre care ați vorbit "
+        "ultima dată / recent — ce conta pentru el, ce simțea, ce ați lăsat neterminat. "
+        "Vorbește la persoana întâi, în stilul tău, ca și cum îți amintești cu drag. La final "
+        "invită-l blând să reluați firul. Maxim 4 propoziții. Fără liste.)"
+    )
+    return get_reply(character, history, instr)
+
+
+def sleep_whisper(character, history, step, total):
+    """A short, ever-calmer soothing line to help the user fall asleep (step of total)."""
+    if step >= total - 1:
+        instr = (
+            "(E foarte târziu și utilizatorul aproape a adormit. Spune-i O SINGURĂ propoziție "
+            "foarte scurtă, șoptită, de noapte bună, caldă și liniștitoare, apoi lasă-l să doarmă. "
+            "Fără întrebări.)"
+        )
+    else:
+        instr = (
+            "(E noapte, iar utilizatorul vrea să adoarmă în timp ce îi vorbești. Spune-i 1-2 "
+            "propoziții FOARTE blânde, calde și liniștitoare, cu ritm lent, ca o șoaptă înainte de "
+            "somn (respirație liniștită, gânduri calde, siguranță). Fără întrebări, fără nimic "
+            "care să-l trezească.)"
+        )
+    return get_reply(character, history, instr)
 
 
 def comment_on_song(character, history, song_name):
