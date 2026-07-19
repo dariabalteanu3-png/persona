@@ -2905,28 +2905,41 @@ def render_chat(char):
         )
         # gol sau toate cele 7 zile -> stocăm listă goală („în fiecare zi")
         _stored_adays = [] if (not _sel_adays or len(_sel_adays) == 7) else sorted(_adow.index(d) for d in _sel_adays)
+        _snz_opts = [5, 10, 15]
+        _cur_snz = int(_asched.get("snooze_min", 5) or 5)
+        _sel_snz = st.selectbox(
+            "😴 Amânare (când apeși «Încă X minute»)",
+            _snz_opts,
+            index=_snz_opts.index(_cur_snz) if _cur_snz in _snz_opts else 0,
+            format_func=lambda m: f"{m} minute",
+            key=f"alarm_snz_{char['id']}",
+            help="Cât să te mai las să dormi când apeși pe amânare.",
+        )
         if (_alarm_on != _asched.get("alarm_on", False)
                 or _new_alarm != (_asched.get("alarm") or "07:30")
-                or _stored_adays != (_asched.get("alarm_days") or [])):
+                or _stored_adays != (_asched.get("alarm_days") or [])
+                or _sel_snz != _cur_snz):
             _merged = dict(_asched)
             _merged["alarm_on"] = _alarm_on
             _merged["alarm"] = _new_alarm
             _merged["alarm_days"] = _stored_adays
+            _merged["snooze_min"] = _sel_snz
             db.update_character(char["id"], {"schedule": _merged})
         if _alarm_on:
             _when = ("în zilele: " + ", ".join(_adow[i] for i in _stored_adays)) if _stored_adays else "în fiecare zi"
             st.caption(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, {_when} "
-                       "(cât timp aplicația e deschisă). Poți amâna cu «😴 Încă 5 minute».")
+                       f"(cât timp aplicația e deschisă). Poți amâna cu «😴 Încă {_sel_snz} minute».")
 
-    # ⏰ alarmă activă: butoane „încă 5 minute" (amânare) / „m-am trezit"
+    # ⏰ alarmă activă: butoane „încă X minute" (amânare) / „m-am trezit"
     if st.session_state.get(f"alarm_ring_{active_conv}"):
+        _snz_min = int((char.get("schedule") or {}).get("snooze_min", 5) or 5)
         st.info("⏰ Bună dimineața! Te-am trezit cu drag. Vrei să te mai las puțin?")
         _acols = st.columns(2)
-        if _acols[0].button("😴 Încă 5 minute", key=f"alarm_snooze_btn_{active_conv}",
+        if _acols[0].button(f"😴 Încă {_snz_min} minute", key=f"alarm_snooze_btn_{active_conv}",
                             use_container_width=True):
-            st.session_state[f"alarm_snooze_{active_conv}"] = time.time() + 300
+            st.session_state[f"alarm_snooze_{active_conv}"] = time.time() + _snz_min * 60
             st.session_state.pop(f"alarm_ring_{active_conv}", None)
-            st.toast("😴 Bine, te mai trezesc în 5 minute.")
+            st.toast(f"😴 Bine, te mai trezesc în {_snz_min} minute.")
             st.rerun()
         if _acols[1].button("☀️ M-am trezit", key=f"alarm_wake_btn_{active_conv}",
                             use_container_width=True, type="primary"):
