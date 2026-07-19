@@ -3,7 +3,10 @@ import asyncio
 import queue
 import threading
 import time
+import logging
 from pathlib import Path
+
+_log = logging.getLogger("persona")
 
 from dotenv import load_dotenv
 
@@ -93,8 +96,57 @@ def _is_rate_limit(e):
     return "429" in m or "rate limit" in m or "rate_limit" in m or "too many requests" in m
 
 
+# ---- rezervă FIABILĂ: Emergent (Claude/OpenAI) prin endpoint compatibil OpenAI ----
+_EMERGENT_MODEL = os.environ.get("EMERGENT_CHAT_MODEL", "claude-sonnet-4-6")
+_emergent_key_cache = None
+_emergent_client = None
+
+
+def _emergent_key():
+    global _emergent_key_cache
+    if _emergent_key_cache is not None:
+        return _emergent_key_cache or None
+    key = (os.environ.get("EMERGENT_LLM_KEY") or "").strip()
+    if not key:
+        try:
+            import db
+            key = (db.get_config("EMERGENT_LLM_KEY") or "").strip()
+        except Exception:  # noqa
+            key = ""
+    _emergent_key_cache = key
+    return key or None
+
+
+def _emergent_text(system, text):
+    global _emergent_client
+    key = _emergent_key()
+    if not key:
+        raise RuntimeError("no emergent key")
+    if _emergent_client is None:
+        from openai import OpenAI
+        base = os.environ.get("INTEGRATION_PROXY_URL", "https://integrations.emergentagent.com").rstrip("/") + "/llm"
+        _emergent_client = OpenAI(api_key=key, base_url=base)
+    resp = _emergent_client.chat.completions.create(
+        model=_EMERGENT_MODEL, messages=_groq_messages(system, text))
+    content = (resp.choices[0].message.content or "").strip()
+    if not content:
+        raise RuntimeError("empty emergent response")
+    return content
+
+
+def _reliable_fallback(system, text):
+    """Când providerul principal (Groq) eșuează: întâi rezerva FIABILĂ (Emergent, dacă e configurată),
+    apoi rezerva gratuită keyless (Pollinations). Așa chatul nu mai dă „probleme tehnice"."""
+    if _emergent_key():
+        try:
+            return _emergent_text(system, text)
+        except Exception:  # noqa
+            _log.exception("emergent fallback failed")
+    return _pollinations_text(system, text)
+
+
 def _groq_text(system, text):
-    # retry scurt pe limita per-minut (429) înainte de a cădea pe fallback-ul keyless
+    # retry scurt pe limita per-minut (429) înainte de a cădea pe rezervă
     for attempt in range(2):
         try:
             resp = groq_client().chat.completions.create(
@@ -109,7 +161,7 @@ def _groq_text(system, text):
             if _is_rate_limit(e) and attempt == 0:
                 time.sleep(3)
                 continue
-            return _pollinations_text(system, text)  # keyless fallback
+            return _reliable_fallback(system, text)
 
 
 def _groq_stream(system, text):
@@ -127,13 +179,13 @@ def _groq_stream(system, text):
                     got = True
                     yield delta
             if not got:
-                yield _pollinations_text(system, text)
+                yield _reliable_fallback(system, text)
             return
         except Exception as e:  # noqa - Groq failed
             if _is_rate_limit(e) and attempt == 0:
                 time.sleep(3)
                 continue
-            yield _pollinations_text(system, text)  # keyless fallback
+            yield _reliable_fallback(system, text)  # rezervă fiabilă apoi keyless
             return
 
 

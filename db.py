@@ -73,6 +73,32 @@ def _gh_url():
     return f"https://api.github.com/repos/{_GH_REPO}/contents/{_GH_FILE}"
 
 
+_gh_config_cache = None
+
+
+def get_config(name, default=None):
+    """Citește o valoare de configurare: întâi din os.environ (secrets/.env), apoi dintr-un fișier
+    `persona_config.json` din repo-ul privat de date (ca să nu fie nevoie de acces la Secrets).
+    Folosit pentru chei de rezervă (ex: EMERGENT_LLM_KEY) fără a le pune în codul public."""
+    global _gh_config_cache
+    v = os.environ.get(name)
+    if v:
+        return v
+    if not (_GH_TOKEN and _GH_REPO):
+        return default
+    if _gh_config_cache is None:
+        import json as _json
+        import base64 as _b64
+        _gh_config_cache = {}
+        try:
+            res = _gh_api("GET", f"https://api.github.com/repos/{_GH_REPO}/contents/persona_config.json")
+            if res and res.get("content"):
+                _gh_config_cache = _json.loads(_b64.b64decode(res["content"]).decode() or "{}")
+        except Exception:  # noqa
+            _gh_config_cache = {}
+    return _gh_config_cache.get(name, default)
+
+
 def _gh_serialize():
     import json as _json
     out = {c: list(_db[c].find({}, {"_id": 0})) for c in _GH_COLLECTIONS}
