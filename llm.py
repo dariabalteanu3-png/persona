@@ -50,61 +50,91 @@ def _groq_messages(system, text):
 
 
 def _pollinations_text(system, text):
-    """Keyless free fallback (Pollinations) so chat keeps working if Groq fails."""
+    """Keyless free fallback (Pollinations) so chat keeps working if Groq fails.
+    Încearcă mai multe modele/endpointuri, ca să reziste când unul e temporar căzut (502)."""
     import requests
-    payload = {"model": "openai", "messages": _groq_messages(system, text)}
+    msgs = _groq_messages(system, text)
+    models = ["openai", "openai-large", "mistral", "llama"]
     last = None
-    for attempt in range(2):
+    for attempt in range(6):
+        model = models[attempt % len(models)]
         try:
-            if attempt % 2 == 0:
-                r = requests.post("https://text.pollinations.ai/", json=payload, timeout=30)
-                body = (r.text or "").strip()
-                if r.status_code == 200 and body and not body.lstrip().startswith("<"):
-                    return body
-                last = f"base HTTP {r.status_code}"
-            else:
-                r = requests.post("https://text.pollinations.ai/openai", json=payload, timeout=30)
-                if r.status_code == 200:
+            r = requests.post("https://text.pollinations.ai/openai",
+                              json={"model": model, "messages": msgs, "private": True}, timeout=40)
+            if r.status_code == 200:
+                c = ""
+                try:
                     c = (r.json()["choices"][0]["message"]["content"] or "").strip()
-                    if c:
-                        return c
-                last = f"openai HTTP {r.status_code}"
+                except Exception:  # noqa
+                    body = (r.text or "").strip()
+                    if body and not body.lstrip().startswith("<"):
+                        c = body
+                if c:
+                    return c
+            last = f"openai/{model} HTTP {r.status_code}"
         except Exception as e:  # noqa
             last = type(e).__name__
+        time.sleep(1.0)
+    # ultimă încercare: endpoint-ul simplu (text brut)
+    try:
+        r = requests.post("https://text.pollinations.ai/",
+                          json={"model": "openai", "messages": msgs}, timeout=40)
+        body = (r.text or "").strip()
+        if r.status_code == 200 and body and not body.lstrip().startswith("<"):
+            return body
+        last = f"base HTTP {r.status_code}"
+    except Exception as e:  # noqa
+        last = type(e).__name__
     raise RuntimeError(f"pollinations failed: {last}")
 
 
+def _is_rate_limit(e):
+    m = str(e).lower()
+    return "429" in m or "rate limit" in m or "rate_limit" in m or "too many requests" in m
+
+
 def _groq_text(system, text):
-    try:
-        resp = groq_client().chat.completions.create(
-            model=GROQ_TEXT_MODEL,
-            messages=_groq_messages(system, text),
-        )
-        content = (resp.choices[0].message.content or "").strip()
-        if not content:
-            raise RuntimeError("empty groq response")
-        return content
-    except Exception:  # noqa - Groq failed (bad key/model/quota) -> keyless fallback
-        return _pollinations_text(system, text)
+    # retry scurt pe limita per-minut (429) înainte de a cădea pe fallback-ul keyless
+    for attempt in range(2):
+        try:
+            resp = groq_client().chat.completions.create(
+                model=GROQ_TEXT_MODEL,
+                messages=_groq_messages(system, text),
+            )
+            content = (resp.choices[0].message.content or "").strip()
+            if not content:
+                raise RuntimeError("empty groq response")
+            return content
+        except Exception as e:  # noqa - Groq failed (bad key/model/quota)
+            if _is_rate_limit(e) and attempt == 0:
+                time.sleep(3)
+                continue
+            return _pollinations_text(system, text)  # keyless fallback
 
 
 def _groq_stream(system, text):
-    try:
-        stream = groq_client().chat.completions.create(
-            model=GROQ_TEXT_MODEL,
-            messages=_groq_messages(system, text),
-            stream=True,
-        )
-        got = False
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                got = True
-                yield delta
-        if not got:
-            yield _pollinations_text(system, text)
-    except Exception:  # noqa - Groq failed -> keyless fallback (whole reply at once)
-        yield _pollinations_text(system, text)
+    for attempt in range(2):
+        try:
+            stream = groq_client().chat.completions.create(
+                model=GROQ_TEXT_MODEL,
+                messages=_groq_messages(system, text),
+                stream=True,
+            )
+            got = False
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    got = True
+                    yield delta
+            if not got:
+                yield _pollinations_text(system, text)
+            return
+        except Exception as e:  # noqa - Groq failed
+            if _is_rate_limit(e) and attempt == 0:
+                time.sleep(3)
+                continue
+            yield _pollinations_text(system, text)  # keyless fallback
+            return
 
 
 def _mood_line(character):
