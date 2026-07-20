@@ -8,6 +8,28 @@ from pathlib import Path
 
 _log = logging.getLogger("persona")
 
+
+def _run_coro(coro):
+    """Rulează o corutină în siguranță CHIAR DACĂ există deja un event loop care rulează
+    (ex: versiunile noi de Streamlit rulează scriptul într-un loop, unde _run_coro() ar
+    crăpa cu «_run_coro() cannot be called from a running event loop»). Fără acest wrapper,
+    TOATE apelurile LLM eșuau instant pe deploy-ul live."""
+    def _fresh():
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _fresh()  # niciun loop activ -> rulăm direct
+    # există deja un loop activ -> rulăm corutina într-un thread separat cu propriul loop
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_fresh).result()
+
+
 from dotenv import load_dotenv
 
 from provider import (
@@ -264,7 +286,7 @@ def web_lookup(user_text):
         f"Întrebare: {user_text}"
     )
     try:
-        q = asyncio.run(_reply("Ești un router care decide dacă e nevoie de căutare web.", prompt, "websearch")).strip()
+        q = _run_coro(_reply("Ești un router care decide dacă e nevoie de căutare web.", prompt, "websearch")).strip()
     except Exception:  # noqa
         return ""
     if not q or "NONE" in q.upper():
@@ -304,7 +326,7 @@ def _run_reply(system, text, sid, tries=2, smart=False):
     n = max(1, tries)
     for attempt in range(n):
         try:
-            out = asyncio.run(_reply(system, text, sid, smart=smart))
+            out = _run_coro(_reply(system, text, sid, smart=smart))
             if out and out.strip():
                 return out
         except Exception as e:  # noqa
@@ -399,7 +421,7 @@ def ambient_cue(character, text):
         f"Replică: {text}"
     )
     try:
-        r = asyncio.run(_reply("Ești un designer de sunet imersiv, layered.", prompt, "ambient")).strip()
+        r = _run_coro(_reply("Ești un designer de sunet imersiv, layered.", prompt, "ambient")).strip()
     except Exception:  # noqa
         return ""
     if not r or "NONE" in r.upper():
@@ -623,7 +645,7 @@ def _vision_reply(system, text, image_b64, mime, sid):
     chat = LlmChat(api_key=KEY, session_id=sid, system_message=system).with_model(
         "openai", "gpt-4o"
     )
-    return asyncio.run(chat.send_message(
+    return _run_coro(chat.send_message(
         UserMessage(text=text, file_contents=[ImageContent(image_base64=image_b64)])
     ))
 
@@ -670,7 +692,7 @@ def sound_cue(text):
         f"Replică: {text}"
     )
     try:
-        r = asyncio.run(_reply("Ești un designer de sunet.", prompt, "sfx")).strip()
+        r = _run_coro(_reply("Ești un designer de sunet.", prompt, "sfx")).strip()
     except Exception:  # noqa
         return ""
     if not r or "NONE" in r.upper():
@@ -691,7 +713,7 @@ def action_sound_cue(actions):
         "'glass shattering'). Dacă acțiunea nu produce niciun sunet clar, returnează exact 'NONE'."
     )
     try:
-        r = asyncio.run(_reply("Ești un designer de sunet.", prompt, "actsfx")).strip()
+        r = _run_coro(_reply("Ești un designer de sunet.", prompt, "actsfx")).strip()
     except Exception:  # noqa
         return ""
     if not r or "NONE" in r.upper():
@@ -775,7 +797,7 @@ def suggest_replies(character, history):
         return []
     system = build_system(character, history)
     try:
-        raw = asyncio.run(_suggest(system, f"sugg-{character['id']}"))
+        raw = _run_coro(_suggest(system, f"sugg-{character['id']}"))
     except Exception:  # noqa
         return []
     out = []
@@ -801,7 +823,7 @@ def update_memory(character, history, existing_memory):
         f"Memorie existentă:\n{existing_memory or '(goală)'}\n\nConversație recentă:\n{convo}"
     )
     try:
-        return asyncio.run(
+        return _run_coro(
             _reply("Ești un sistem care menține memoria de lungă durată a unui personaj.",
                    prompt, f"mem-{character['id']}")
         ).strip()
@@ -817,7 +839,7 @@ def pick_ambiance(scenario, personality, options):
         "Răspunde DOAR cu un singur cuvânt, exact cum apare în listă."
     )
     try:
-        r = asyncio.run(_reply("Ești un director artistic care alege atmosfera vizuală.", prompt, "amb")).strip()
+        r = _run_coro(_reply("Ești un director artistic care alege atmosfera vizuală.", prompt, "amb")).strip()
     except Exception:  # noqa
         return "Neutru"
     for o in options:
