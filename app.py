@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timezone
 
 _log = logging.getLogger("persona")
+_APP_BUILD = "2026-06-run-coro-v2"
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -2788,6 +2789,21 @@ def render_chat(char):
                 if ap:
                     st.session_state["ambient_play_mid"] = None
 
+    if st.query_params.get("debug") == "1":
+        with st.expander("🐞 Debug", expanded=True):
+            st.write(f"build: {_APP_BUILD} · streamlit: {st.__version__}")
+            _dberr = st.session_state.get("_last_chat_error")
+            if _dberr:
+                st.code(_dberr)
+            if st.button("🧪 Test provider chat", key=f"dbg_test_{active_conv}"):
+                import traceback as _tb2
+                try:
+                    _r = llm.get_reply(char, [], "Spune doar cuvântul: merge.", tries=1)
+                    st.success(f"OK: {(_r or '')[:160]}")
+                except Exception as _e:  # noqa
+                    st.error(repr(_e))
+                    st.code(_tb2.format_exc())
+
     # 🔄 „Încearcă din nou" — dacă ultimul mesaj e al utilizatorului și n-a primit răspuns
     # (generarea a eșuat), oferă un buton care regenerează răspunsul, fără a rescrie mesajul.
     if history and history[-1]["role"] == "user":
@@ -2807,8 +2823,10 @@ def render_chat(char):
                 try:
                     _parts = llm.burst_reply(char, _hist, _prompt, web_info=_wi,
                                              smart=(st.session_state.get("chat_brain") == "smart"))
-                except Exception:  # noqa
+                except Exception as e:  # noqa
                     _log.exception("burst_reply failed (retry button)")
+                    import traceback as _tb
+                    st.session_state["_last_chat_error"] = f"retry: {e!r}\n{_tb.format_exc()}"
                     _parts = []
             if not _parts:
                 st.error("Tot nu a mers. Mai încearcă în câteva secunde. 💛")
@@ -3272,8 +3290,10 @@ def render_chat(char):
         try:
             parts = llm.burst_reply(char, history, prompt, web_info=web_info,
                                      smart=(st.session_state.get("chat_brain") == "smart"))
-        except Exception:  # noqa
+        except Exception as e:  # noqa
             _log.exception("burst_reply failed (chat send)")
+            import traceback as _tb
+            st.session_state["_last_chat_error"] = f"send: {e!r}\n{_tb.format_exc()}"
             parts = []
         gen_ph.empty()
         if not parts:
