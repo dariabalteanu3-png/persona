@@ -280,7 +280,7 @@ st.session_state.setdefault("autoplay_mid", None)
 st.session_state.setdefault("pending_prompt", None)
 st.session_state.setdefault("pending_voice", None)
 st.session_state.setdefault("ambient_fx", True)
-st.session_state.setdefault("ambient_volume", 25)
+st.session_state.setdefault("ambient_volume", 100)
 st.session_state.setdefault("voice_volume", 100)
 st.session_state.setdefault("voice_speed", 1.0)
 st.session_state.setdefault("call_muted", False)
@@ -947,17 +947,31 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
         return
     srcs = ["data:audio/mp3;base64," + base64.b64encode(v).decode() for v in voices]
     srcs_js = json.dumps(srcs)
-    vol = max(0.0, min(1.0, int(st.session_state.get("ambient_volume", 25)) / 100.0))
+    gain = max(0.0, int(st.session_state.get("ambient_volume", 100)) / 100.0)
     base_v = max(0.0, min(1.0, int(st.session_state.get("voice_volume", 100)) / 100.0))
     vvol = max(0.0, min(1.0, float(voice_vol) * base_v))
     spd = max(0.5, min(1.5, float(st.session_state.get("voice_speed", 1.0))))
+    # Fundal mai TARE de 100%: suprapunem mai multe copii ale aceluiași sunet (însumare de
+    # amplitudine) — metodă fiabilă pe telefon, fără Web Audio (care are restricții de autoplay).
     amb_html = ""
-    if ambient_bytes:
+    amb_ids = []
+    amb_vols = []
+    if ambient_bytes and gain > 0:
         amb_b64 = base64.b64encode(ambient_bytes).decode()
-        amb_html = (
-            f'<audio id="amb_{uid}" loop preload="auto">'
-            f'<source src="data:audio/mp3;base64,{amb_b64}" type="audio/mp3"></audio>'
-        )
+        n = max(1, int(gain + 0.999))
+        rem = gain
+        for k in range(n):
+            _v = min(1.0, rem)
+            rem -= _v
+            aid = f"amb_{uid}_{k}"
+            amb_ids.append(aid)
+            amb_vols.append(round(_v, 3))
+            amb_html += (
+                f'<audio id="{aid}" loop preload="auto">'
+                f'<source src="data:audio/mp3;base64,{amb_b64}" type="audio/mp3"></audio>'
+            )
+    amb_ids_js = json.dumps(amb_ids)
+    amb_vols_js = json.dumps(amb_vols)
     components.html(
         f'''
         <audio id="v_{uid}" playsinline preload="auto"></audio>
@@ -966,13 +980,16 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
         (function(){{
           var srcs={srcs_js};
           var v=document.getElementById("v_{uid}");
-          var amb=document.getElementById("amb_{uid}");
-          function stopAmb(){{ if(amb){{ try{{amb.pause();}}catch(e){{}} }} }}
+          var ambIds={amb_ids_js}, ambVols={amb_vols_js};
+          var ambs=ambIds.map(function(id){{return document.getElementById(id);}});
+          function stopAmb(){{ ambs.forEach(function(a){{ if(a){{try{{a.pause();}}catch(e){{}}}} }}); }}
           function playAmb(n){{
-            if(!amb){{return;}}
-            amb.volume={vol};
-            var p=amb.play();
-            if(p&&p.catch){{p.catch(function(){{ if(n>0){{setTimeout(function(){{playAmb(n-1);}},350);}} }});}}
+            ambs.forEach(function(a, idx){{
+              if(!a){{return;}}
+              a.volume=ambVols[idx];
+              var p=a.play();
+              if(p&&p.catch){{p.catch(function(){{ if(n>0){{setTimeout(function(){{ a.play().catch(function(){{}}); }},350);}} }});}}
+            }});
           }}
           var i=0;
           function playIdx(idx, tries){{
@@ -986,6 +1003,7 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
           if(v){{ v.addEventListener("ended", function(){{ i++; playIdx(i,4); }}); }}
           playAmb(6);
           if(srcs.length){{ playIdx(0,6); }}
+          else if(ambs.length){{ setTimeout(stopAmb, 20000); }}
         }})();
         </script>
         ''',
@@ -2754,12 +2772,17 @@ def render_chat(char):
                             st.rerun()
             if m["role"] == "assistant" and char.get("voice_id"):
                 mid = m["id"]
-                if st.button("🔊 Ascultă", key=f"tts_{mid}"):
+                if st.button("🔊 Ascultă (cu fundal)", key=f"tts_{mid}",
+                             help="Reascultă mesajul cu vocea + sunetul de fundal, de câte ori vrei"):
                     try:
-                        with st.spinner("Generez vocea..."):
-                            st.session_state[f"audio_{mid}"] = voice.text_to_speech(
-                                m["content"], char["voice_id"], **tts_kwargs
-                            )
+                        if not st.session_state.get(f"audio_{mid}"):
+                            with st.spinner("Generez vocea..."):
+                                st.session_state[f"audio_{mid}"] = voice.text_to_speech(
+                                    m["content"], char["voice_id"], **tts_kwargs
+                                )
+                        if st.session_state.get("ambient_fx") and not st.session_state.get(f"sfx_{mid}"):
+                            with st.spinner("Pregătesc fundalul..."):
+                                maybe_ambient(char, mid, m["content"])
                         st.session_state["autoplay_mid"] = mid
                     except Exception as e:  # noqa
                         st.error(f"Redarea vocii a eșuat: {e}")
@@ -4289,18 +4312,30 @@ def render_profil():
                 help="Redă sunete de fundal potrivite acțiunii (ex: vase, parc, ploaie)",
                 key="ambient_fx_toggle",
             )
-            st.session_state.ambient_volume = st.slider(
-                "🎚️ Volum fundal (sub voce)",
-                0, 100, int(st.session_state.get("ambient_volume", 25)),
-                help="Cât de tare se aude sunetul de fundal sub vocea personajului",
-                key="ambient_volume_slider",
+            _amb_levels = {"Oprit": 0, "Încet": 50, "Mediu": 100, "Tare": 175,
+                           "Foarte tare": 250, "Maxim": 350}
+            _cur_amb = int(st.session_state.get("ambient_volume", 100))
+            _amb_lbl = min(_amb_levels, key=lambda k: abs(_amb_levels[k] - _cur_amb))
+            _sel_amb = st.selectbox(
+                "🎧 Cât de tare e fundalul (ambianța)",
+                list(_amb_levels.keys()),
+                index=list(_amb_levels.keys()).index(_amb_lbl),
+                key="ambient_volume_sel",
+                help="Alege cât de tare se aude sunetul de fundal sub voce. «Foarte tare» și «Maxim» "
+                     "îl fac mult mai puternic. Butoane clare, fără a fi nevoie să tragi de ceva.",
             )
-            st.session_state.voice_volume = st.slider(
-                "🔊 Volum voce",
-                0, 100, int(st.session_state.get("voice_volume", 100)),
-                help="Cât de tare se aude vocea personajului (separat de fundal)",
-                key="voice_volume_slider",
+            st.session_state.ambient_volume = _amb_levels[_sel_amb]
+            _voi_levels = {"Foarte încet": 40, "Încet": 70, "Normal": 100}
+            _cur_voi = int(st.session_state.get("voice_volume", 100))
+            _voi_lbl = min(_voi_levels, key=lambda k: abs(_voi_levels[k] - _cur_voi))
+            _sel_voi = st.selectbox(
+                "🔊 Cât de tare e vocea",
+                list(_voi_levels.keys()),
+                index=list(_voi_levels.keys()).index(_voi_lbl),
+                key="voice_volume_sel",
+                help="Pune vocea mai încet dacă vrei ca fundalul (ambianța) să se audă mai bine.",
             )
+            st.session_state.voice_volume = _voi_levels[_sel_voi]
             _spd_opts = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
             _csp = float(st.session_state.get("voice_speed", 1.0))
             st.session_state.voice_speed = st.select_slider(
