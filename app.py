@@ -280,6 +280,7 @@ st.session_state.setdefault("autoplay_mid", None)
 st.session_state.setdefault("pending_prompt", None)
 st.session_state.setdefault("pending_voice", None)
 st.session_state.setdefault("ambient_fx", True)
+st.session_state.setdefault("react_voice_on", True)
 st.session_state.setdefault("ambient_volume", 100)
 st.session_state.setdefault("voice_volume", 100)
 st.session_state.setdefault("voice_speed", 1.0)
@@ -567,6 +568,7 @@ _PREF_KEYS = [
     "auto_play", "ambient_fx", "ambient_volume", "voice_volume", "voice_speed",
     "web_search", "chat_brain", "theme_light", "notif_volume", "sound_theme",
     "manual_tz", "notify_on", "absence_on", "absence_min", "birthday", "holidays_on",
+    "react_voice_on",
 ]
 
 
@@ -1461,6 +1463,36 @@ def _emit_wakeup(char, conv_id):
             pass
     elif st.session_state.get(f"sfx_{msg['id']}"):
         st.session_state["ambient_play_mid"] = msg["id"]
+    return msg["id"]
+
+
+def _emit_reaction_voice(char, conv_id, reacted_text, emoji):
+    """La reacția utilizatorului (❤️/😂/👍...), personajul spune o vorbă scurtă, caldă, cu vocea lui."""
+    hist = db.get_messages(conv_id)
+    snippet = (reacted_text or "").strip().replace("\n", " ")
+    if len(snippet) > 160:
+        snippet = snippet[:160] + "…"
+    instr = (
+        f"(Utilizatorul tocmai a pus reacția {emoji} pe acest mesaj: „{snippet}”. "
+        "Răspunde FOARTE scurt — o singură propoziție caldă, în caracter, care recunoaște reacția lui "
+        "(potrivit emoji-ului: bucurie, tandrețe, amuzament, uimire). Maxim ~12 cuvinte, fără întrebări lungi.)"
+    )
+    try:
+        line = llm.get_reply(char, hist, instr, tries=1)
+    except Exception:  # noqa
+        return None
+    line = (line or "").strip()
+    if not line:
+        return None
+    msg = db.add_message(conv_id, "assistant", line)
+    st.session_state["notif_sound"] = True
+    if char.get("voice_id"):
+        try:
+            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
+                line, char["voice_id"], **_tts_kwargs(char))
+            st.session_state["autoplay_mid"] = msg["id"]
+        except Exception:  # noqa
+            pass
     return msg["id"]
 
 
@@ -2851,7 +2883,12 @@ def render_chat(char):
                     _ec = st.columns(len(_emos))
                     for _j, _e in enumerate(_emos):
                         if _ec[_j].button(_e, key=f"react_{_mid}_{_e}", use_container_width=True):
+                            _adding = (_react != _e)
                             db.set_reaction(_mid, "" if _react == _e else _e)
+                            if (_adding and char.get("voice_id")
+                                    and st.session_state.get("react_voice_on", True)):
+                                with st.spinner(f"{char['name']} reacționează..."):
+                                    _emit_reaction_voice(char, active_conv, m.get("content"), _e)
                             st.rerun()
             if m["role"] == "assistant" and char.get("voice_id"):
                 mid = m["id"]
@@ -4407,6 +4444,12 @@ def render_profil():
                 value=st.session_state.auto_play,
                 help="Redă automat răspunsul cu vocea personajului",
                 key="auto_play_toggle",
+            )
+            st.session_state.react_voice_on = st.toggle(
+                "🗣️ Răspuns vocal la reacții",
+                value=st.session_state.get("react_voice_on", True),
+                help="Când pui o reacție (❤️/😂/👍...) pe un mesaj, personajul îți spune o vorbă scurtă cu vocea lui.",
+                key="react_voice_toggle",
             )
             st.session_state.ambient_fx = st.toggle(
                 "🎧 Efecte ambientale",
