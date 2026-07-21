@@ -562,6 +562,46 @@ def _write_notify_params():
         pass
 
 
+# Setări personale salvate permanent în contul utilizatorului (nu doar în URL).
+_PREF_KEYS = [
+    "auto_play", "ambient_fx", "ambient_volume", "voice_volume", "voice_speed",
+    "web_search", "chat_brain", "theme_light", "notif_volume", "sound_theme",
+    "manual_tz", "notify_on", "absence_on", "absence_min", "birthday", "holidays_on",
+]
+
+
+def _restore_prefs():
+    """Încarcă setările salvate ale utilizatorului logat (o singură dată pe sesiune)."""
+    if st.session_state.get("_prefs_restored"):
+        return
+    u = st.session_state.get("auth_user")
+    if not u:
+        return  # doar pentru utilizatorii cu cont; vizitatorii folosesc URL-ul
+    st.session_state._prefs_restored = True
+    try:
+        full = db.get_user_by_id(u["id"]) or {}
+    except Exception:  # noqa
+        full = {}
+    prefs = full.get("prefs") or {}
+    for k in _PREF_KEYS:
+        v = prefs.get(k)
+        if v is not None:
+            st.session_state[k] = v
+
+
+def _save_prefs(uid):
+    """Salvează setările curente în contul utilizatorului (persistente între sesiuni)."""
+    if not uid:
+        return
+    prefs = {k: st.session_state.get(k) for k in _PREF_KEYS}
+    try:
+        db.update_user(uid, {"prefs": prefs})
+        if st.session_state.get("auth_user"):
+            st.session_state.auth_user["prefs"] = prefs
+    except Exception:  # noqa
+        pass
+
+
 def _send_code(email, purpose):
     try:
         code = auth.gen_code(email, purpose)
@@ -1832,6 +1872,47 @@ def _parse_time(hhmm, default="08:00"):
         return _time(h, m)
 
 
+_MONTHS_RO = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
+              "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"]
+
+
+def _time_select(label, key, default="08:00", help=None):
+    """Selectoare accesibile (oră + minut) în locul ceasului de tras. Întoarce 'HH:MM'.
+    Prietenos cu cititorul de ecran — două liste simple, fără widget de ceas."""
+    try:
+        dh, dm = map(int, str(default or "08:00").split(":")[:2])
+    except Exception:  # noqa
+        dh, dm = 8, 0
+    mins = list(range(0, 60, 5))
+    dm = min(mins, key=lambda m: abs(m - dm))
+    st.markdown(f"**{label}**")
+    h = st.selectbox("Ora (0–23)", list(range(24)),
+                     index=dh if 0 <= dh <= 23 else 8,
+                     format_func=lambda x: f"{x:02d}", key=f"{key}_h", help=help)
+    m = st.selectbox("Minutul", mins, index=mins.index(dm),
+                     format_func=lambda x: f"{x:02d}", key=f"{key}_m")
+    return f"{h:02d}:{m:02d}"
+
+
+def _date_select(label, key, default_md=None, help=None):
+    """Selectoare accesibile (zi + lună) în locul calendarului. Întoarce 'MM-DD'.
+    Prietenos cu cititorul de ecran — două liste simple, fără calendar."""
+    dd, mm = 1, 1
+    if default_md:
+        try:
+            mm, dd = map(int, str(default_md).split("-")[:2])
+        except Exception:  # noqa
+            dd, mm = 1, 1
+    st.markdown(f"**{label}**")
+    day = st.selectbox("Ziua", list(range(1, 32)),
+                       index=(dd - 1) if 1 <= dd <= 31 else 0,
+                       key=f"{key}_d", help=help)
+    month = st.selectbox("Luna", list(range(1, 13)),
+                         index=(mm - 1) if 1 <= mm <= 12 else 0,
+                         format_func=lambda x: _MONTHS_RO[x - 1], key=f"{key}_mo")
+    return f"{month:02d}-{day:02d}"
+
+
 def _orthodox_easter(year):
     """Data Paștelui ortodox (calendar gregorian) — algoritmul Meeus (valid 1900–2099)."""
     from datetime import date, timedelta
@@ -2142,6 +2223,7 @@ _restore_tz()
 _restore_sound()
 _restore_brain()
 _restore_notify()
+_restore_prefs()
 user = current_user()
 with st.sidebar:
     st.markdown('<div class="app-logo">🎭 Persona<span class="dot">.</span></div>', unsafe_allow_html=True)
@@ -2566,13 +2648,13 @@ def render_chat(char):
         st.caption(f"Ora locală acum: {_local_now().strftime('%H:%M')}")
         st.caption("Personajul îți scrie automat la orele alese, cât timp aplicația e deschisă.")
         m_on = st.toggle("☀️ Mesaj de dimineață", value=sched.get("morning_on", False), key=f"morn_on_{char['id']}")
-        m_time = st.time_input("Ora dimineața", value=_parse_time(sched.get("morning"), "08:00"), key=f"morn_t_{char['id']}")
+        m_hhmm = _time_select("Ora dimineața", f"morn_t_{char['id']}", sched.get("morning") or "08:00")
         l_on = st.toggle("🍽️ Mesaj de prânz", value=sched.get("lunch_on", False), key=f"lunch_on_{char['id']}")
-        l_time = st.time_input("Ora prânzului", value=_parse_time(sched.get("lunch"), "13:00"), key=f"lunch_t_{char['id']}")
+        l_hhmm = _time_select("Ora prânzului", f"lunch_t_{char['id']}", sched.get("lunch") or "13:00")
         e_on = st.toggle("🌙 Mesaj de seară", value=sched.get("evening_on", False), key=f"eve_on_{char['id']}")
-        e_time = st.time_input("Ora seara", value=_parse_time(sched.get("evening"), "22:00"), key=f"eve_t_{char['id']}")
+        e_hhmm = _time_select("Ora seara", f"eve_t_{char['id']}", sched.get("evening") or "22:00")
         s_on = st.toggle("📋 Rezumat de seară (ce ați vorbit azi)", value=sched.get("summary_on", False), key=f"sum_on_{char['id']}")
-        s_time = st.time_input("Ora rezumatului", value=_parse_time(sched.get("summary"), "21:00"), key=f"sum_t_{char['id']}")
+        s_hhmm = _time_select("Ora rezumatului", f"sum_t_{char['id']}", sched.get("summary") or "21:00")
 
         st.markdown("**➕ Momente extra**")
         cust_key = f"custom_{char['id']}"
@@ -2584,13 +2666,10 @@ def render_chat(char):
             if cc[1].button("🗑️", key=f"rmcust_{char['id']}_{idx}"):
                 st.session_state[cust_key].pop(idx)
                 st.rerun()
-        ac = st.columns([4, 1])
-        new_t = ac[0].time_input("Adaugă oră", value=_parse_time("12:00"),
-                                 key=f"addcust_t_{char['id']}", label_visibility="collapsed")
-        if ac[1].button("➕", key=f"addcust_{char['id']}"):
-            hhmm = new_t.strftime("%H:%M")
-            if hhmm not in st.session_state[cust_key]:
-                st.session_state[cust_key].append(hhmm)
+        new_hhmm = _time_select("Adaugă o oră nouă", f"addcust_t_{char['id']}", "12:00")
+        if st.button("➕ Adaugă ora", key=f"addcust_{char['id']}", use_container_width=True):
+            if new_hhmm not in st.session_state[cust_key]:
+                st.session_state[cust_key].append(new_hhmm)
                 st.rerun()
 
         st.markdown("**🎂 Zile speciale (aniversări)**")
@@ -2603,12 +2682,11 @@ def render_chat(char):
             if ac2[1].button("🗑️", key=f"rmann_{char['id']}_{idx}"):
                 st.session_state[ann_key].pop(idx)
                 st.rerun()
-        anc = st.columns([2, 3, 1])
-        ann_date = anc[0].date_input("Data", key=f"annd_{char['id']}", label_visibility="collapsed")
-        ann_name = anc[1].text_input("Ocazie (ex: ziua mea)", key=f"annn_{char['id']}", label_visibility="collapsed",
-                                     placeholder="ocazie (ex: ziua mea)")
-        if anc[2].button("➕", key=f"addann_{char['id']}"):
-            entry = {"date": ann_date.strftime("%m-%d"), "name": ann_name.strip() or "o zi specială"}
+        ann_md = _date_select("Data zilei speciale (alege ziua și luna)", f"annd_{char['id']}")
+        ann_name = st.text_input("Ocazie (ex: ziua mea)", key=f"annn_{char['id']}",
+                                 placeholder="ocazie (ex: ziua mea)")
+        if st.button("➕ Adaugă ziua specială", key=f"addann_{char['id']}", use_container_width=True):
+            entry = {"date": ann_md, "name": ann_name.strip() or "o zi specială"}
             if entry not in st.session_state[ann_key]:
                 st.session_state[ann_key].append(entry)
                 st.rerun()
@@ -2645,10 +2723,10 @@ def render_chat(char):
                 "schedule": {
                     "dnd": dnd,
                     "voice_on": voice_on,
-                    "morning_on": m_on, "morning": m_time.strftime("%H:%M"),
-                    "lunch_on": l_on, "lunch": l_time.strftime("%H:%M"),
-                    "evening_on": e_on, "evening": e_time.strftime("%H:%M"),
-                    "summary_on": s_on, "summary": s_time.strftime("%H:%M"),
+                    "morning_on": m_on, "morning": m_hhmm,
+                    "lunch_on": l_on, "lunch": l_hhmm,
+                    "evening_on": e_on, "evening": e_hhmm,
+                    "summary_on": s_on, "summary": s_hhmm,
                     "custom": list(st.session_state[cust_key]),
                     "anniversaries": list(st.session_state[ann_key]),
                     "days": sorted(_days.index(d) for d in sel_days),
@@ -2989,12 +3067,8 @@ def render_chat(char):
             help="Personajul te trezește dimineața cu vocea lui, la ora aleasă "
                  "(funcționează cât timp aplicația e deschisă).",
         )
-        _alarm_t = st.time_input(
-            "Ora de trezire",
-            value=_parse_time(_asched.get("alarm"), "07:30"),
-            key=f"alarm_t_{char['id']}",
-        )
-        _new_alarm = _alarm_t.strftime("%H:%M")
+        _new_alarm = _time_select("Ora de trezire", f"alarm_t_{char['id']}",
+                                   _asched.get("alarm") or "07:30")
         _adow = ["Lun", "Mar", "Mie", "Joi", "Vin", "Sâm", "Dum"]
         _cur_adays = _asched.get("alarm_days")
         _def_adays = [_adow[i] for i in _cur_adays] if _cur_adays else _adow
@@ -3268,11 +3342,32 @@ def render_chat(char):
         suggestions = st.session_state.get(f"sugg_{active_conv}", [])
 
     if suggestions:
-        st.caption("💬 Sugestii:")
-        scols = st.columns(len(suggestions))
+        st.caption("💬 Sugestii (apasă una ca să o trimiți):")
         for i, s in enumerate(suggestions):
-            if scols[i].button(s, key=f"sug_{active_conv}_{i}", use_container_width=True):
+            if st.button(s, key=f"sug_{active_conv}_{i}", use_container_width=True):
                 st.session_state.pending_prompt = s
+                st.rerun()
+        if st.button("➕ Arată mai multe sugestii", key=f"more_sug_{active_conv}",
+                     use_container_width=True):
+            with st.spinner("Caut mai multe idei..."):
+                _extra = llm.suggest_replies(char, history, count=4, avoid=suggestions)
+            _cur = list(st.session_state.get(f"sugg_{active_conv}", []))
+            for _e in _extra:
+                if _e and _e not in _cur:
+                    _cur.append(_e)
+            st.session_state[f"sugg_{active_conv}"] = _cur
+            st.rerun()
+
+    # 😊 emoji rapid — trimite un emoji personajului (mereu disponibil)
+    with st.expander("😊 Trimite un emoji"):
+        st.caption("Apasă un emoji ca să i-l trimiți personajului. Îți va răspunde la el.")
+        _emoji_set = ["😊", "❤️", "😂", "🥰", "😍", "😘", "👍", "🙏", "🤗", "😢",
+                      "😮", "🎉", "🔥", "🌹", "💕", "😴", "😅", "🥳", "😎", "🤔"]
+        _ecols = st.columns(5)
+        for _ei, _emo in enumerate(_emoji_set):
+            if _ecols[_ei % 5].button(_emo, key=f"emoji_{active_conv}_{_ei}",
+                                      use_container_width=True):
+                st.session_state.pending_prompt = _emo
                 st.rerun()
 
     user_audio = None
@@ -4420,26 +4515,14 @@ def render_profil():
                 st.toast("Am trimis o notificare de test 🔔")
             st.markdown("---")
             st.caption("🎂 Ziua ta & sărbători")
-            import datetime as _dtmod
             _has_bd = bool(st.session_state.get("birthday"))
-            _bd_default = None
-            if _has_bd:
-                try:
-                    _mm, _dd = st.session_state.birthday.split("-")
-                    _bd_default = _dtmod.date(2000, int(_mm), int(_dd))
-                except Exception:  # noqa
-                    _bd_default = None
             _set_bd = st.checkbox("Vreau să-mi urați ziua de naștere", value=_has_bd, key="bd_enable")
             if _set_bd:
-                _bd = st.date_input(
-                    "🎂 Ziua ta de naștere",
-                    value=_bd_default or _dtmod.date(2000, 1, 1),
-                    min_value=_dtmod.date(1920, 1, 1),
-                    max_value=_dtmod.date(2020, 12, 31),
-                    format="DD.MM.YYYY",
-                    key="bd_input",
+                _new_bd = _date_select(
+                    "🎂 Ziua ta de naștere (alege ziua și luna)", "bd_input",
+                    st.session_state.get("birthday") or "01-01",
+                    help="Alege ziua și luna din liste — fără calendar de tras.",
                 )
-                _new_bd = f"{_bd.month:02d}-{_bd.day:02d}"
                 if _new_bd != st.session_state.get("birthday"):
                     st.session_state.birthday = _new_bd
                     _write_notify_params()
@@ -4454,6 +4537,14 @@ def render_profil():
                 help="Personajele îți trimit un mesaj cald de sărbători, inclusiv Paștele, Floriile și Rusaliile (date calculate automat).",
             )
             _write_notify_params()
+            st.markdown("---")
+            st.caption("Când ai terminat de ales setările de mai sus, apasă butonul de salvare "
+                       "ca să rămână așa și data viitoare când intri în aplicație.")
+            if st.button("💾 Salvează setările", key="save_settings_btn",
+                         use_container_width=True, type="primary"):
+                _save_prefs(user["id"])
+                st.success("✅ Setările au fost salvate. Vor rămâne așa și data viitoare când intri.")
+                st.toast("✅ Setări salvate!")
             st.markdown("---")
             if st.checkbox("Vreau să-mi șterg contul", key="del_confirm"):
                 st.warning("Se șterg definitiv contul și toate personajele tale. Acțiunea e ireversibilă.")

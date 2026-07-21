@@ -27,6 +27,7 @@ def _public(user):
         "email": user["email"],
         "name": user.get("name") or user["email"],
         "avatar_image": user.get("avatar_image"),
+        "prefs": user.get("prefs") or {},
     }
 
 

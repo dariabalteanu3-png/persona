@@ -774,11 +774,14 @@ def stream_reply(character, history, user_text, web_info="", smart=False):
         yield item
 
 
-async def _suggest(system, sid):
+async def _suggest(system, sid, count=3, avoid=None):
+    _av = ""
+    if avoid:
+        _av = " Evită să repeți aceste replici deja propuse: " + " | ".join(avoid) + "."
     prompt = (
-        "Pe baza conversației, propune exact 3 replici scurte pe care UTILIZATORUL "
+        f"Pe baza conversației, propune exact {count} replici scurte pe care UTILIZATORUL "
         "le-ar putea spune ca răspuns. Fiecare replică pe o linie separată, maxim 6 cuvinte, "
-        "fără numerotare, fără ghilimele."
+        "fără numerotare, fără ghilimele." + _av
     )
     if USE_GROQ:
         return _groq_text(system, prompt)
@@ -791,13 +794,13 @@ async def _suggest(system, sid):
     return await chat.send_message(UserMessage(text=prompt))
 
 
-def suggest_replies(character, history):
-    """Return up to 3 short suggested user replies based on the conversation."""
+def suggest_replies(character, history, count=3, avoid=None):
+    """Return up to `count` short suggested user replies based on the conversation."""
     if not history:
         return []
     system = build_system(character, history)
     try:
-        raw = _run_coro(_suggest(system, f"sugg-{character['id']}"))
+        raw = _run_coro(_suggest(system, f"sugg-{character['id']}", count=count, avoid=avoid))
     except Exception:  # noqa
         return []
     out = []
@@ -805,7 +808,7 @@ def suggest_replies(character, history):
         s = line.strip().lstrip("-•*0123456789. ").strip().strip('"').strip()
         if s:
             out.append(s)
-    return out[:3]
+    return out[:count]
 
 
 def update_memory(character, history, existing_memory):
