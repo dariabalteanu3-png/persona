@@ -2707,8 +2707,13 @@ def render_chat(char):
         st.markdown("---")
         fu_on = st.toggle("⏰ Îmi scrie dacă tac o vreme", value=sched.get("followup_on", True),
                           key=f"fu_on_{char['id']}")
-        fu_min = st.slider("După câte minute de tăcere", 1, 30, int(sched.get("followup_min", 1) or 1),
-                           key=f"fu_min_{char['id']}")
+        _fu_opts = [1, 2, 3, 5, 10, 15, 20, 30]
+        _fu_cur = int(sched.get("followup_min", 1) or 1)
+        _fu_cur = min(_fu_opts, key=lambda x: abs(x - _fu_cur))
+        fu_min = st.selectbox("După câte minute de tăcere", _fu_opts,
+                              index=_fu_opts.index(_fu_cur),
+                              format_func=lambda x: f"{x} min",
+                              key=f"fu_min_sel_{char['id']}")
         ded_on = st.toggle("💝 «Melodia noastră» — din când în când îmi dedică o melodie din playlist",
                            value=sched.get("dedicate_on", True), key=f"ded_on_{char['id']}")
         sod_on = st.toggle("🌅 «Melodia zilei» — în fiecare dimineață îmi alege o melodie din playlist",
@@ -3368,6 +3373,7 @@ def render_chat(char):
             if _ecols[_ei % 5].button(_emo, key=f"emoji_{active_conv}_{_ei}",
                                       use_container_width=True):
                 st.session_state.pending_prompt = _emo
+                st.session_state["force_voice_reply"] = True
                 st.rerun()
 
     user_audio = None
@@ -3441,7 +3447,8 @@ def render_chat(char):
                     maybe_ambient(char, msgs[0]["id"], reply)
             # voce pentru fiecare mesaj (se redau unul după altul, cu ambient sub ele)
             did_voice = False
-            if (st.session_state.get("auto_play") or user_audio) and char.get("voice_id"):
+            _force_voice = st.session_state.pop("force_voice_reply", False)
+            if (st.session_state.get("auto_play") or user_audio or _force_voice) and char.get("voice_id"):
                 with st.spinner(f"{char['name']} vorbește..."):
                     for _m in msgs:
                         try:
@@ -4433,14 +4440,14 @@ def render_profil():
             st.session_state.voice_volume = _voi_levels[_sel_voi]
             _spd_opts = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
             _csp = float(st.session_state.get("voice_speed", 1.0))
-            st.session_state.voice_speed = st.select_slider(
+            st.session_state.voice_speed = st.selectbox(
                 "🏃 Viteza vocii",
-                options=_spd_opts,
-                value=_csp if _csp in _spd_opts else 1.0,
+                _spd_opts,
+                index=_spd_opts.index(_csp) if _csp in _spd_opts else 3,
                 format_func=lambda s: ("normal" if s == 1.0 else
                                        (f"{s:g}× mai rar" if s < 1 else f"{s:g}× mai rapid")),
                 help="Cât de repede vorbește personajul",
-                key="voice_speed_slider",
+                key="voice_speed_sel",
             )
             st.session_state.web_search = st.toggle(
                 "🌐 Căutare web",
@@ -4454,12 +4461,17 @@ def render_profil():
                 help="Comută între mod zi (luminos) și noapte (întunecat)",
                 key="theme_light_toggle",
             )
-            st.session_state.notif_volume = st.slider(
-                "🔊 Volum notificări",
-                0, 100, int(st.session_state.get("notif_volume", 70)),
-                help="Volumul sunetelor de notificare și mesaj",
-                key="notif_volume_slider",
+            _nv_levels = {"Oprit": 0, "Încet": 30, "Mediu": 60, "Tare": 85, "Maxim": 100}
+            _cur_nv = int(st.session_state.get("notif_volume", 70))
+            _nv_lbl = min(_nv_levels, key=lambda k: abs(_nv_levels[k] - _cur_nv))
+            _sel_nv = st.selectbox(
+                "🔊 Cât de tare sunt notificările",
+                list(_nv_levels.keys()),
+                index=list(_nv_levels.keys()).index(_nv_lbl),
+                key="notif_volume_sel",
+                help="Cât de tare se aud sunetele de notificare și de mesaj. Alegi dintr-o listă, fără a trage de ceva.",
             )
+            st.session_state.notif_volume = _nv_levels[_sel_nv]
             _snd_opts = ["iPhone", "Samsung"]
             _cur_snd = st.session_state.get("sound_theme", "iPhone")
             _snd = st.selectbox(
@@ -4500,12 +4512,12 @@ def render_profil():
             )
             _abs_opts = [5, 15, 30, 60, 120]
             _abs_cur = st.session_state.get("absence_min", 15)
-            st.session_state.absence_min = st.select_slider(
+            st.session_state.absence_min = st.selectbox(
                 "După cât timp de absență?",
-                options=_abs_opts,
-                value=_abs_cur if _abs_cur in _abs_opts else 15,
+                _abs_opts,
+                index=_abs_opts.index(_abs_cur) if _abs_cur in _abs_opts else 1,
                 format_func=lambda x: f"{x} min",
-                key="absence_min_sel",
+                key="absence_min_sel2",
             )
             _write_notify_params()
             if st.button("📩 Testează notificarea", key="test_browser_notify", use_container_width=True):
