@@ -10,3 +10,4 @@ elevenlabs
 resend
 openai
 requests
+# rebuild-marker: 2026-06-53 (force full restart to reload llm.py/auth.py — suggest_replies count/avoid)
