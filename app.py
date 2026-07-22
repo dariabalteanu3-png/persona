@@ -992,11 +992,12 @@ def play_ui_sound(name, vol=None):
     if not data:
         return
     b64 = base64.b64encode(data).decode()
+    mime = "audio/wav" if name.lower().endswith(".wav") else "audio/mp3"
     if vol is None:
         vol = int(st.session_state.get("notif_volume", 70))
     vol = max(0.0, min(1.0, int(vol) / 100.0))
     components.html(
-        f'<audio id="ns" autoplay><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
+        f'<audio id="ns" autoplay><source src="data:{mime};base64,{b64}" type="{mime}"></audio>'
         f'<script>var a=document.getElementById("ns");if(a){{a.volume={vol};}}</script>',
         height=0,
     )
@@ -1172,11 +1173,11 @@ def _sound_prefix(theme=None):
 
 def play_sound(kind, theme=None):
     _v = st.session_state.get("ui_volume", 70) if kind == "send" else st.session_state.get("notif_volume", 70)
-    play_ui_sound(f"{_sound_prefix(theme)}_{kind}.mp3", vol=_v)
+    play_ui_sound(f"{_sound_prefix(theme)}_{kind}.wav", vol=_v)
 
 
 def sound_bytes(kind):
-    return ui_sound(f"{_sound_prefix()}_{kind}.mp3")
+    return ui_sound(f"{_sound_prefix()}_{kind}.wav")
 
 
 def haptic(ms=15):

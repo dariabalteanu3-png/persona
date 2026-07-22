@@ -12,3 +12,4 @@ openai
 requests
 # rebuild-marker: 2026-06-53 (force full restart to reload llm.py/auth.py — suggest_replies count/avoid)
 # rebuild-marker: 2026-06-54 (stage 1 — ambient season/day-night awareness in llm.py)
+# rebuild-marker: 2026-06-56 (stage 3 — sunete UI originale iPhone/Samsung + tonuri reactie voice.py)

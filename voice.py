@@ -124,6 +124,10 @@ TONE_TAGS = {
     "Voce de somn": "[whispering softly] ",
     "Voce veselă": "[cheerfully] ",
     "Voce blândă": "[gently] ",
+    "Voce tandră": "[warmly] ",
+    "Voce amuzată": "[laughs] ",
+    "Voce mirată": "[excited] ",
+    "Voce recunoscătoare": "[warmly] ",
 }
 
 
@@ -133,8 +137,10 @@ def text_to_speech(text, voice_id, stability=0.5, similarity_boost=0.75, style=0
     tag = TONE_TAGS.get(tone or "")
     if tag:
         spoken = tag + spoken
-        if tone in ("Șoaptă", "Voce de somn", "Voce blândă"):
+        if tone in ("Șoaptă", "Voce de somn", "Voce blândă", "Voce tandră"):
             stability = max(float(stability), 0.7)
+        elif tone in ("Voce amuzată", "Voce veselă", "Voce mirată"):
+            stability = min(float(stability), 0.3)
     audio = _client.text_to_speech.convert(
         text=spoken,
         voice_id=voice_id,
