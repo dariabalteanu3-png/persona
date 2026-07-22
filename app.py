@@ -178,6 +178,38 @@ hr { border-color:#e6e6ec !important; }
 
 EMOJIS = ["🎭", "🧙", "🦊", "🤖", "👑", "🕵️", "🧛", "🧜", "🐉", "👽", "🧝", "🦸", "🌟", "💀", "🐺"]
 
+# Emoji pe categorii cu etichete în română (accesibil la cititorul de ecran).
+EMOJI_CATEGORIES = {
+    "😊 Fețe & emoții": [
+        ("😊", "Zâmbet"), ("😂", "Râd"), ("🥰", "Îndrăgostit"), ("😍", "Ochi de inimă"),
+        ("😘", "Pupic"), ("🤗", "Îmbrățișare"), ("😢", "Trist"), ("😭", "Plâng"),
+        ("😮", "Mirat"), ("😅", "Ușurare"), ("🤔", "Gânditor"), ("😎", "Cool"),
+        ("😴", "Somnoros"), ("😉", "Ochi complice"), ("🙃", "Poznaș"),
+    ],
+    "❤️ Inimi & iubire": [
+        ("❤️", "Inimă roșie"), ("💕", "Două inimi"), ("💖", "Inimă strălucitoare"),
+        ("💗", "Inimă care crește"), ("💘", "Inimă cu săgeată"), ("💝", "Inimă cadou"),
+        ("💜", "Inimă mov"), ("💙", "Inimă albastră"), ("🌹", "Trandafir"), ("💋", "Sărut"),
+    ],
+    "👍 Gesturi": [
+        ("👍", "Aprob"), ("👎", "Nu-mi place"), ("🙏", "Mulțumesc / te rog"),
+        ("👏", "Aplauze"), ("🤝", "Strângere de mână"), ("✌️", "Victorie"),
+        ("👋", "Salut"), ("🤞", "Baftă"), ("💪", "Putere"), ("🤗", "Îmbrățișare"),
+    ],
+    "🎉 Sărbătoare": [
+        ("🎉", "Petrecere"), ("🥳", "Sărbătoare"), ("🎂", "Tort"), ("🎁", "Cadou"),
+        ("🔥", "Foc"), ("🌟", "Stea"), ("✨", "Sclipici"), ("🎈", "Balon"), ("🍾", "Șampanie"),
+    ],
+    "🌸 Natură & animale": [
+        ("🌸", "Floare"), ("🌻", "Floarea-soarelui"), ("🐶", "Cățel"), ("🐱", "Pisică"),
+        ("🦊", "Vulpe"), ("🦋", "Fluture"), ("🌙", "Lună"), ("☀️", "Soare"),
+        ("🌈", "Curcubeu"), ("⭐", "Steluță"),
+    ],
+}
+# Hartă emoji → etichetă (pentru secțiunea „Recente”).
+EMOJI_LABELS = {e: lbl for items in EMOJI_CATEGORIES.values() for (e, lbl) in items}
+
+
 SECURITY_QUESTIONS = [
     "Cum se numește animalul tău de companie?",
     "În ce oraș te-ai născut?",
@@ -291,6 +323,7 @@ st.session_state.setdefault("call_volume", 100)
 st.session_state.setdefault("fx_volume", 100)
 st.session_state.setdefault("ui_volume", 70)
 st.session_state.setdefault("sound_mode", "sunet")
+st.session_state.setdefault("recent_emojis", [])
 st.session_state.setdefault("show_profile", False)
 st.session_state.setdefault("nav", "personaje")
 st.session_state.setdefault("profile_name", "")
@@ -573,6 +606,7 @@ _PREF_KEYS = [
     "web_search", "chat_brain", "theme_light", "notif_volume", "sound_theme",
     "manual_tz", "notify_on", "absence_on", "absence_min", "birthday", "holidays_on",
     "react_voice_on", "call_volume", "fx_volume", "ui_volume", "sound_mode",
+    "recent_emojis",
 ]
 
 
