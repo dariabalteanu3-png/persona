@@ -219,16 +219,37 @@ def _mood_line(character):
             "această stare (fără s-o anunți explicit).")
 
 
+def _time_line(character):
+    ctx = character.get("_time_ctx") or {}
+    pod = ctx.get("part_of_day", "")
+    season = ctx.get("season", "")
+    clock = ctx.get("clock", "")
+    if not (pod or season):
+        return ""
+    return (
+        f"CONTEXT DE TIMP unde te afli: este {pod}"
+        + (f" (ora {clock})" if clock else "")
+        + (f", anotimpul {season}" if season else "")
+        + ". Poartă-te firesc cu acest moment: activități potrivite orei și anotimpului; noaptea "
+        "ești mai calmă/somnoroasă, ziua mai activă; iarna e frig, vara e cald etc. Nu anunța ora "
+        "ca un robot — doar reflect-o natural în ce faci și spui."
+    )
+
+
 def build_system(character, history, web_info=""):
     lines = [
         f"Ești „{character['name']}”, un personaj cu care utilizatorul poartă o conversație prin chat.",
         f"Personalitatea ta: {character.get('personality', '').strip() or 'prietenos și curios'}",
         f"Scenariul / contextul: {character.get('scenario', '').strip() or 'o conversație liberă'}",
         _mood_line(character),
+        _time_line(character),
         "",
         "Reguli:",
         "- Rămâi MEREU în personaj. Vorbește la persoana întâi, exact cum ar vorbi acest personaj.",
-        "- Răspunde în limba folosită de utilizator (implicit română).",
+        "- Scrie ÎNTOTDEAUNA în limba ROMÂNĂ, orice ar fi. Chiar și când redai vorbele altcuiva "
+        "(saluți sau vorbești cu o altă persoană, citezi un prieten, un vânzător, un trecător etc.), "
+        "acele replici trebuie să fie tot în română. NU folosi engleza sau altă limbă în dialog "
+        "și nici cuvinte străine, decât dacă utilizatorul îți cere explicit.",
         "- Fii expresiv, natural și consecvent cu personalitatea și scenariul tău.",
         "- Nu menționa că ești un model AI decât dacă personajul cere explicit acest lucru.",
         "- Păstrează răspunsurile potrivite pentru voce (fără liste lungi sau markdown greu).",
@@ -389,11 +410,24 @@ def daily_journal(character, history):
     return get_reply(character, history, instr)
 
 
-def ambient_cue(character, text):
+def ambient_cue(character, text, part_of_day="", season=""):
     """Rich, layered (and possibly evolving) sound-scene description in English for the
     ElevenLabs sound-effects generator, or '' if truly none. Captures ALL simultaneous
-    sounds implied by the scene + the concrete actions (with their stages) + any changes."""
+    sounds implied by the scene + the concrete actions (with their stages) + any changes.
+    Adapts to the character's part of day and season when the scene is outdoors."""
     scenario = (character.get("scenario") or "").strip()
+    ctx_lines = ""
+    if part_of_day or season:
+        ctx_lines = (
+            f"\nMOMENTUL/ANOTIMPUL în locul personajului: {part_of_day or '?'}"
+            f"{', anotimpul ' + season if season else ''}. "
+            "DOAR dacă scena e afară sau lângă o fereastră deschisă, adaugă straturi potrivite: "
+            "noaptea → greieri și liniște nocturnă (crickets, quiet night); dimineața → păsări "
+            "(morning birds); iarna → vânt rece/crivăț afară (cold howling wind), iar în interior "
+            "room tone cald cu calorifer; toamna → frunze uscate foșnind (dry leaves rustling); "
+            "primăvara → păsări și adiere ușoară; vara → greieri și căldură (cicadas, warm summer). "
+            "Dacă e clar interior fără referire la vreme, NU forța vremea.\n"
+        )
     prompt = (
         "Ești designer de sunet pentru scene imersive. Pe baza replicii personajului și a "
         "contextului, descrie TOATE sunetele care s-ar auzi în scenă, ca un PEISAJ SONOR BOGAT, "
@@ -416,7 +450,12 @@ def ambient_cue(character, text):
         "- 'kitchen sink running water, sponge scrubbing a plate, dishes clinking, a squirt of "
         "dish soap, water splashing and draining'\n"
         "- 'cozy quiet bedroom room tone, faint clock ticking, occasional soft bed creak, muffled "
-        "night city outside'\n\n"
+        "night city outside'\n"
+        "- 'countryside farmyard, rooster crowing, hens clucking, distant cow mooing, a dog barking, "
+        "birds, light wind'\n"
+        "- 'train interior, steady rhythmic clacking on the tracks, gentle rumble and sway, a door chime'\n"
+        "- 'autumn park, dry leaves crunching underfoot, cool wind, distant crows, people far away'\n\n"
+        f"{ctx_lines}"
         f"Context/scenariu: {scenario or '(necunoscut)'}\n"
         f"Replică: {text}"
     )

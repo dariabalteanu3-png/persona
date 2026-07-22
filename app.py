@@ -897,6 +897,39 @@ def avatar_html(char, size=56, radius=14):
     return f'<span style="font-size:{int(size * 0.62)}px;line-height:1">{char.get("avatar", "🎭")}</span>'
 
 
+# Bibliotecă de sunete de fundal (categorii pe care utilizatorul le poate alege și asculta).
+# Cheie = etichetă în română (accesibilă); valoare = prompt EN pt generatorul de efecte sonore.
+AMBIENT_LIBRARY = {
+    "🌧️ Ploaie liniștită": "gentle steady rain falling, soft drops on a window, calm cozy rain ambience",
+    "⛈️ Ploaie cu tunete": "heavy rain with distant rumbling thunder and occasional closer thunderclaps, storm ambience",
+    "🌊 Valuri la mare": "ocean waves rolling onto the shore, gentle sea breeze, distant seagulls",
+    "🌲 Pădure": "peaceful forest ambience, birds chirping, rustling leaves, light wind through trees",
+    "🔥 Foc de tabără": "crackling campfire, wood popping and hissing, soft night wind, distant crickets",
+    "☕ Cafenea": "cozy coffee shop ambience, quiet murmuring chatter, espresso machine, cups clinking",
+    "🌬️ Vânt liniștit": "soft gentle wind blowing, calm breeze, subtle whooshing through the air",
+    "🦗 Noapte cu greieri": "peaceful warm summer night, crickets chirping steadily, gentle breeze, distant owl",
+    "🏙️ Oraș": "busy city street ambience, distant traffic hum, people passing by, faint car horns",
+    "❄️ Ninsoare liniștită": "very quiet snowy winter night, muffled soft wind, calm gentle snowfall ambience",
+    "🕊️ Cameră liniștită": "cozy quiet room tone, faint clock ticking, occasional soft creak, calm and warm",
+    "🎹 Ploaie cu pian slab": "soft steady rain with a faint distant calm piano, relaxing lofi rainy ambience",
+    "🌅 Dimineață la țară": "calm countryside morning, rooster in the distance, birds, light breeze, gentle nature",
+    "🌊 Râu de munte": "clear mountain river stream flowing over rocks, birds, wind in pine trees",
+    "🚂 Tren liniștit": "gentle train ride ambience, steady rhythmic clacking on tracks, soft rumble",
+    "🌸 Primăvară afară": "spring outdoors, birds singing brightly, gentle warm breeze, occasional light spring rain, nature waking up",
+    "☀️ Vară afară": "hot summer day outdoors, cicadas and crickets, birds, warm breeze, distant children playing",
+    "🍂 Toamnă afară": "autumn outdoors, dry leaves rustling and crunching underfoot, cool gusty wind, distant crows",
+    "❄️ Iarnă afară": "cold winter outdoors, howling wind and blizzard, snow crunching underfoot, muffled distant sounds",
+    "🏠 Iarnă în casă": "cozy winter indoors, radiator ticking, warm room tone, wind against the closed window, soft slippers shuffling",
+    "🐔 La țară (curte)": "countryside farmyard, rooster crowing, hens clucking, distant cow mooing, sheep, a dog barking, birds, light wind",
+    "🚉 În gară": "train station ambience, several trains arriving and departing, muffled platform announcements, crowd murmur, rolling luggage",
+    "🛒 Supermarket": "supermarket ambience, shopping carts rolling, checkout beeps scanning products, quiet crowd, faint store announcement",
+    "🔥 Grătar (petrecere)": "backyard barbecue, meat sizzling on the grill, crackling fire, cheerful people chatting and laughing, faint music",
+    "🎶 Muzică din boxă (acasă)": "cozy home with soft instrumental music from a speaker across the room, gentle warm room ambience",
+    "🌉 Pe ponton": "wooden lake pier, footsteps on wooden planks, water gently lapping against posts, wind, distant birds and a boat",
+    "🌃 Noapte în oraș": "quiet late-night city, occasional distant car passing, faint hum, gentle wind, a far-off dog",
+}
+
+
 def maybe_ambient(char, msg_id, text):
     """Generate + cache a CONTINUOUS ambient sound bed matching the scene (if any)."""
     if not st.session_state.get("ambient_fx"):
@@ -908,7 +941,10 @@ def maybe_ambient(char, msg_id, text):
         cue = ""
         if hasattr(llm, "ambient_cue"):
             try:
-                cue = llm.ambient_cue(char, text)
+                _ctx = char.get("_time_ctx") or _time_context()
+                cue = llm.ambient_cue(char, text,
+                                      part_of_day=_ctx.get("part_of_day", ""),
+                                      season=_ctx.get("season", ""))
             except Exception:  # noqa
                 cue = ""
         if not cue:
@@ -981,9 +1017,59 @@ def _autoplay_voice(audio_bytes, uid):
         height=0,
     )
 
+_AMBIENT_JS = r"""
+(function(){
+  var srcs=__SRCS__;
+  var ambIds=__AMBIDS__, ambVols=__AMBVOLS__;
+  var ambSrc=__AMBSRC__, ambGain=__GAIN__, vGain=__VVOL__, spd=__SPD__;
+  var ua=navigator.userAgent||"";
+  var isIOS=/iP(hone|od|ad)/.test(ua)||(/Macintosh/.test(ua)&&"ontouchend" in document);
+  var isSafari=/safari/i.test(ua)&&!/chrome|crios|android|fxios/i.test(ua);
+  if(isIOS||isSafari){ waPath(); } else { classicPath(); }
+
+  // --- Safari / iOS: pe iOS `audio.volume` din JS e IGNORAT, deci folosim Web Audio (GainNode),
+  //     singurul mod fiabil de a controla volumul (mai tare / mai încet). Deblocăm sunetul la
+  //     prima atingere a utilizatorului (context audio partajat, ținut minte între rulări). ---
+  function waPath(){
+    var root; try { root=window.top; void root.document; } catch(e) { root=window; }
+    try { if(!root.__personaAC) root.__personaAC=new (root.AudioContext||root.webkitAudioContext)(); } catch(e) { root.__personaAC=null; }
+    var ac=root.__personaAC;
+    function resumeAC(){ try { if(ac&&ac.state!=='running') ac.resume(); } catch(e){} }
+    try { var d=root.document||document; ['pointerdown','touchend','click','keydown'].forEach(function(ev){ d.addEventListener(ev, resumeAC, true); }); } catch(e){}
+    resumeAC();
+    function mkGain(el,g){ if(ac){ try { var s=ac.createMediaElementSource(el); var gn=ac.createGain(); gn.gain.value=g; s.connect(gn); gn.connect(ac.destination); return; } catch(e){} } try { el.volume=Math.min(1,g); } catch(e){} }
+    var amb=null;
+    if(ambSrc && ambGain>0){ amb=new Audio(); amb.src=ambSrc; amb.loop=true; amb.preload='auto'; amb.playsInline=true; mkGain(amb, ambGain); }
+    function startAmb(){ if(amb){ resumeAC(); var p=amb.play(); if(p&&p.catch)p.catch(function(){ setTimeout(function(){resumeAC(); amb.play().catch(function(){});},400); }); } }
+    function stopAmb(){ if(amb){ try{amb.pause();}catch(e){} } }
+    var vv=new Audio(); vv.playsInline=true; vv.preload='auto'; mkGain(vv, vGain);
+    var i=0;
+    function playIdx(idx,tries){ if(idx>=srcs.length){ stopAmb(); return; } vv.src=srcs[idx]; try{ vv.preservesPitch=true; vv.mozPreservesPitch=true; vv.webkitPreservesPitch=true; }catch(e){} vv.playbackRate=spd; resumeAC(); var p=vv.play(); if(p&&p.catch)p.catch(function(){ if(tries>0) setTimeout(function(){playIdx(idx,tries-1);},400); }); }
+    vv.addEventListener('ended', function(){ i++; playIdx(i,4); });
+    startAmb();
+    if(srcs.length) playIdx(0,6); else if(amb) setTimeout(stopAmb,60000);
+  }
+
+  // --- restul browserelor (Chrome/Android etc.): calea clasică, deja funcțională ---
+  function classicPath(){
+    var v=document.getElementById("v___UID__");
+    var ambs=ambIds.map(function(id){return document.getElementById(id);});
+    function stopAmb(){ ambs.forEach(function(a){ if(a){try{a.pause();}catch(e){}} }); }
+    function playAmb(n){ ambs.forEach(function(a, idx){ if(!a){return;} a.volume=ambVols[idx]; var p=a.play(); if(p&&p.catch){p.catch(function(){ if(n>0){setTimeout(function(){ a.play().catch(function(){}); },350);} });} }); }
+    var i=0;
+    function playIdx(idx, tries){ if(!v||idx>=srcs.length){ stopAmb(); return; } v.src=srcs[idx]; v.volume=__VVOL__; try{ v.preservesPitch=true; v.mozPreservesPitch=true; v.webkitPreservesPitch=true; }catch(e){} v.playbackRate=__SPD__; var p=v.play(); if(p&&p.catch){p.catch(function(){ if(tries>0){setTimeout(function(){playIdx(idx,tries-1);},350);} });} }
+    if(v){ v.addEventListener("ended", function(){ i++; playIdx(i,4); }); }
+    playAmb(6);
+    if(srcs.length){ playIdx(0,6); } else if(ambs.length){ setTimeout(stopAmb, 60000); }
+  }
+})();
+"""
+
+
 def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
     """Redă una sau mai multe voci una după alta, cu un fundal ambiental (buclă) care
-    se aude pe TOATĂ durata și se oprește când se termină ultima voce. Fiabil pe mobil."""
+    se aude pe TOATĂ durata și se oprește când se termină ultima voce.
+    Compatibil Safari/iOS: acolo volumul se controlează prin Web Audio (GainNode)."""
     voices = [v for v in (voices or []) if v]
     if not voices and not ambient_bytes:
         return
@@ -993,11 +1079,11 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
     base_v = max(0.0, min(1.0, int(st.session_state.get("voice_volume", 100)) / 100.0))
     vvol = max(0.0, min(1.0, float(voice_vol) * base_v))
     spd = max(0.5, min(1.5, float(st.session_state.get("voice_speed", 1.0))))
-    # Fundal mai TARE de 100%: suprapunem mai multe copii ale aceluiași sunet (însumare de
-    # amplitudine) — metodă fiabilă pe telefon, fără Web Audio (care are restricții de autoplay).
+    # Fundal mai TARE de 100% (path clasic): suprapunem mai multe copii ale aceluiași sunet.
     amb_html = ""
     amb_ids = []
     amb_vols = []
+    amb_b64 = ""
     if ambient_bytes and gain > 0:
         amb_b64 = base64.b64encode(ambient_bytes).decode()
         n = max(1, int(gain + 0.999))
@@ -1012,43 +1098,20 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
                 f'<audio id="{aid}" loop preload="auto">'
                 f'<source src="data:audio/mp3;base64,{amb_b64}" type="audio/mp3"></audio>'
             )
-    amb_ids_js = json.dumps(amb_ids)
-    amb_vols_js = json.dumps(amb_vols)
+    amb_src = ("data:audio/mp3;base64," + amb_b64) if amb_b64 else ""
+    js = (
+        _AMBIENT_JS
+        .replace("__SRCS__", srcs_js)
+        .replace("__AMBIDS__", json.dumps(amb_ids))
+        .replace("__AMBVOLS__", json.dumps(amb_vols))
+        .replace("__AMBSRC__", json.dumps(amb_src))
+        .replace("__GAIN__", repr(gain))
+        .replace("__VVOL__", repr(vvol))
+        .replace("__SPD__", repr(spd))
+        .replace("__UID__", str(uid))
+    )
     components.html(
-        f'''
-        <audio id="v_{uid}" playsinline preload="auto"></audio>
-        {amb_html}
-        <script>
-        (function(){{
-          var srcs={srcs_js};
-          var v=document.getElementById("v_{uid}");
-          var ambIds={amb_ids_js}, ambVols={amb_vols_js};
-          var ambs=ambIds.map(function(id){{return document.getElementById(id);}});
-          function stopAmb(){{ ambs.forEach(function(a){{ if(a){{try{{a.pause();}}catch(e){{}}}} }}); }}
-          function playAmb(n){{
-            ambs.forEach(function(a, idx){{
-              if(!a){{return;}}
-              a.volume=ambVols[idx];
-              var p=a.play();
-              if(p&&p.catch){{p.catch(function(){{ if(n>0){{setTimeout(function(){{ a.play().catch(function(){{}}); }},350);}} }});}}
-            }});
-          }}
-          var i=0;
-          function playIdx(idx, tries){{
-            if(!v||idx>=srcs.length){{ stopAmb(); return; }}
-            v.src=srcs[idx]; v.volume={vvol};
-            try{{ v.preservesPitch=true; v.mozPreservesPitch=true; v.webkitPreservesPitch=true; }}catch(e){{}}
-            v.playbackRate={spd};
-            var p=v.play();
-            if(p&&p.catch){{p.catch(function(){{ if(tries>0){{setTimeout(function(){{playIdx(idx,tries-1);}},350);}} }});}}
-          }}
-          if(v){{ v.addEventListener("ended", function(){{ i++; playIdx(i,4); }}); }}
-          playAmb(6);
-          if(srcs.length){{ playIdx(0,6); }}
-          else if(ambs.length){{ setTimeout(stopAmb, 20000); }}
-        }})();
-        </script>
-        ''',
+        f'<audio id="v_{uid}" playsinline preload="auto"></audio>{amb_html}<script>{js}</script>',
         height=0,
     )
 
@@ -1135,6 +1198,54 @@ def _tts_kwargs(char):
         similarity_boost=char.get("voice_similarity", 0.75),
         style=char.get("voice_style", 0.0),
     )
+
+
+def _any_voice_id():
+    """O voce disponibilă: prima voce a personajelor userului, altfel prima voce ElevenLabs."""
+    try:
+        for c in db.list_characters(owner_id=_identity_id()):
+            if c.get("voice_id"):
+                return c["voice_id"]
+    except Exception:  # noqa
+        pass
+    try:
+        vs = voice.list_voices()
+        return vs[0][0] if vs else None
+    except Exception:  # noqa
+        return None
+
+
+def _settings_summary_text():
+    """Text în română cu setările curente, pentru a fi citit cu voce."""
+    S = st.session_state
+    def on(b):
+        return "pornit" if b else "oprit"
+    def closest(d, v):
+        return d[min(d, key=lambda k: abs(k - int(v)))]
+    amb_lbl = {0: "oprit", 50: "încet", 100: "mediu", 175: "tare", 250: "foarte tare", 350: "maxim"}
+    voi_lbl = {40: "foarte încet", 70: "încet", 100: "normal"}
+    nv_lbl = {0: "oprit", 30: "încet", 60: "mediu", 85: "tare", 100: "maxim"}
+    p = ["Iată setările tale acum."]
+    p.append(f"Auto-redarea vocii este {on(S.get('auto_play'))}.")
+    p.append(f"Răspunsul vocal la reacții este {on(S.get('react_voice_on', True))}.")
+    p.append(f"Efectele ambientale sunt {on(S.get('ambient_fx'))}.")
+    p.append(f"Volumul fundalului este {closest(amb_lbl, S.get('ambient_volume', 100))}.")
+    p.append(f"Volumul vocii este {closest(voi_lbl, S.get('voice_volume', 100))}.")
+    p.append(f"Volumul notificărilor este {closest(nv_lbl, S.get('notif_volume', 70))}.")
+    p.append("Creierul chatului este " + ("inteligent" if S.get('chat_brain') == "smart" else "rapid") + ".")
+    p.append("Căutarea pe web este " + on(S.get('web_search')) + ".")
+    p.append("Tema este " + ("luminoasă" if S.get('theme_light') else "întunecată") + ".")
+    p.append("Notificările în browser sunt " + on(S.get('notify_on')) + ".")
+    if S.get('birthday'):
+        try:
+            mm, dd = S['birthday'].split("-")
+            months = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "iulie",
+                      "august", "septembrie", "octombrie", "noiembrie", "decembrie"]
+            p.append(f"Ziua ta de naștere este pe {int(dd)} {months[int(mm) - 1]}.")
+        except Exception:  # noqa
+            pass
+    p.append("Mesajele de sărbători sunt " + on(S.get('holidays_on', True)) + ".")
+    return " ".join(p)
 
 
 def _playlist_intro_text(char, names):
@@ -1404,6 +1515,35 @@ def _local_now():
     return datetime.now(timezone.utc)
 
 
+def _time_context():
+    """Context de timp în locația personajului: moment al zilei + anotimp (Emisfera Nordică/România)."""
+    now = _local_now()
+    h = now.hour
+    if 5 <= h < 8:
+        pod = "dimineață devreme"
+    elif 8 <= h < 12:
+        pod = "dimineață"
+    elif 12 <= h < 17:
+        pod = "după-amiază"
+    elif 17 <= h < 21:
+        pod = "seară"
+    elif 21 <= h < 24:
+        pod = "seară târzie"
+    else:
+        pod = "noapte (foarte târziu)"
+    m = now.month
+    if m in (12, 1, 2):
+        season = "iarnă"
+    elif m in (3, 4, 5):
+        season = "primăvară"
+    elif m in (6, 7, 8):
+        season = "vară"
+    else:
+        season = "toamnă"
+    return {"part_of_day": pod, "season": season,
+            "is_night": (h >= 21 or h < 6), "clock": now.strftime("%H:%M")}
+
+
 def _emit_proactive(char, conv_id, kind, tone=None, custom_instr=None):
     hist = db.get_messages(conv_id)
     try:
@@ -1467,15 +1607,26 @@ def _emit_wakeup(char, conv_id):
 
 
 def _emit_reaction_voice(char, conv_id, reacted_text, emoji):
-    """La reacția utilizatorului (❤️/😂/👍...), personajul spune o vorbă scurtă, caldă, cu vocea lui."""
+    """La reacția utilizatorului (❤️/😂/👍...), personajul spune o vorbă scurtă, caldă, cu vocea lui —
+    cu un TON al vocii potrivit emoției reacției."""
     hist = db.get_messages(conv_id)
     snippet = (reacted_text or "").strip().replace("\n", " ")
     if len(snippet) > 160:
         snippet = snippet[:160] + "…"
+    # fiecare reacție → un ton al vocii + o stare de spus, potrivite emoției
+    styles = {
+        "❤️": ("Voce tandră", "tandru, cald și afectuos, cu drag"),
+        "😂": ("Voce amuzată", "amuzat și jucăuș, râzând ușor"),
+        "👍": ("Voce veselă", "vesel, mulțumit și încurajator"),
+        "😮": ("Voce mirată", "surprins plăcut, cu mirare și entuziasm"),
+        "😢": ("Voce blândă", "cald, blând și alinător, cu compasiune"),
+        "🙏": ("Voce recunoscătoare", "recunoscător, cald și emoționat"),
+    }
+    tone, mood = styles.get(emoji, ("Voce blândă", "cald și prietenos"))
     instr = (
         f"(Utilizatorul tocmai a pus reacția {emoji} pe acest mesaj: „{snippet}”. "
-        "Răspunde FOARTE scurt — o singură propoziție caldă, în caracter, care recunoaște reacția lui "
-        "(potrivit emoji-ului: bucurie, tandrețe, amuzament, uimire). Maxim ~12 cuvinte, fără întrebări lungi.)"
+        f"Răspunde FOARTE scurt — o singură propoziție, pe un ton {mood}, în caracter, "
+        "care recunoaște reacția lui. Maxim ~12 cuvinte, fără întrebări lungi.)"
     )
     try:
         line = llm.get_reply(char, hist, instr, tries=1)
@@ -1489,7 +1640,7 @@ def _emit_reaction_voice(char, conv_id, reacted_text, emoji):
     if char.get("voice_id"):
         try:
             st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
-                line, char["voice_id"], **_tts_kwargs(char))
+                line, char["voice_id"], tone=tone, **_tts_kwargs(char))
             st.session_state["autoplay_mid"] = msg["id"]
         except Exception:  # noqa
             pass
@@ -2824,6 +2975,7 @@ def render_chat(char):
     )
     # 🎭 dispoziția de azi a personajului (o alege o dată pe zi) — influențează răspunsurile
     char["_mood_today"] = _char_mood(char)
+    char["_time_ctx"] = _time_context()
     # 🎨 tonul vocii salvat pe personaj (șoaptă / somn / veselă...) — se ține minte
     _tone = char.get("voice_tone") or "Normal"
     if _tone and _tone != "Normal":
@@ -3196,6 +3348,9 @@ def render_chat(char):
         st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea și "
                    f"{char['name']} îți răspunde imediat. Prima dată telefonul îți cere "
                    "permisiunea pentru microfon — apasă „Permite”.")
+    st.caption("🍎 Pe iPhone/Safari: prima dată apare o cerere de permisiune pentru microfon — apasă "
+               "„Permite”. Dacă ai apăsat din greșeală „Nu permite”, mergi în Reglaje → Safari → "
+               "Microfon și alege „Permite”, apoi reîncarcă pagina.")
     vm = st.audio_input("Mesaj vocal", label_visibility="collapsed", key=f"vm_{active_conv}")
     if vm is not None:
         vdata = vm.getvalue()
@@ -3413,6 +3568,30 @@ def render_chat(char):
                 st.session_state["force_voice_reply"] = True
                 st.rerun()
 
+    with st.expander("🎵 Sunet de fundal (alege și ascultă)"):
+        st.caption("Alege un sunet de fundal din listă — ploaie, ocean, pădure, foc de tabără și "
+                   "multe altele — și apasă „Ascultă”. Cât de tare se aude depinde de „volumul "
+                   "fundalului” din Setări.")
+        _amb_labels = list(AMBIENT_LIBRARY.keys())
+        _amb_choice = st.selectbox("Ce sunet de fundal vrei?", _amb_labels,
+                                   key=f"amblib_sel_{active_conv}")
+        if st.button("▶️ Ascultă fundalul", key=f"amblib_play_{active_conv}",
+                     use_container_width=True):
+            _cache = st.session_state.setdefault("_amblib_cache", {})
+            _data = _cache.get(_amb_choice)
+            if _data is None:
+                with st.spinner("Pregătesc sunetul de fundal..."):
+                    try:
+                        _data = voice.sound_effect(AMBIENT_LIBRARY[_amb_choice], duration=22.0)
+                        _cache[_amb_choice] = _data
+                    except Exception:  # noqa
+                        _data = None
+            if _data:
+                _play_voice_ambient([], _data, f"amblib_{active_conv}")
+                st.caption(f"🔊 Se aude: {_amb_choice}")
+            else:
+                st.warning("Nu am putut crea sunetul acum. Încearcă din nou.")
+
     user_audio = None
     if not prompt and st.session_state.get("pending_voice"):
         vmsg = st.session_state.pop("pending_voice")
@@ -3512,6 +3691,8 @@ def render_chat(char):
 
 def render_call(char):
     conv = active_conv_id(char)
+    char["_mood_today"] = _char_mood(char)
+    char["_time_ctx"] = _time_context()
     amb = AMBIANCES.get(char.get("ambiance", "Neutru"), AMBIANCES["Neutru"])
     glow = amb["glow"]
     st.markdown(
@@ -4420,6 +4601,26 @@ def render_profil():
                 st.rerun()
             st.markdown("---")
             st.caption("⚙️ Setări")
+            if st.button("🔊 Citește-mi setările (cu voce)", key="read_settings_btn",
+                         use_container_width=True,
+                         help="Îți spun cu voce ce setări ai acum, ca să le verifici fără să citești."):
+                with st.spinner("Îți citesc setările..."):
+                    _vid = _any_voice_id()
+                    _aud = None
+                    if _vid:
+                        try:
+                            _aud = voice.text_to_speech(_settings_summary_text(), _vid, tone="Voce blândă")
+                        except Exception:  # noqa
+                            _aud = None
+                if _aud:
+                    st.session_state["_settings_audio"] = _aud
+                    st.session_state["_play_settings_audio"] = True
+                else:
+                    st.warning("Nu am putut citi setările acum (nicio voce disponibilă).")
+            if st.session_state.get("_settings_audio"):
+                if st.session_state.pop("_play_settings_audio", False):
+                    _play_voice_ambient([st.session_state["_settings_audio"]], None, "settings_read")
+                st.audio(st.session_state["_settings_audio"], format="audio/mp3")
             _brain_opts = ["fast", "smart"]
             _brain_labels = {
                 "fast": "⚡ Rapid — răspunsuri iuți, gratuite",
