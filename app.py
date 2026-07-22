@@ -287,6 +287,10 @@ st.session_state.setdefault("voice_speed", 1.0)
 st.session_state.setdefault("call_muted", False)
 st.session_state.setdefault("sound_theme", "iPhone")
 st.session_state.setdefault("notif_volume", 70)
+st.session_state.setdefault("call_volume", 100)
+st.session_state.setdefault("fx_volume", 100)
+st.session_state.setdefault("ui_volume", 70)
+st.session_state.setdefault("sound_mode", "sunet")
 st.session_state.setdefault("show_profile", False)
 st.session_state.setdefault("nav", "personaje")
 st.session_state.setdefault("profile_name", "")
@@ -568,7 +572,7 @@ _PREF_KEYS = [
     "auto_play", "ambient_fx", "ambient_volume", "voice_volume", "voice_speed",
     "web_search", "chat_brain", "theme_light", "notif_volume", "sound_theme",
     "manual_tz", "notify_on", "absence_on", "absence_min", "birthday", "holidays_on",
-    "react_voice_on",
+    "react_voice_on", "call_volume", "fx_volume", "ui_volume", "sound_mode",
 ]
 
 
@@ -806,8 +810,14 @@ def _render_login_register():
             "stocată niciodată ca text simplu.</div>",
             unsafe_allow_html=True,
         )
-        t_login, t_reg = st.tabs(["Autentificare", "Cont nou"])
-        with t_login:
+        _mode = st.radio(
+            "Ce vrei să faci?",
+            ["Intră în cont", "Cont nou"],
+            key="auth_mode",
+            horizontal=True,
+            help="Alege dacă intri într-un cont existent sau îți creezi unul nou.",
+        )
+        if _mode == "Intră în cont":
             le = st.text_input("Nume utilizator", key="login_email", placeholder="ex: daria")
             lp = st.text_input("Parolă", type="password", key="login_pw")
             if st.button("Intră în cont", key="do_login", use_container_width=True, type="primary"):
@@ -846,7 +856,7 @@ def _render_login_register():
                             st.session_state.pop("fp_user_val", None)
                             st.success("Parolă schimbată! Te-am conectat.")
                             st.rerun()
-        with t_reg:
+        else:
             rge = st.text_input("Nume utilizator", key="reg_email", placeholder="ex: daria")
             rgp = st.text_input("Parolă (min. 6 caractere)", type="password", key="reg_pw")
             st.caption("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
@@ -975,12 +985,16 @@ def ui_sound(name):
         return None
 
 
-def play_ui_sound(name):
+def play_ui_sound(name, vol=None):
+    if st.session_state.get("sound_mode") == "silentios":
+        return
     data = ui_sound(name)
     if not data:
         return
     b64 = base64.b64encode(data).decode()
-    vol = int(st.session_state.get("notif_volume", 70)) / 100.0
+    if vol is None:
+        vol = int(st.session_state.get("notif_volume", 70))
+    vol = max(0.0, min(1.0, int(vol) / 100.0))
     components.html(
         f'<audio id="ns" autoplay><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
         f'<script>var a=document.getElementById("ns");if(a){{a.volume={vol};}}</script>',
@@ -1066,16 +1080,20 @@ _AMBIENT_JS = r"""
 """
 
 
-def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0):
+def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None):
     """Redă una sau mai multe voci una după alta, cu un fundal ambiental (buclă) care
     se aude pe TOATĂ durata și se oprește când se termină ultima voce.
-    Compatibil Safari/iOS: acolo volumul se controlează prin Web Audio (GainNode)."""
+    Compatibil Safari/iOS: acolo volumul se controlează prin Web Audio (GainNode).
+    `amb_gain` (0..3.5) suprascrie volumul ambianței (ex: pt efecte separate)."""
     voices = [v for v in (voices or []) if v]
     if not voices and not ambient_bytes:
         return
     srcs = ["data:audio/mp3;base64," + base64.b64encode(v).decode() for v in voices]
     srcs_js = json.dumps(srcs)
-    gain = max(0.0, int(st.session_state.get("ambient_volume", 100)) / 100.0)
+    if amb_gain is None:
+        gain = max(0.0, int(st.session_state.get("ambient_volume", 100)) / 100.0)
+    else:
+        gain = max(0.0, float(amb_gain))
     base_v = max(0.0, min(1.0, int(st.session_state.get("voice_volume", 100)) / 100.0))
     vvol = max(0.0, min(1.0, float(voice_vol) * base_v))
     spd = max(0.5, min(1.5, float(st.session_state.get("voice_speed", 1.0))))
@@ -1153,7 +1171,8 @@ def _sound_prefix(theme=None):
 
 
 def play_sound(kind, theme=None):
-    play_ui_sound(f"{_sound_prefix(theme)}_{kind}.mp3")
+    _v = st.session_state.get("ui_volume", 70) if kind == "send" else st.session_state.get("notif_volume", 70)
+    play_ui_sound(f"{_sound_prefix(theme)}_{kind}.mp3", vol=_v)
 
 
 def sound_bytes(kind):
@@ -1223,15 +1242,17 @@ def _settings_summary_text():
     def closest(d, v):
         return d[min(d, key=lambda k: abs(k - int(v)))]
     amb_lbl = {0: "oprit", 50: "încet", 100: "mediu", 175: "tare", 250: "foarte tare", 350: "maxim"}
-    voi_lbl = {40: "foarte încet", 70: "încet", 100: "normal"}
-    nv_lbl = {0: "oprit", 30: "încet", 60: "mediu", 85: "tare", 100: "maxim"}
+    std_lbl = {0: "oprit", 20: "foarte încet", 40: "încet", 60: "mediu", 80: "tare", 100: "maxim"}
     p = ["Iată setările tale acum."]
     p.append(f"Auto-redarea vocii este {on(S.get('auto_play'))}.")
     p.append(f"Răspunsul vocal la reacții este {on(S.get('react_voice_on', True))}.")
     p.append(f"Efectele ambientale sunt {on(S.get('ambient_fx'))}.")
+    p.append(f"Volumul vocii este {closest(std_lbl, S.get('voice_volume', 100))}.")
     p.append(f"Volumul fundalului este {closest(amb_lbl, S.get('ambient_volume', 100))}.")
-    p.append(f"Volumul vocii este {closest(voi_lbl, S.get('voice_volume', 100))}.")
-    p.append(f"Volumul notificărilor este {closest(nv_lbl, S.get('notif_volume', 70))}.")
+    p.append(f"Volumul notificărilor este {closest(std_lbl, S.get('notif_volume', 70))}.")
+    p.append(f"Volumul apelului este {closest(std_lbl, S.get('call_volume', 100))}.")
+    p.append(f"Volumul efectelor este {closest(std_lbl, S.get('fx_volume', 100))}.")
+    p.append(f"Volumul interfeței este {closest(std_lbl, S.get('ui_volume', 70))}.")
     p.append("Creierul chatului este " + ("inteligent" if S.get('chat_brain') == "smart" else "rapid") + ".")
     p.append("Căutarea pe web este " + on(S.get('web_search')) + ".")
     p.append("Tema este " + ("luminoasă" if S.get('theme_light') else "întunecată") + ".")
@@ -1246,6 +1267,93 @@ def _settings_summary_text():
             pass
     p.append("Mesajele de sărbători sunt " + on(S.get('holidays_on', True)) + ".")
     return " ".join(p)
+
+
+_VOL_STD = [("Oprit", 0), ("Foarte încet", 20), ("Încet", 40), ("Mediu", 60), ("Tare", 80), ("Maxim", 100)]
+_VOL_AMB = [("Oprit", 0), ("Încet", 50), ("Mediu", 100), ("Tare", 175), ("Foarte tare", 250), ("Maxim", 350)]
+
+
+def _volume_control(label, key, levels, test_fn=None, test_label=None, help=None):
+    """Control de volum ACCESIBIL: afișează nivelul actual + butoane Scade/Crește/Minim/Maxim
+    (și opțional Testează). Fără glisor greu de folosit; totul e anunțat clar."""
+    labels = [l for l, _ in levels]
+    values = [v for _, v in levels]
+    cur = int(st.session_state.get(key, values[len(values) // 2]))
+    idx = min(range(len(values)), key=lambda i: abs(values[i] - cur))
+    st.markdown(f"**{label}** — nivel actual: **{labels[idx]}**")
+    ll = label.lower()
+    c = st.columns(4)
+    changed = None
+    if c[0].button("➖ Scade", key=f"{key}_dec", use_container_width=True, help=f"Scade {ll}"):
+        changed = max(0, idx - 1)
+    if c[1].button("➕ Crește", key=f"{key}_inc", use_container_width=True, help=f"Crește {ll}"):
+        changed = min(len(values) - 1, idx + 1)
+    if c[2].button("⏬ Minim", key=f"{key}_min", use_container_width=True, help=f"{label} la minim"):
+        changed = 0
+    if c[3].button("⏫ Maxim", key=f"{key}_max", use_container_width=True, help=f"{label} la maxim"):
+        changed = len(values) - 1
+    if changed is not None:
+        st.session_state[key] = values[changed]
+        st.rerun()
+    if help:
+        st.caption(help)
+    if test_fn is not None:
+        if st.button(test_label or f"🔊 Testează {ll}", key=f"{key}_test",
+                     use_container_width=True):
+            test_fn()
+
+
+def _test_voice_volume():
+    vid = _any_voice_id()
+    if not vid:
+        st.warning("Nu am o voce disponibilă de testat.")
+        return
+    try:
+        a = voice.text_to_speech("Așa se aude vocea personajului.", vid)
+        _play_voice_ambient([a], None, "voltest_voice")
+    except Exception:  # noqa
+        st.warning("Nu am putut testa acum.")
+
+
+def _test_call_volume():
+    vid = _any_voice_id()
+    if not vid:
+        st.warning("Nu am o voce disponibilă de testat.")
+        return
+    try:
+        a = voice.text_to_speech("Așa se aude vocea în timpul apelului.", vid)
+        _play_voice_ambient([a], None, "voltest_call",
+                            voice_vol=st.session_state.get("call_volume", 100) / 100.0)
+    except Exception:  # noqa
+        st.warning("Nu am putut testa acum.")
+
+
+def _test_ambient_volume():
+    try:
+        cache = st.session_state.setdefault("_amblib_cache", {})
+        d = cache.get("__test_rain__")
+        if d is None:
+            d = voice.sound_effect("gentle steady rain, calm cozy ambience", duration=10.0)
+            cache["__test_rain__"] = d
+        _play_voice_ambient([], d, "voltest_amb")
+    except Exception:  # noqa
+        st.warning("Nu am putut testa acum.")
+
+
+def _test_fx_volume():
+    try:
+        cache = st.session_state.setdefault("_amblib_cache", {})
+        d = cache.get("__test_fx__")
+        if d is None:
+            d = voice.sound_effect(
+                "a short pleasant sequence: a soft click, a gentle whoosh and a light chime",
+                duration=5.0)
+            cache["__test_fx__"] = d
+        _play_voice_ambient([], d, "voltest_fx",
+                            amb_gain=st.session_state.get("fx_volume", 100) / 100.0)
+    except Exception:  # noqa
+        st.warning("Nu am putut testa acum.")
+
 
 
 def _playlist_intro_text(char, names):
@@ -3587,7 +3695,8 @@ def render_chat(char):
                     except Exception:  # noqa
                         _data = None
             if _data:
-                _play_voice_ambient([], _data, f"amblib_{active_conv}")
+                _play_voice_ambient([], _data, f"amblib_{active_conv}",
+                                    amb_gain=st.session_state.get("fx_volume", 100) / 100.0)
                 st.caption(f"🔊 Se aude: {_amb_choice}")
             else:
                 st.warning("Nu am putut crea sunetul acum. Încearcă din nou.")
@@ -3806,7 +3915,8 @@ def render_call(char):
                 with st.spinner("Pregătesc fundalul sonor..."):
                     maybe_ambient(char, aid, last_assistant["content"])  # fundal continuu potrivit locului
             # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
-            _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid)
+            _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid,
+                                voice_vol=st.session_state.get("call_volume", 100) / 100.0)
             st.audio(_ab, format="audio/mp3")  # control de reascultare (fără autoplay dublu)
 
     st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
@@ -4471,7 +4581,7 @@ def render_personaje():
             st.session_state["_open_auth_hint"] = True
             st.rerun()
         if st.session_state.get("_open_auth_hint"):
-            st.info("👈 Deschide **🔐 Autentificare** din bara laterală și alege fila "
+            st.info("👈 Deschide **🔐 Autentificare** din bara laterală și alege "
                     "**„Cont nou”** ca să-ți creezi contul. Personajele create acum vor trece "
                     "automat în contul tău.")
     if st.button("＋  Personaj nou", use_container_width=True, type="primary", key="new-char-main"):
@@ -4658,30 +4768,23 @@ def render_profil():
                 help="Redă sunete de fundal potrivite acțiunii (ex: vase, parc, ploaie)",
                 key="ambient_fx_toggle",
             )
-            _amb_levels = {"Oprit": 0, "Încet": 50, "Mediu": 100, "Tare": 175,
-                           "Foarte tare": 250, "Maxim": 350}
-            _cur_amb = int(st.session_state.get("ambient_volume", 100))
-            _amb_lbl = min(_amb_levels, key=lambda k: abs(_amb_levels[k] - _cur_amb))
-            _sel_amb = st.selectbox(
-                "🎧 Cât de tare e fundalul (ambianța)",
-                list(_amb_levels.keys()),
-                index=list(_amb_levels.keys()).index(_amb_lbl),
-                key="ambient_volume_sel",
-                help="Alege cât de tare se aude sunetul de fundal sub voce. «Foarte tare» și «Maxim» "
-                     "îl fac mult mai puternic. Butoane clare, fără a fi nevoie să tragi de ceva.",
-            )
-            st.session_state.ambient_volume = _amb_levels[_sel_amb]
-            _voi_levels = {"Foarte încet": 40, "Încet": 70, "Normal": 100}
-            _cur_voi = int(st.session_state.get("voice_volume", 100))
-            _voi_lbl = min(_voi_levels, key=lambda k: abs(_voi_levels[k] - _cur_voi))
-            _sel_voi = st.selectbox(
-                "🔊 Cât de tare e vocea",
-                list(_voi_levels.keys()),
-                index=list(_voi_levels.keys()).index(_voi_lbl),
-                key="voice_volume_sel",
-                help="Pune vocea mai încet dacă vrei ca fundalul (ambianța) să se audă mai bine.",
-            )
-            st.session_state.voice_volume = _voi_levels[_sel_voi]
+            st.markdown("#### 🔊 Volume (apasă butoanele Crește / Scade / Minim / Maxim)")
+            _volume_control("🗣️ Volumul vocii", "voice_volume", _VOL_STD, test_fn=_test_voice_volume,
+                            help="Pune vocea mai încet dacă vrei ca fundalul să se audă mai bine.")
+            _volume_control("🎧 Volumul fundalului (ambianța)", "ambient_volume", _VOL_AMB,
+                            test_fn=_test_ambient_volume,
+                            help="«Foarte tare» și «Maxim» fac fundalul mult mai puternic sub voce.")
+            _volume_control("🔔 Volumul notificărilor", "notif_volume", _VOL_STD,
+                            test_fn=lambda: play_sound("notification"),
+                            help="Cât de tare se aud notificările și mesajele primite.")
+            _volume_control("📞 Volumul apelului", "call_volume", _VOL_STD, test_fn=_test_call_volume,
+                            help="Cât de tare se aude vocea personajului în timpul apelului.")
+            _volume_control("✨ Volumul efectelor audio", "fx_volume", _VOL_STD, test_fn=_test_fx_volume,
+                            help="Cât de tare se aud efectele și sunetele de fundal ascultate separat.")
+            _volume_control("🖱️ Volumul sunetelor de interfață", "ui_volume", _VOL_STD,
+                            test_fn=lambda: play_sound("send"),
+                            help="Cât de tare se aud sunetele de la trimiterea mesajelor și butoane.")
+            # (volumul vocii e acum în secțiunea „🔊 Volume” de mai sus)
             _spd_opts = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
             _csp = float(st.session_state.get("voice_speed", 1.0))
             st.session_state.voice_speed = st.selectbox(
@@ -4705,17 +4808,7 @@ def render_profil():
                 help="Comută între mod zi (luminos) și noapte (întunecat)",
                 key="theme_light_toggle",
             )
-            _nv_levels = {"Oprit": 0, "Încet": 30, "Mediu": 60, "Tare": 85, "Maxim": 100}
-            _cur_nv = int(st.session_state.get("notif_volume", 70))
-            _nv_lbl = min(_nv_levels, key=lambda k: abs(_nv_levels[k] - _cur_nv))
-            _sel_nv = st.selectbox(
-                "🔊 Cât de tare sunt notificările",
-                list(_nv_levels.keys()),
-                index=list(_nv_levels.keys()).index(_nv_lbl),
-                key="notif_volume_sel",
-                help="Cât de tare se aud sunetele de notificare și de mesaj. Alegi dintr-o listă, fără a trage de ceva.",
-            )
-            st.session_state.notif_volume = _nv_levels[_sel_nv]
+            # (volumul notificărilor e acum în secțiunea „🔊 Volume” de mai sus)
             _snd_opts = ["iPhone", "Samsung"]
             _cur_snd = st.session_state.get("sound_theme", "iPhone")
             _snd = st.selectbox(
