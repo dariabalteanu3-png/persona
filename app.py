@@ -1214,6 +1214,23 @@ def sound_bytes(kind):
     return ui_sound(f"{_sound_prefix()}_{kind}.wav")
 
 
+def _voice_error_msg(e):
+    """Transformă o eroare de generare a vocii într-un mesaj clar și accesibil (română).
+    Setează flag-ul `voice_quota_out` când creditele ElevenLabs s-au terminat."""
+    body = str(getattr(e, "body", "") or "")
+    code = getattr(e, "status_code", None)
+    txt = (body + " " + str(e)).lower()
+    if "quota" in txt or "credit" in txt:
+        st.session_state["voice_quota_out"] = True
+        return ("🔇 Vocea e oprită momentan pentru că s-au terminat creditele de voce ElevenLabs. "
+                "Textul mesajelor merge normal. Vocea revine după ce contul ElevenLabs are din nou "
+                "credite (reînnoirea lunară a abonamentului sau adăugarea de credite).")
+    if code in (401, 403) or "api key" in txt or "unauthorized" in txt:
+        return ("🔑 Nu pot folosi vocea acum — pare o problemă cu cheia ElevenLabs. "
+                "Verifică setările aplicației (Secrets).")
+    return "Nu am putut reda vocea acum. Mai încearcă puțin mai târziu. 💛"
+
+
 def haptic(ms=15):
     components.html(
         f"<script>try{{window.parent.navigator.vibrate&&window.parent.navigator.vibrate({ms});"
@@ -3200,7 +3217,7 @@ def render_chat(char):
                                 maybe_ambient(char, mid, m["content"])
                         st.session_state["autoplay_mid"] = mid
                     except Exception as e:  # noqa
-                        st.error(f"Redarea vocii a eșuat: {e}")
+                        st.error(_voice_error_msg(e))
                 if st.session_state.get(f"audio_{mid}"):
                     if st.session_state.get("autoplay_mid") == mid:
                         # redare fiabilă pe telefon + fundal ambiental sub voce (dacă există)
@@ -3304,12 +3321,16 @@ def render_chat(char):
                     st.session_state[f"audio_{_gv}"] = voice.text_to_speech(
                         _m["content"], char["voice_id"], **tts_kwargs)
                     st.session_state["autoplay_mid"] = _gv
-                except Exception:  # noqa
-                    pass
+                except Exception as _e:  # noqa
+                    _voice_error_msg(_e)  # marchează dacă s-au terminat creditele (banner clar)
             st.rerun()
 
     prompt = st.chat_input(f"Scrie-i lui {char['name']}...")
     proactive_fragment(char["id"], active_conv)
+    if st.session_state.get("voice_quota_out"):
+        st.warning("🔇 Vocea e oprită momentan: s-au terminat creditele de voce ElevenLabs. "
+                   "Textul și chatul funcționează normal; vocea revine când contul ElevenLabs are "
+                   "din nou credite (reînnoire lunară sau adăugare de credite).")
     st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
     # 🎭 dispoziția de azi + 🎨 tonul vocii + 🗓️ recap + 😴 adoarme cu mine
