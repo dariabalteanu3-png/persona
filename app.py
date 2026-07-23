@@ -2683,6 +2683,16 @@ def render_create():
                 st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format="audio/wav")
             except Exception:  # noqa
                 st.warning("Mostra salvată nu poate fi previzualizată.")
+            _saved_ref = edit_char.get("voice_ref_text", "")
+            if _saved_ref:
+                st.markdown(
+                    f"**📝 Textul salvat al mostrei:**\n\n> {_saved_ref}",
+                    help="Acesta este textul rostit în mostra audio salvată. "
+                         "F5-TTS îl folosește pentru a recunoaște vocea."
+                )
+            else:
+                st.warning("⚠️ Nu există niciun text salvat pentru această mostră. "
+                           "Editează personajul și re-încarcă mostra cu textul rostit.")
         else:
             st.info("Încarcă întâi o mostră nouă pentru a activa vocea.")
     elif mode.startswith("🗑️"):
@@ -2697,14 +2707,36 @@ def render_create():
             type=["mp3", "wav", "m4a", "ogg", "flac"],
             key="cf_clone_file",
         )
+        # Auto-transcriere: când se încarcă un fișier nou, transcriem automat
+        if clone_file is not None:
+            _fhash = hashlib.md5(clone_file.getvalue()).hexdigest()
+            if st.session_state.get("_cf_file_hash") != _fhash:
+                st.session_state["_cf_file_hash"] = _fhash
+                with st.spinner("🎙️ Transcriu automat mostra audio... (câteva secunde)"):
+                    try:
+                        _auto_text = voice.transcribe_sample(
+                            clone_file.getvalue(), clone_file.name
+                        )
+                        st.session_state.cf_ref_text = _auto_text
+                        st.session_state["_cf_auto_ok"] = True
+                    except Exception as _te:
+                        st.session_state["_cf_auto_ok"] = False
+                        st.session_state["_cf_auto_err"] = str(_te)
+            if st.session_state.get("_cf_auto_ok"):
+                st.success("✅ Textul a fost completat automat din înregistrare. Poți verifica sau corecta mai jos.")
+            elif st.session_state.get("_cf_auto_err"):
+                st.warning(f"⚠️ Nu am putut transcrie automat ({st.session_state['_cf_auto_err']}). "
+                           "Scrie tu textul mai jos sau reîncearcă.")
         st.text_area(
-            "Textul exact rostit în mostră",
-            placeholder="Scrie exact cuvintele rostite în fișier, în aceeași limbă.",
+            "Textul rostit în mostră (completat automat sau scrie tu)",
+            placeholder="Textul se completează automat când încarci fișierul. "
+                        "Dacă nu s-a completat, scrie ce ai spus în înregistrare.",
             key="cf_ref_text",
             height=90,
-            help="F5-TTS folosește acest text pentru a înțelege mostra de voce.",
+            help="F5-TTS folosește acest text pentru a recunoaște vocea. "
+                 "De obicei se completează automat — nu trebuie să scrii nimic.",
         )
-        st.caption("Serviciu gratuit: modelul open-source F5-TTS din Hugging Face.")
+        st.caption("Serviciu gratuit: F5-TTS + Whisper din Hugging Face. Transcrierea e automată.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -2731,8 +2763,19 @@ def render_create():
             voice_id = voice_name = None
             voice_sample_b64 = voice_sample_name = voice_ref_text = None
         elif mode.startswith("Încarcă"):
-            if not clone_file or not (clone_name or "").strip() or not st.session_state.get("cf_ref_text", "").strip():
-                st.error("Ai nevoie de un nume, o mostră audio și textul exact rostit în mostră.")
+            _ref_txt = st.session_state.get("cf_ref_text", "").strip()
+            if not clone_file:
+                st.error("Te rog încarcă un fișier audio pentru mostră.")
+                return
+            if not (clone_name or "").strip():
+                st.error("Te rog dă un nume vocii (ex. «Vocea mea»).")
+                return
+            if not _ref_txt:
+                st.error(
+                    "Nu am putut transcrie automat mostra. "
+                    "Scrie în căsuța de mai sus exact ce ai spus în înregistrare, "
+                    "apoi apasă din nou «Salvează»."
+                )
                 return
             try:
                 sample_bytes = clone_file.getvalue()

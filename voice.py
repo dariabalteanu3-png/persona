@@ -22,9 +22,11 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
 F5_TTS_SPACE = os.environ.get("F5_TTS_SPACE", "mrfakename/E2-F5-TTS")
+_WHISPER_SPACE = os.environ.get("WHISPER_SPACE", "openai/whisper")
 _client = None
 _handle_file = None
 _voice_samples = {}
+_whisper_client = None
 
 
 class VoiceGenerationError(RuntimeError):
@@ -49,6 +51,63 @@ def voice_id_for_sample(sample_bytes):
     if not sample_bytes:
         return None
     return "f5tts:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
+
+
+def transcribe_sample(audio_bytes, filename="audio.wav", language="ro"):
+    """Transcribe an audio sample using the STT module (Groq/Gemini) if available,
+    otherwise fall back to a free public Whisper Gradio Space on Hugging Face.
+    Returns the transcribed text or raises VoiceGenerationError on failure."""
+    global _whisper_client
+    # Try existing STT providers first (Groq / Gemini) — they're faster
+    try:
+        import stt as _stt
+        from provider import USE_GROQ, USE_GEMINI
+        if USE_GROQ or USE_GEMINI:
+            return _stt.transcribe(audio_bytes, filename)
+    except Exception:
+        pass
+    # Fallback: free public Whisper space via gradio_client
+    try:
+        from gradio_client import Client, handle_file
+    except ImportError as exc:
+        raise VoiceGenerationError("gradio_client lipsește.") from exc
+    try:
+        if _whisper_client is None:
+            _whisper_client = Client(_WHISPER_SPACE)
+        suffix = Path(str(filename or "audio.wav")).suffix.lower()
+        if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}:
+            suffix = ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+        try:
+            # openai/whisper space: predict(audio, task) → text string
+            result = _whisper_client.predict(
+                handle_file(tmp_path),
+                "transcribe",          # task: 'transcribe' (nu 'translate')
+                api_name="/predict",
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        if isinstance(result, dict):
+            text = result.get("text") or result.get("output") or ""
+        elif isinstance(result, (list, tuple)):
+            text = str(result[0]) if result else ""
+        else:
+            text = str(result or "")
+        text = text.strip()
+        if not text:
+            raise VoiceGenerationError("Transcrierea nu a returnat text.")
+        return text
+    except VoiceGenerationError:
+        raise
+    except Exception as exc:
+        raise VoiceGenerationError(
+            f"Nu am putut transcrie automat mostra: {exc}"
+        ) from exc
 
 
 def register_voice(voice_id, sample_b64, reference_text, sample_name="reference.wav"):
@@ -144,7 +203,7 @@ def _generate(text, sample_bytes, reference_text, sample_name="reference.wav"):
                 handle_file(reference_file.name),
                 str(reference_text).strip(),
                 str(text).strip() or "...",
-                False,
+                True,   # remove_silence → voce mai curată, fără pauze lungi la început/sfârșit
                 api_name="/predict",
             )
         except Exception as exc:  # noqa: broad-except
@@ -232,6 +291,37 @@ def _ambient_wav(preset, duration=12.0, sample_rate=16000):
             value = previous * 0.3 + math.sin(2 * math.pi * 0.18 * t) * 0.18
         elif preset == "train":
             value = math.sin(2 * math.pi * 3.2 * t) * 0.16 + previous * 0.3
+        elif preset == "forest":
+            # foliaj ușor + vânt blând + ocazional o pasăre
+            value = previous * 0.62 + noise * 0.06
+            value += math.sin(2 * math.pi * 0.07 * t) * 0.08
+            if rng.random() < 0.00018:
+                value += math.sin(2 * math.pi * rng.uniform(1800, 3400) * t) * rng.uniform(0.1, 0.28)
+        elif preset == "cafe":
+            # murmur de fond + ocazional zgomot de ceașcă / mașinărie de cafea
+            value = previous * 0.55 + noise * 0.04
+            if rng.random() < 0.00030:
+                value += rng.uniform(-0.45, 0.45)
+            value += math.sin(2 * math.pi * 0.11 * t) * 0.04
+        elif preset == "city":
+            # trafic continuu + bocănituri ocazionale de motor / claxon scurt
+            value = previous * 0.50 + noise * 0.08
+            value += math.sin(2 * math.pi * 0.04 * t) * 0.10
+            if rng.random() < 0.00055:
+                value += rng.uniform(-0.65, 0.65)
+        elif preset == "countryside":
+            # vânt fin + păsări dimineață + greierei ocazionali
+            value = previous * 0.70 + noise * 0.03
+            value += math.sin(2 * math.pi * 0.06 * t) * 0.06
+            chirp2 = max(0.0, math.sin(2 * math.pi * 2.8 * t)) ** 22
+            value += chirp2 * math.sin(2 * math.pi * 3200 * t) * 0.10
+            if rng.random() < 0.00012:
+                value += math.sin(2 * math.pi * rng.uniform(2000, 4000) * t) * rng.uniform(0.08, 0.18)
+        elif preset == "snow":
+            # vânt arctic foarte lin + tăcere cu pulsații rare
+            value = previous * 0.88 + math.sin(2 * math.pi * 0.03 * t) * 0.05
+            if rng.random() < 0.00012:
+                value += rng.uniform(-0.25, 0.25)
         else:
             value = previous * 0.25
             if rng.random() < 0.00025:

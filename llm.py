@@ -79,13 +79,15 @@ def _pollinations_text(system, text):
     Încearcă mai multe modele/endpointuri, ca să reziste când unul e temporar căzut (502)."""
     import requests
     msgs = _groq_messages(system, text)
-    models = ["openai", "openai-large", "mistral", "llama"]
+    # Timeout scurt per cerere (25s) ca să nu aștepte utilizatorul la nesfârșit;
+    # doar 3 modele, nu 6 — eșecul e detectat rapid și se încearcă alternativa.
+    models = ["openai", "openai-large", "mistral"]
     last = None
-    for attempt in range(6):
+    for attempt in range(3):
         model = models[attempt % len(models)]
         try:
             r = requests.post("https://text.pollinations.ai/openai",
-                              json={"model": model, "messages": msgs, "private": True}, timeout=40)
+                              json={"model": model, "messages": msgs, "private": True}, timeout=25)
             if r.status_code == 200:
                 c = ""
                 try:
@@ -99,11 +101,11 @@ def _pollinations_text(system, text):
             last = f"openai/{model} HTTP {r.status_code}"
         except Exception as e:  # noqa
             last = type(e).__name__
-        time.sleep(1.0)
+        time.sleep(0.5)
     # ultimă încercare: endpoint-ul simplu (text brut)
     try:
         r = requests.post("https://text.pollinations.ai/",
-                          json={"model": "openai", "messages": msgs}, timeout=40)
+                          json={"model": "openai", "messages": msgs}, timeout=25)
         body = (r.text or "").strip()
         if r.status_code == 200 and body and not body.lstrip().startswith("<"):
             return body

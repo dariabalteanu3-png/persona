@@ -33,3 +33,14 @@ confirmation phrase.
 - Keep the existing Streamlit/Python structure.
 - Prefer free/open-source services for voice generation.
 - Keep user-facing text in Romanian.
+- The primary user is visually impaired — minimize required manual text input wherever possible.
+
+## Recent fixes
+
+- **Transcriere automată voce** (`voice.py`, `app.py`): când utilizatoarea încarcă o mostră audio,
+  aplicația o transcrie automat prin Whisper (spațiu public Hugging Face). Textul de referință
+  F5-TTS se completează singur — nu mai trebuie scris manual.
+- **Sunete ambientale lipsă** (`voice.py`): preseturile `forest`, `cafe`, `city`, `countryside`,
+  `snow` aveau sinteze proprii, nu mai cad pe ramura generică.
+- **Afișare text referință salvat** (`app.py`): în modul „Folosește mostra salvată" se afișează
+  acum textul salvat ca referință, pentru verificare.
