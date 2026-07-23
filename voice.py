@@ -6,10 +6,15 @@ syntax check).  No paid provider or API key is used here.
 """
 
 import base64
+import hashlib
+import io
+import math
 import os
+import random
 import re
 import tempfile
 import urllib.request
+import wave
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -192,11 +197,95 @@ def expressify(text):
     return text or "..."
 
 
-def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Ambient generation is not part of F5-TTS and no longer uses a paid API."""
-    raise VoiceGenerationError(
-        "Efectele ambientale generate nu sunt disponibile în modul gratuit F5-TTS."
+def _ambient_wav(preset, duration=12.0, sample_rate=16000):
+    """Create a small mono WAV ambience locally, with no API or subscription."""
+    duration = max(2.0, min(float(duration), 30.0))
+    count = int(sample_rate * duration)
+    rng = random.Random(hashlib.sha256(preset.encode("utf-8")).digest())
+    previous = 0.0
+    samples = []
+    for index in range(count):
+        t = index / sample_rate
+        noise = rng.uniform(-1.0, 1.0)
+        previous = previous * 0.985 + noise * 0.015
+        if preset == "rain":
+            value = noise * 0.14 + previous * 0.42
+            if rng.random() < 0.00035:
+                value += rng.uniform(-0.8, 0.8)
+        elif preset == "storm":
+            value = noise * 0.18 + previous * 0.44
+            if rng.random() < 0.00065:
+                value += rng.uniform(-0.95, 0.95)
+        elif preset == "ocean":
+            value = (math.sin(2 * math.pi * 0.09 * t) ** 8) * 0.32
+            value += previous * 0.28
+        elif preset == "fire":
+            value = previous * 0.34
+            if rng.random() < 0.0012:
+                value += rng.uniform(-0.8, 0.8)
+        elif preset == "wind":
+            value = previous * 0.82 + math.sin(2 * math.pi * 0.05 * t) * 0.12
+        elif preset == "crickets":
+            chirp = max(0.0, math.sin(2 * math.pi * 4.2 * t)) ** 18
+            value = chirp * math.sin(2 * math.pi * 2400 * t) * 0.22 + previous * 0.12
+        elif preset == "river":
+            value = previous * 0.3 + math.sin(2 * math.pi * 0.18 * t) * 0.18
+        elif preset == "train":
+            value = math.sin(2 * math.pi * 3.2 * t) * 0.16 + previous * 0.3
+        else:
+            value = previous * 0.25
+            if rng.random() < 0.00025:
+                value += rng.uniform(-0.55, 0.55)
+        samples.append(value)
+
+    peak = max((abs(value) for value in samples), default=1.0) or 1.0
+    pcm = b"".join(
+        int(max(-1.0, min(1.0, value / peak)) * 32767).to_bytes(
+            2, "little", signed=True
+        )
+        for value in samples
     )
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm)
+    return output.getvalue()
+
+
+def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
+    """Return a locally synthesized ambience; no paid provider is contacted."""
+    text = str(prompt or "").lower()
+    presets = (
+        ("storm", ("tunet", "furtun", "thunder", "storm")),
+        ("rain", ("ploaie", "rain")),
+        ("ocean", ("mare", "val", "ocean", "wave")),
+        ("fire", ("foc", "campfire", "fire", "șemineu")),
+        ("wind", ("vânt", "wind", "breeze")),
+        ("crickets", ("greier", "cricket", "noapte")),
+        ("river", ("râu", "river", "apă")),
+        ("train", ("tren", "train")),
+        ("forest", ("pădure", "forest", "frunze")),
+        ("cafe", ("cafenea", "cafe", "coffee")),
+        ("city", ("oraș", "city", "trafic")),
+        ("countryside", ("țară", "sat", "countryside", "fermă")),
+        ("snow", ("ninso", "zăpad", "snow")),
+    )
+    preset = next(
+        (name for name, words in presets if any(word in text for word in words)),
+        "room",
+    )
+    return _ambient_wav(preset, duration=duration)
+
+
+def forget_registered_voices(voice_ids=None):
+    """Forget persisted voice samples from this process after user deletion."""
+    if voice_ids is None:
+        _voice_samples.clear()
+        return
+    for voice_id in voice_ids:
+        _voice_samples.pop(voice_id, None)
 
 
 def text_to_speech(

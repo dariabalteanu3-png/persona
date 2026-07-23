@@ -18,8 +18,15 @@ Character speech uses the public Hugging Face `mrfakename/E2-F5-TTS` Space throu
 When creating a character, upload a short reference recording and enter the exact
 words spoken in it. Generated speech is returned and downloaded as WAV.
 
-The public Space may queue requests when busy. The application reports a clear
-retry message rather than silently falling back to a paid provider.
+Background ambience is now generated locally as WAV presets inside the app
+(rain, storm, ocean, forest, fire, café, wind, crickets, city, snow, room,
+countryside, river, and train). Selecting and playing these sounds does not call
+an external audio provider or require a subscription.
+
+From the profile settings, “Șterge vocile mele” removes the saved reference
+samples and voice settings from the user's characters while preserving the
+characters, conversations, and messages. The action requires an explicit
+confirmation phrase.
 
 ## Project preferences
 

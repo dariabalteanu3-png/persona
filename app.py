@@ -922,36 +922,23 @@ def avatar_html(char, size=56, radius=14):
     return f'<span style="font-size:{int(size * 0.62)}px;line-height:1">{char.get("avatar", "🎭")}</span>'
 
 
-# Bibliotecă de sunete de fundal (categorii pe care utilizatorul le poate alege și asculta).
-# Cheie = etichetă în română (accesibilă); valoare = prompt EN pt generatorul de efecte sonore.
+# Bibliotecă locală de sunete de fundal. Valorile sunt preseturi pentru generatorul
+# WAV din voice.py; nu sunt prompturi și nu trimit nimic către un serviciu extern.
 AMBIENT_LIBRARY = {
-    "🌧️ Ploaie liniștită": "gentle steady rain falling, soft drops on a window, calm cozy rain ambience",
-    "⛈️ Ploaie cu tunete": "heavy rain with distant rumbling thunder and occasional closer thunderclaps, storm ambience",
-    "🌊 Valuri la mare": "ocean waves rolling onto the shore, gentle sea breeze, distant seagulls",
-    "🌲 Pădure": "peaceful forest ambience, birds chirping, rustling leaves, light wind through trees",
-    "🔥 Foc de tabără": "crackling campfire, wood popping and hissing, soft night wind, distant crickets",
-    "☕ Cafenea": "cozy coffee shop ambience, quiet murmuring chatter, espresso machine, cups clinking",
-    "🌬️ Vânt liniștit": "soft gentle wind blowing, calm breeze, subtle whooshing through the air",
-    "🦗 Noapte cu greieri": "peaceful warm summer night, crickets chirping steadily, gentle breeze, distant owl",
-    "🏙️ Oraș": "busy city street ambience, distant traffic hum, people passing by, faint car horns",
-    "❄️ Ninsoare liniștită": "very quiet snowy winter night, muffled soft wind, calm gentle snowfall ambience",
-    "🕊️ Cameră liniștită": "cozy quiet room tone, faint clock ticking, occasional soft creak, calm and warm",
-    "🎹 Ploaie cu pian slab": "soft steady rain with a faint distant calm piano, relaxing lofi rainy ambience",
-    "🌅 Dimineață la țară": "calm countryside morning, rooster in the distance, birds, light breeze, gentle nature",
-    "🌊 Râu de munte": "clear mountain river stream flowing over rocks, birds, wind in pine trees",
-    "🚂 Tren liniștit": "gentle train ride ambience, steady rhythmic clacking on tracks, soft rumble",
-    "🌸 Primăvară afară": "spring outdoors, birds singing brightly, gentle warm breeze, occasional light spring rain, nature waking up",
-    "☀️ Vară afară": "hot summer day outdoors, cicadas and crickets, birds, warm breeze, distant children playing",
-    "🍂 Toamnă afară": "autumn outdoors, dry leaves rustling and crunching underfoot, cool gusty wind, distant crows",
-    "❄️ Iarnă afară": "cold winter outdoors, howling wind and blizzard, snow crunching underfoot, muffled distant sounds",
-    "🏠 Iarnă în casă": "cozy winter indoors, radiator ticking, warm room tone, wind against the closed window, soft slippers shuffling",
-    "🐔 La țară (curte)": "countryside farmyard, rooster crowing, hens clucking, distant cow mooing, sheep, a dog barking, birds, light wind",
-    "🚉 În gară": "train station ambience, several trains arriving and departing, muffled platform announcements, crowd murmur, rolling luggage",
-    "🛒 Supermarket": "supermarket ambience, shopping carts rolling, checkout beeps scanning products, quiet crowd, faint store announcement",
-    "🔥 Grătar (petrecere)": "backyard barbecue, meat sizzling on the grill, crackling fire, cheerful people chatting and laughing, faint music",
-    "🎶 Muzică din boxă (acasă)": "cozy home with soft instrumental music from a speaker across the room, gentle warm room ambience",
-    "🌉 Pe ponton": "wooden lake pier, footsteps on wooden planks, water gently lapping against posts, wind, distant birds and a boat",
-    "🌃 Noapte în oraș": "quiet late-night city, occasional distant car passing, faint hum, gentle wind, a far-off dog",
+    "🌧️ Ploaie liniștită": "rain",
+    "⛈️ Ploaie cu tunete": "storm",
+    "🌊 Valuri la mare": "ocean",
+    "🌲 Pădure": "forest",
+    "🔥 Foc de tabără": "fire",
+    "☕ Cafenea": "cafe",
+    "🌬️ Vânt liniștit": "wind",
+    "🦗 Noapte cu greieri": "crickets",
+    "🏙️ Oraș": "city",
+    "❄️ Ninsoare liniștită": "snow",
+    "🕊️ Cameră liniștită": "room",
+    "🌅 Dimineață la țară": "countryside",
+    "🌊 Râu de munte": "river",
+    "🚂 Tren liniștit": "train",
 }
 
 
@@ -1130,9 +1117,9 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
             amb_vols.append(round(_v, 3))
             amb_html += (
                 f'<audio id="{aid}" loop preload="auto">'
-                f'<source src="data:audio/mp3;base64,{amb_b64}" type="audio/mp3"></audio>'
+                f'<source src="data:audio/wav;base64,{amb_b64}" type="audio/wav"></audio>'
             )
-    amb_src = ("data:audio/mp3;base64," + amb_b64) if amb_b64 else ""
+    amb_src = ("data:audio/wav;base64," + amb_b64) if amb_b64 else ""
     js = (
         _AMBIENT_JS
         .replace("__SRCS__", srcs_js)
@@ -3214,7 +3201,7 @@ def render_chat(char):
                 cue = st.session_state.get(f"sfxcue_{m['id']}", "ambianță")
                 st.caption(f"🎧 {cue}")
                 ap = st.session_state.get("ambient_play_mid") == m["id"]
-                st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/mp3", autoplay=ap)
+                st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/wav", autoplay=ap)
                 if ap:
                     st.session_state["ambient_play_mid"] = None
 
@@ -3716,7 +3703,7 @@ def render_chat(char):
             if _data is None:
                 with st.spinner("Pregătesc sunetul de fundal..."):
                     try:
-                        _data = voice.sound_effect(AMBIENT_LIBRARY[_amb_choice], duration=22.0)
+                        _data = voice.sound_effect(AMBIENT_LIBRARY[_amb_choice], duration=12.0)
                         _cache[_amb_choice] = _data
                     except Exception:  # noqa
                         _data = None
@@ -3870,7 +3857,7 @@ def render_call(char):
             unsafe_allow_html=True,
         )
         if st.session_state.get("ringtone_audio"):
-            st.audio(st.session_state["ringtone_audio"], format="audio/mp3", autoplay=True)
+                st.audio(st.session_state["ringtone_audio"], format="audio/wav", autoplay=True)
         cc = st.columns([1, 2, 1])
         with cc[1]:
             a, b = st.columns(2)
@@ -3944,7 +3931,7 @@ def render_call(char):
             # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
             _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid,
                                 voice_vol=st.session_state.get("call_volume", 100) / 100.0)
-            st.audio(_ab, format="audio/mp3")  # control de reascultare (fără autoplay dublu)
+            st.audio(_ab, format="audio/wav")  # control de reascultare (fără autoplay dublu)
 
     st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
                "îți va cere permisiunea pentru microfon — apasă „Permite”.")
@@ -4761,7 +4748,38 @@ def render_profil():
             if st.session_state.get("_settings_audio"):
                 if st.session_state.pop("_play_settings_audio", False):
                     _play_voice_ambient([st.session_state["_settings_audio"]], None, "settings_read")
-                st.audio(st.session_state["_settings_audio"], format="audio/mp3")
+                st.audio(st.session_state["_settings_audio"], format="audio/wav")
+            st.markdown("---")
+            st.markdown("#### 🗑️ Vocile mele")
+            _voice_chars = [
+                c for c in db.list_characters(owner_id=user["id"])
+                if c.get("voice_id") or c.get("voice_sample_b64")
+            ]
+            st.caption(
+                f"Ai {len(_voice_chars)} "
+                f"{'personaj cu voce salvată' if len(_voice_chars) == 1 else 'personaje cu voci salvate'}. "
+                "Ștergerea păstrează personajele, conversațiile și mesajele."
+            )
+            if _voice_chars:
+                if st.checkbox("Înțeleg că mostrele vocale vor fi șterse definitiv",
+                               key="delete_voices_confirm"):
+                    typed = st.text_input(
+                        "Scrie ȘTERGE VOCILE pentru a confirma",
+                        key="delete_voices_typed",
+                    )
+                    if st.button(
+                        "🗑️ Șterge vocile mele",
+                        key="delete_voices_btn",
+                        use_container_width=True,
+                        disabled=typed.strip().upper() not in ("ȘTERGE VOCILE", "STERGE VOCILE"),
+                    ):
+                        _voice_ids = [c.get("voice_id") for c in _voice_chars if c.get("voice_id")]
+                        removed = db.delete_user_voices(user["id"])
+                        voice.forget_registered_voices(_voice_ids)
+                        for key in ("_settings_audio", "_play_settings_audio"):
+                            st.session_state.pop(key, None)
+                        st.success(f"Au fost șterse vocile din {removed} personaje. Personajele și conversațiile au rămas.")
+                        st.rerun()
             _brain_opts = ["fast", "smart"]
             _brain_labels = {
                 "fast": "⚡ Rapid — răspunsuri iuți, gratuite",

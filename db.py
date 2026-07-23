@@ -358,6 +358,27 @@ def update_character(cid, data):
     return get_character(cid)
 
 
+def delete_user_voices(user_id):
+    """Remove only voice data from a user's characters; keep characters and chats."""
+    result = characters.update_many(
+        {"owner_id": user_id},
+        {
+            "$unset": {
+                "voice_id": "",
+                "voice_name": "",
+                "voice_sample_b64": "",
+                "voice_sample_name": "",
+                "voice_ref_text": "",
+                "voice_stability": "",
+                "voice_similarity": "",
+                "voice_style": "",
+                "voice_tone": "",
+            }
+        },
+    )
+    return result.modified_count
+
+
 def delete_character(cid):
     conv_ids = [c["id"] for c in list_conversations(cid)]
     characters.delete_one({"id": cid})

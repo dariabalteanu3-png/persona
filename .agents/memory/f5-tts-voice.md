@@ -15,3 +15,8 @@ switching providers.
 **How to apply:** Keep the Space endpoint inputs in sync with its live Gradio API:
 reference audio, reference text, generation text, and the remove-silence flag.
 Generated speech is WAV; preserve WAV MIME types in UI playback and downloads.
+
+Ambient sound is separate from voice generation: the app now uses locally
+synthesized WAV presets, so ambient playback does not require an external audio
+provider. User voice deletion clears only voice fields from owned characters and
+preserves characters, conversations, and messages.
