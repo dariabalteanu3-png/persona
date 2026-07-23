@@ -222,14 +222,6 @@ SECURITY_QUESTIONS = [
 TYPING_HTML = '<div class="typing"><span></span><span></span><span></span></div>'
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def cached_voices():
-    try:
-        return voice.list_voices()
-    except Exception as e:  # noqa
-        return {"error": str(e)}
-
-
 AMBIANCES = {
     "Neutru": {"grad": "linear-gradient(180deg,#15151b,#0e0e11)", "glow": "#FF7A59"},
     "Noir": {"grad": "linear-gradient(135deg,#11151c,#0a0d12)", "glow": "#8b96a5"},
@@ -275,23 +267,12 @@ PRESETS = [
 ]
 
 
-def _resolve_voice(preferred):
-    voices = cached_voices()
-    if isinstance(voices, dict) or not voices:
-        return None, None
-    for vid, vname in voices:
-        if preferred and preferred.lower() in vname.lower():
-            return vid, vname
-    return voices[0]
-
-
 def create_from_preset(p):
-    vid, vname = _resolve_voice(p.get("voice"))
     data = {
         "name": p["name"], "avatar": p["avatar"],
         "personality": p["personality"], "scenario": p["scenario"],
         "ambiance": p.get("ambiance", "Neutru"), "visibility": "private",
-        "voice_id": vid, "voice_name": vname,
+        "voice_id": None, "voice_name": None,
         "voice_stability": 0.5, "voice_similarity": 0.75, "voice_style": 0.0,
     }
     data["owner_id"] = _identity_id()
@@ -1046,7 +1027,7 @@ def _autoplay_voice(audio_bytes, uid):
     components.html(
         f'''
         <audio id="cv_{uid}" autoplay playsinline preload="auto">
-          <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+          <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
         <script>
         (function(){{
@@ -1123,7 +1104,7 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
     voices = [v for v in (voices or []) if v]
     if not voices and not ambient_bytes:
         return
-    srcs = ["data:audio/mp3;base64," + base64.b64encode(v).decode() for v in voices]
+    srcs = ["data:audio/wav;base64," + base64.b64encode(v).decode() for v in voices]
     srcs_js = json.dumps(srcs)
     if amb_gain is None:
         gain = max(0.0, int(st.session_state.get("ambient_volume", 100)) / 100.0)
@@ -1215,20 +1196,8 @@ def sound_bytes(kind):
 
 
 def _voice_error_msg(e):
-    """Transformă o eroare de generare a vocii într-un mesaj clar și accesibil (română).
-    Setează flag-ul `voice_quota_out` când creditele ElevenLabs s-au terminat."""
-    body = str(getattr(e, "body", "") or "")
-    code = getattr(e, "status_code", None)
-    txt = (body + " " + str(e)).lower()
-    if "quota" in txt or "credit" in txt:
-        st.session_state["voice_quota_out"] = True
-        return ("🔇 Vocea e oprită momentan pentru că s-au terminat creditele de voce ElevenLabs. "
-                "Textul mesajelor merge normal. Vocea revine după ce contul ElevenLabs are din nou "
-                "credite (reînnoirea lunară a abonamentului sau adăugarea de credite).")
-    if code in (401, 403) or "api key" in txt or "unauthorized" in txt:
-        return ("🔑 Nu pot folosi vocea acum — pare o problemă cu cheia ElevenLabs. "
-                "Verifică setările aplicației (Secrets).")
-    return "Nu am putut reda vocea acum. Mai încearcă puțin mai târziu. 💛"
+    """Transformă o eroare F5-TTS într-un mesaj clar și accesibil."""
+    return f"Nu am putut reda vocea acum: {e}"
 
 
 def haptic(ms=15):
@@ -1264,6 +1233,7 @@ def active_conv_id(char):
 
 
 def _tts_kwargs(char):
+    voice.register_character_voice(char)
     return dict(
         stability=char.get("voice_stability", 0.5),
         similarity_boost=char.get("voice_similarity", 0.75),
@@ -1272,18 +1242,15 @@ def _tts_kwargs(char):
 
 
 def _any_voice_id():
-    """O voce disponibilă: prima voce a personajelor userului, altfel prima voce ElevenLabs."""
+    """Return the first saved F5-TTS voice for the current user."""
     try:
         for c in db.list_characters(owner_id=_identity_id()):
             if c.get("voice_id"):
+                voice.register_character_voice(c)
                 return c["voice_id"]
     except Exception:  # noqa
         pass
-    try:
-        vs = voice.list_voices()
-        return vs[0][0] if vs else None
-    except Exception:  # noqa
-        return None
+    return None
 
 
 def _settings_summary_text():
@@ -2604,10 +2571,6 @@ if st.session_state.get("_theme_cookie_val") != _cur_theme:
 # ------------------------- create / edit form -------------------------
 def render_create():
     edit_char = db.get_character(st.session_state.editing_id) if st.session_state.editing_id else None
-    voices = cached_voices()
-    voice_error = isinstance(voices, dict)
-    if voice_error:
-        voices = []
 
     # Seed widgets once when opening the edit form
     if edit_char and st.session_state.get("_seeded_for") != edit_char["id"]:
@@ -2618,13 +2581,16 @@ def render_create():
         st.session_state.cf_scen = edit_char.get("scenario", "")
         st.session_state.cf_amb = edit_char.get("ambiance", "Neutru")
         st.session_state.cf_vis = edit_char.get("visibility", "private")
-        st.session_state.cf_mode = "Voce existentă" if edit_char.get("voice_id") else "🗑️ Fără voce (doar text)"
+        st.session_state.cf_mode = (
+            "Folosește mostra salvată"
+            if edit_char.get("voice_sample_b64")
+            else "🗑️ Fără voce (doar text)"
+        )
+        st.session_state.cf_clone_name = edit_char.get("voice_name", "")
+        st.session_state.cf_ref_text = edit_char.get("voice_ref_text", "")
         st.session_state.cf_stab = float(edit_char.get("voice_stability", 0.5))
         st.session_state.cf_sim = float(edit_char.get("voice_similarity", 0.75))
         st.session_state.cf_style = float(edit_char.get("voice_style", 0.0))
-        ids = [vid for (vid, _) in voices]
-        if edit_char.get("voice_id") in ids:
-            st.session_state.cf_voice = ids.index(edit_char["voice_id"])
         st.session_state["_seeded_for"] = edit_char["id"]
 
     if edit_char:
@@ -2637,8 +2603,8 @@ def render_create():
     else:
         st.markdown(
             '<div class="hero"><h1>Creează un <span class="accent">personaj</span></h1>'
-            "<p>Dă-i un nume, o personalitate și un scenariu. Alege o voce existentă sau "
-            "clonează una din propriul tău sample audio.</p></div>",
+            "<p>Dă-i un nume, o personalitate și un scenariu. Încarcă o mostră audio "
+            "și textul rostit pentru o voce gratuită F5-TTS.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -2711,54 +2677,47 @@ def render_create():
             st.image(base64.b64decode(st.session_state.cf_avatar_img), width=150)
 
     st.markdown("**Voce**")
-    if voice_error:
-        st.warning("Nu am putut încărca vocile ElevenLabs.")
-
     mode = st.radio(
         "Sursă voce",
-        ["Voce existentă", "Clonează o voce (upload sample)", "🗑️ Fără voce (doar text)"],
+        ["Încarcă o mostră F5-TTS", "Folosește mostra salvată", "🗑️ Fără voce (doar text)"],
         horizontal=True,
         label_visibility="collapsed",
         key="cf_mode",
     )
 
-    chosen_voice_id = None
-    chosen_voice_name = None
+    chosen_voice_id = edit_char.get("voice_id") if edit_char else None
+    chosen_voice_name = edit_char.get("voice_name") if edit_char else None
     clone_file = None
     clone_name = None
-
-    if mode == "Voce existentă":
-        if voices:
-            labels = [n for (_, n) in voices]
-            idx = st.selectbox(
-                "Alege vocea", range(len(labels)), format_func=lambda i: labels[i], key="cf_voice"
-            )
-            chosen_voice_id, chosen_voice_name = voices[idx]
-            if st.button("🔊 Ascultă mostra", key="cf_preview"):
-                try:
-                    with st.spinner("Generez mostra..."):
-                        st.session_state[f"sample_{chosen_voice_id}"] = voice.text_to_speech(
-                            "Salut! Așa sună vocea mea. Îmi place tare mult să spun povești. 😊",
-                            chosen_voice_id,
-                        )
-                except Exception as e:  # noqa
-                    st.error(f"Nu am putut genera mostra: {e}")
-            if st.session_state.get(f"sample_{chosen_voice_id}"):
-                st.audio(st.session_state[f"sample_{chosen_voice_id}"], format="audio/mp3")
+    if mode == "Folosește mostra salvată":
+        if edit_char and edit_char.get("voice_sample_b64"):
+            st.info("Se va folosi mostra audio deja salvată pentru acest personaj.")
+            try:
+                st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format="audio/wav")
+            except Exception:  # noqa
+                st.warning("Mostra salvată nu poate fi previzualizată.")
         else:
-            st.info("Nu există voci disponibile momentan.")
+            st.info("Încarcă întâi o mostră nouă pentru a activa vocea.")
     elif mode.startswith("🗑️"):
         st.info("🔇 Personajul va comunica DOAR prin text, fără voce. "
                 "Poți adăuga oricând o voce editând personajul.")
     else:
         clone_name = st.text_input(
-            "Nume voce clonată", placeholder="ex. Vocea lui Marlow", key="cf_clone_name"
+            "Nume voce", placeholder="ex. Vocea lui Marlow", key="cf_clone_name"
         )
         clone_file = st.file_uploader(
-            "Sample audio (mp3/wav, 30s–1min recomandat)",
+            "Mostră audio (wav/mp3, 10–30 secunde recomandat)",
             type=["mp3", "wav", "m4a", "ogg", "flac"],
             key="cf_clone_file",
         )
+        st.text_area(
+            "Textul exact rostit în mostră",
+            placeholder="Scrie exact cuvintele rostite în fișier, în aceeași limbă.",
+            key="cf_ref_text",
+            height=90,
+            help="F5-TTS folosește acest text pentru a înțelege mostra de voce.",
+        )
+        st.caption("Serviciu gratuit: modelul open-source F5-TTS din Hugging Face.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -2778,21 +2737,35 @@ def render_create():
             return
 
         voice_id, voice_name = chosen_voice_id, chosen_voice_name
+        voice_sample_b64 = edit_char.get("voice_sample_b64") if edit_char else None
+        voice_sample_name = edit_char.get("voice_sample_name") if edit_char else None
+        voice_ref_text = edit_char.get("voice_ref_text") if edit_char else None
         if mode.startswith("🗑️"):
-            voice_id, voice_name = None, None
-        elif mode.startswith("Clonează"):
-            if not clone_file or not (clone_name or "").strip():
-                st.error("Pentru clonare ai nevoie de un nume și un fișier audio.")
+            voice_id = voice_name = None
+            voice_sample_b64 = voice_sample_name = voice_ref_text = None
+        elif mode.startswith("Încarcă"):
+            if not clone_file or not (clone_name or "").strip() or not st.session_state.get("cf_ref_text", "").strip():
+                st.error("Ai nevoie de un nume, o mostră audio și textul exact rostit în mostră.")
                 return
             try:
-                with st.spinner("Clonez vocea cu ElevenLabs..."):
-                    voice_id = voice.clone_voice(
-                        clone_name.strip(), clone_file.getvalue(), clone_file.name
+                sample_bytes = clone_file.getvalue()
+                ref_text = st.session_state.get("cf_ref_text", "").strip()
+                with st.spinner("Testez mostra cu F5-TTS (poate dura puțin)..."):
+                    preview = voice.text_to_speech_from_sample(
+                        "Salut! Aceasta este vocea personajului meu.",
+                        sample_bytes,
+                        ref_text,
+                        clone_file.name,
                     )
-                    voice_name = clone_name.strip()
-                cached_voices.clear()
+                voice_id = voice.voice_id_for_sample(sample_bytes)
+                voice_sample_b64 = base64.b64encode(sample_bytes).decode("ascii")
+                voice_sample_name = clone_file.name
+                voice_ref_text = ref_text
+                st.session_state[f"sample_{voice_id}"] = preview
+                st.session_state[f"sample_play_{voice_id}"] = True
+                voice_name = clone_name.strip()
             except Exception as e:  # noqa
-                st.error(f"Clonarea vocii a eșuat: {e}")
+                st.error(f"Testarea vocii a eșuat: {e}")
                 return
 
         data = {
@@ -2805,6 +2778,9 @@ def render_create():
             "visibility": visibility,
             "voice_id": voice_id,
             "voice_name": voice_name,
+            "voice_sample_b64": voice_sample_b64,
+            "voice_sample_name": voice_sample_name,
+            "voice_ref_text": voice_ref_text,
             "voice_stability": stab,
             "voice_similarity": sim,
             "voice_style": style,
@@ -2839,6 +2815,7 @@ def _song_name(filename):
 
 
 def render_chat(char):
+    voice.register_character_voice(char)
     amb = AMBIANCES.get(char.get("ambiance", "Neutru"), AMBIANCES["Neutru"])
     st.markdown(
         f'<style>.block-container::before{{content:"";position:fixed;top:0;left:0;right:0;'
@@ -2908,7 +2885,8 @@ def render_chat(char):
             data=json.dumps(
                 {k: char.get(k) for k in (
                     "name", "avatar", "personality", "scenario", "ambiance", "visibility",
-                    "voice_name", "voice_stability", "voice_similarity", "voice_style", "memory",
+                    "voice_id", "voice_name", "voice_sample_b64", "voice_sample_name",
+                    "voice_ref_text", "voice_stability", "voice_similarity", "voice_style", "memory",
                 )} | {"_persona": True},
                 ensure_ascii=False, indent=2,
             ),
@@ -3128,11 +3106,7 @@ def render_chat(char):
                 db.update_character(char["id"], {"memory": ""})
                 st.rerun()
 
-    tts_kwargs = dict(
-        stability=char.get("voice_stability", 0.5),
-        similarity_boost=char.get("voice_similarity", 0.75),
-        style=char.get("voice_style", 0.0),
-    )
+    tts_kwargs = _tts_kwargs(char)
     # 🎭 dispoziția de azi a personajului (o alege o dată pe zi) — influențează răspunsurile
     char["_mood_today"] = _char_mood(char)
     char["_time_ctx"] = _time_context()
@@ -3228,12 +3202,12 @@ def render_chat(char):
                             voice_vol=st.session_state.get(f"sleepvvol_{mid}", 1.0),
                         )
                         st.session_state["autoplay_mid"] = None
-                    st.audio(st.session_state[f"audio_{mid}"], format="audio/mp3")
+                    st.audio(st.session_state[f"audio_{mid}"], format="audio/wav")
                     st.download_button(
-                        "⬇️ Descarcă MP3",
+                        "⬇️ Descarcă WAV",
                         data=st.session_state[f"audio_{mid}"],
-                        file_name=f"{char['name']}_{mid[:6]}.mp3",
-                        mime="audio/mpeg",
+                        file_name=f"{char['name']}_{mid[:6]}.wav",
+                        mime="audio/wav",
                         key=f"dl_{mid}",
                     )
             if m["role"] == "assistant" and st.session_state.get(f"sfx_{m['id']}"):
@@ -3327,10 +3301,6 @@ def render_chat(char):
 
     prompt = st.chat_input(f"Scrie-i lui {char['name']}...")
     proactive_fragment(char["id"], active_conv)
-    if st.session_state.get("voice_quota_out"):
-        st.warning("🔇 Vocea e oprită momentan: s-au terminat creditele de voce ElevenLabs. "
-                   "Textul și chatul funcționează normal; vocea revine când contul ElevenLabs are "
-                   "din nou credite (reînnoire lunară sau adăugare de credite).")
     st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
     # 🎭 dispoziția de azi + 🎨 tonul vocii + 🗓️ recap + 😴 adoarme cu mine
@@ -3364,7 +3334,7 @@ def render_chat(char):
                         st.warning("Nu am putut genera mostra acum.")
             _tp = st.session_state.get(f"toneprev_{char['id']}")
             if _tp:
-                st.audio(_tp, format="audio/mp3")
+                st.audio(_tp, format="audio/wav")
                 if st.session_state.pop(f"toneprev_play_{char['id']}", False):
                     _play_voice_ambient([_tp], None, "toneprev_" + char["id"][:6])
 
@@ -3855,6 +3825,7 @@ def render_chat(char):
 
 
 def render_call(char):
+    voice.register_character_voice(char)
     conv = active_conv_id(char)
     char["_mood_today"] = _char_mood(char)
     char["_time_ctx"] = _time_context()
@@ -4041,7 +4012,8 @@ def clone_public_char(c):
     _u = current_user()
     data = {k: c.get(k) for k in (
         "name", "avatar", "avatar_image", "personality", "scenario", "ambiance",
-        "voice_id", "voice_name", "voice_stability", "voice_similarity", "voice_style",
+        "voice_id", "voice_name", "voice_sample_b64", "voice_sample_name", "voice_ref_text",
+        "voice_stability", "voice_similarity", "voice_style",
     )}
     data["visibility"] = "private"
     data["owner_id"] = _identity_id()
@@ -4358,7 +4330,7 @@ def render_gallery():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu o voce clonată prin ElevenLabs. Alege un șablon de mai jos sau apasă "
+            "răspunsul cu vocea gratuită F5-TTS. Alege un șablon de mai jos sau apasă "
             "<b>＋ Personaj nou</b>.</p></div>",
             unsafe_allow_html=True,
         )
@@ -4380,7 +4352,6 @@ def render_gallery():
         if up and st.button("Adaugă personajul importat", key="do_import", type="primary"):
             try:
                 data = json.loads(up.getvalue().decode("utf-8"))
-                vid, vname = _resolve_voice(data.get("voice_name"))
                 new_data = {
                     "name": data.get("name", "Personaj importat"),
                     "avatar": data.get("avatar", "🎭"),
@@ -4388,7 +4359,11 @@ def render_gallery():
                     "scenario": data.get("scenario", ""),
                     "ambiance": data.get("ambiance", "Neutru"),
                     "visibility": data.get("visibility", "private"),
-                    "voice_id": vid, "voice_name": vname or data.get("voice_name"),
+                    "voice_id": data.get("voice_id"),
+                    "voice_name": data.get("voice_name"),
+                    "voice_sample_b64": data.get("voice_sample_b64"),
+                    "voice_sample_name": data.get("voice_sample_name"),
+                    "voice_ref_text": data.get("voice_ref_text"),
                     "voice_stability": float(data.get("voice_stability", 0.5)),
                     "voice_similarity": float(data.get("voice_similarity", 0.75)),
                     "voice_style": float(data.get("voice_style", 0.0)),
@@ -4692,7 +4667,7 @@ def render_personaje():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu o voce clonată. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
+            "răspunsul cu vocea gratuită F5-TTS. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
             unsafe_allow_html=True,
         )
 

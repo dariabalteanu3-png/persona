@@ -411,8 +411,8 @@ def daily_journal(character, history):
 
 
 def ambient_cue(character, text, part_of_day="", season=""):
-    """Rich, layered (and possibly evolving) sound-scene description in English for the
-    ElevenLabs sound-effects generator, or '' if truly none. Captures ALL simultaneous
+    """Rich, layered (and possibly evolving) sound-scene description in English for an
+    optional sound-effects generator, or '' if truly none. Captures ALL simultaneous
     sounds implied by the scene + the concrete actions (with their stages) + any changes.
     Adapts to the character's part of day and season when the scene is outdoors."""
     scenario = (character.get("scenario") or "").strip()
