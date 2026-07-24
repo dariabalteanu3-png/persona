@@ -1,5 +1,5 @@
 services:
-  # Serviciul web Streamlit
+  # WEB SERVICE - Aplicația Streamlit (acesta este site-ul tău public)
   - type: web
     name: persona
     repo: https://github.com/dariabalteanu3-png/persona.git
@@ -11,9 +11,9 @@ services:
       - key: PORT
         value: 10000
       - key: TTS_SERVER_URL
-        value: "http://persona-tts:5001"
+        value: "https://persona-tts.onrender.com"
 
-  # Worker background pentru serverul TTS (rulează mereu)
+  # BACKGROUND WORKER - Serverul XTTS v2 de clonare voce (rulează mereu în fundal)
   - type: background_worker
     name: persona-tts
     repo: https://github.com/dariabalteanu3-png/persona.git
@@ -24,5 +24,4 @@ services:
     envVars:
       - key: PORT
         value: 5001
-      - key: TTS_SERVER_URL
-        value: "http://0.0.0.0:5001"
+      - TTS_SERVER_URL: "http://0.0.0.0:5001"
