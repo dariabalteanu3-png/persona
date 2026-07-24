@@ -66,7 +66,7 @@ def _audio_to_wav_bytes(wav_array, sample_rate=24000):
 def _is_wav(path):
     """Verifică dacă fișierul este WAV valid."""
     try:
-        data, sr = sf.read(str(path))
+        sf.read(str(path))
         return True
     except Exception:
         return False
@@ -81,7 +81,7 @@ def _convert_to_wav(src_path, dst_path):
     return str(dst_path)
 
 
-# ── Modele Pydantic ─────────────────────────────────────────────────
+# ── Modele Pydantic ─────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
     voice_id: str
@@ -92,7 +92,7 @@ class RegisterRequest(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     voice_id: str
-    exaggeration: float = 0.5   # intensivitate emoțională (0=neutru, 1=dramatic)
+    exaggeration: float = 0.5   # intensitate emoțională (0=neutru, 1=dramatic)
     cfg_weight: float = 0.5     # (ignorat de XTTS, păstrat pentru compatibilitate)
 
 
@@ -104,7 +104,7 @@ class PreviewRequest(BaseModel):
     cfg_weight: float = 0.5
 
 
-# ── Endpoints ────────────────────────────────────────────────────────
+# ── Endpoints ────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -141,11 +141,24 @@ def register(req: RegisterRequest):
             wav_path = _VOICE_DIR / f"{req.voice_id}.wav"
             _convert_to_wav(str(voice_path), str(wav_path))
             voice_path = wav_path
-            log.info("Conversie în WAV completată pentru: %s", req.voice_id)
+            log.info("Conversie în WAV compatată pentru: %s", req.voice_id)
         except Exception as exc:
             log.warning("Nu s-a putut converti în WAV: %s", exc)
 
-    _speaker_wavs[req.voice_id] = str(voice_path)
+    # Verificăm că fișierul exista și re-verify
+    final_path = voice_path if str(voice_path).endswith(".wav") else None
+    if str(voice_path).endswith(".wav"):
+        final_path = str(voice_path)
+    elif voice_path.exists():
+        wav_path = _VOICE_DIR / f"{req.voice_id}.wav"
+        try:
+            _convert_to_wav(str(voice_path), str(wav_path))
+            final_path = str(wav_path)
+        except Exception:
+            final_path = str(voice_path)
+
+    if final_path and Path(final_path).exists():
+        _speaker_wavs[req.voice_id] = final_path
     return {"status": "ok", "voice_id": req.voice_id}
 
 
@@ -160,7 +173,6 @@ def tts(req: TTSRequest):
             if p.exists():
                 speaker_wav = str(p)
                 if not _is_wav(p):
-                    # Convertim pe loc
                     wav_path = _VOICE_DIR / f"{req.voice_id}.wav"
                     _convert_to_wav(speaker_wav, str(wav_path))
                     speaker_wav = str(wav_path)
@@ -178,17 +190,13 @@ def tts(req: TTSRequest):
 
     model = _load_model()
     text = str(req.text).strip() or "..."
-    # Mapare: exaggeration 0-1 → temperature 0.5-1.3
-    # temperature mai mare = mai expresiv / emocional
-    temperature = max(0.1, min(1.5, 0.5 + float(req.exaggeration) * 0.8))
 
-    log.info("Generare TTS: %d caractere, voice_id=%s, temp=%.2f", len(text), req.voice_id, temperature)
+    log.info("Generare TTS: %d caractere, voice_id=%s", len(text), req.voice_id)
     try:
         wav = model.tts(
             text=text,
             speaker_wav=speaker_wav,
             language="ro",
-            temperature=temperature,
         )
     except Exception as exc:
         log.error("Eroare generare TTS: %s", exc)
@@ -219,27 +227,24 @@ def preview(req: PreviewRequest):
 
     # Convertim în WAV dacă e nevoie
     wav_tmp_path = None
+    effective_path = tmp_path
     try:
         if suffix != ".wav":
             wav_tmp_path = _VOICE_DIR / f"_preview_{os.getpid()}.wav"
             _convert_to_wav(tmp_path, str(wav_tmp_path))
             effective_path = str(wav_tmp_path)
-        else:
-            effective_path = tmp_path
     except Exception:
         effective_path = tmp_path
 
     model = _load_model()
     text = str(req.text).strip() or "..."
-    temperature = max(0.1, min(1.5, 0.5 + float(req.exaggeration) * 0.8))
 
-    log.info("Preview TTS: %d caractere, temp=%.2f", len(text), temperature)
+    log.info("Preview TTS: %d caractere", len(text))
     try:
         wav = model.tts(
             text=text,
             speaker_wav=effective_path,
             language="ro",
-            temperature=temperature,
         )
     except Exception as exc:
         log.error("Eroare preview TTS: %s", exc)
@@ -259,7 +264,7 @@ def preview(req: PreviewRequest):
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
-# ── Startup ──────────────────────────────────────────────────────────
+# ── Startup ──────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def _startup_warmup():
