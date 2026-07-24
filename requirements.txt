@@ -11,12 +11,9 @@ resend
 openai
 requests
 numpy
-# Audio processing & conversion
 soundfile
 librosa
-# Coqui XTTS v2 — clonare vocală open-source, excelent pe română
-TTS
-# Server TTS local
+chatterbox-tts
 fastapi
 uvicorn[standard]
 torch

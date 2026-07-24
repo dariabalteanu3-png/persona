@@ -1,0 +1,28 @@
+services:
+  # Serviciul web Streamlit
+  - type: web
+    name: persona
+    repo: https://github.com/dariabalteanu3-png/persona.git
+    branch: main
+    runCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
+    buildCommand: "pip install -r requirements.txt"
+    plan: free
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: TTS_SERVER_URL
+        value: "http://persona-tts:5001"
+
+  # Worker background pentru serverul TTS (rulează mereu)
+  - type: background_worker
+    name: persona-tts
+    repo: https://github.com/dariabalteanu3-png/persona.git
+    branch: main
+    runCommand: "python tts_server.py"
+    buildCommand: "pip install -r requirements.txt"
+    plan: free
+    envVars:
+      - key: PORT
+        value: 5001
+      - key: TTS_SERVER_URL
+        value: "http://0.0.0.0:5001"

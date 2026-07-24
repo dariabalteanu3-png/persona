@@ -1,7 +1,7 @@
 """Server local FastAPI pentru generarea vocii cu Coqui XTTS v2.
 
-Ruleaza separat de Streamlit, pe portul 5001.
-XTTS v2 cloneaza vocea direct din mostra audio — nu necesita text deReferinta.
+Ruleaza pe Render ca background worker, pe portul 5001.
+XTTS v2 cloneaza vocea direct din mostra audio — nu necesita text de referinta.
 Suporta romana cu expresivitate emotionala ridicata.
 """
 import os
@@ -73,8 +73,6 @@ def _convert_to_wav(src_path, dst_path):
     return str(dst_path)
 
 
-# ── Modele Pydantic ─────────────────────────────────────────
-
 class RegisterRequest(BaseModel):
     voice_id: str
     audio_b64: str
@@ -95,8 +93,6 @@ class PreviewRequest(BaseModel):
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
 
-
-# ── Endpoints ────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -125,7 +121,6 @@ def register(req: RegisterRequest):
     voice_path.write_bytes(sample_bytes)
     log.info("Voce inregistrata: %s (%d bytes)", req.voice_id, len(sample_bytes))
 
-    # Convertim in WAV daca e necesar
     final_path = str(voice_path)
     if suffix != ".wav":
         try:
@@ -136,7 +131,8 @@ def register(req: RegisterRequest):
         except Exception as exc:
             log.warning("Nu s-a putut converti in WAV: %s", exc)
 
-    _speaker_wavs[req.voice_id] = final_path
+    if Path(final_path).exists():
+        _speaker_wavs[req.voice_id] = final_path
     return {"status": "ok", "voice_id": req.voice_id}
 
 
@@ -233,8 +229,6 @@ def preview(req: PreviewRequest):
     wav_bytes = _audio_to_wav_bytes(wav)
     return Response(content=wav_bytes, media_type="audio/wav")
 
-
-# ── Startup ──────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def _startup_warmup():
