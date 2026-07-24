@@ -23,6 +23,9 @@ load_dotenv(Path(__file__).parent / ".env")
 
 F5_TTS_SPACE = os.environ.get("F5_TTS_SPACE", "mrfakename/E2-F5-TTS")
 _WHISPER_SPACE = os.environ.get("WHISPER_SPACE", "openai/whisper")
+# HF_TOKEN oferă cotă ZeroGPU mai mare și prioritate mai bună pe serverele HF.
+# Dacă lipsește, se încearcă anonim (cotă mai mică, mai lentă).
+_HF_TOKEN = os.environ.get("HF_TOKEN") or None
 _client = None
 _handle_file = None
 _voice_samples = {}
@@ -73,7 +76,7 @@ def transcribe_sample(audio_bytes, filename="audio.wav", language="ro"):
         raise VoiceGenerationError("gradio_client lipsește.") from exc
     try:
         if _whisper_client is None:
-            _whisper_client = Client(_WHISPER_SPACE)
+            _whisper_client = Client(_WHISPER_SPACE, hf_token=_HF_TOKEN)
         suffix = Path(str(filename or "audio.wav")).suffix.lower()
         if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}:
             suffix = ".wav"
@@ -143,7 +146,7 @@ def _get_client():
             "dependențelor din requirements.txt."
         ) from exc
     try:
-        _client = Client(F5_TTS_SPACE)
+        _client = Client(F5_TTS_SPACE, hf_token=_HF_TOKEN)
         _handle_file = handle_file
     except Exception as exc:  # noqa: broad-except
         raise VoiceGenerationError(
