@@ -1,8 +1,8 @@
 """Server local FastAPI pentru generarea vocii cu Coqui XTTS v2.
 
-Rulează separat de Streamlit, pe portul 5001.
-XTTS v2 clonează vocea direct din mostra audio — nu necesită text de referință.
-Suportă română cu expresivitate emoțională ridicată.
+Ruleaza separat de Streamlit, pe portul 5001.
+XTTS v2 cloneaza vocea direct din mostra audio — nu necesita text deReferinta.
+Suporta romana cu expresivitate emotionala ridicata.
 """
 import os
 import io
@@ -25,11 +25,10 @@ _VOICE_DIR = Path(os.environ.get("VOICE_SAMPLES_DIR", "/tmp/persona_voices"))
 _VOICE_DIR.mkdir(parents=True, exist_ok=True)
 
 _model = None
-_speaker_wavs: dict = {}  # voice_id -> path to wav file
+_speaker_wavs: dict = {}
 
 
 def _check_cuda():
-    """Verifică dacă CUDA este disponibil."""
     try:
         import torch
         return torch.cuda.is_available()
@@ -38,24 +37,19 @@ def _check_cuda():
 
 
 def _load_model():
-    """Încarcă modelul Coqui XTTS v2 (prima dată descarcă ~1.7 GB)."""
     global _model
     if _model is not None:
         return _model
-    log.info(
-        "Se încarcă modelul Coqui XTTS v2 (prima dată poate dura 3-5 minute)..."
-    )
+    log.info("Se incarca modelul Coqui XTTS v2 (prima data poate dura 3-5 minute)...")
     from TTS.api import TTS
-
     device = "cuda" if _check_cuda() else "cpu"
     log.info(f"Folosesc device: {device}")
     _model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-    log.info("Modelul Coqui XTTS v2 a fost încărcat.")
+    log.info("Modelul Coqui XTTS v2 a fost incarcat.")
     return _model
 
 
 def _audio_to_wav_bytes(wav_array, sample_rate=24000):
-    """Convertește numpy array la bytes WAV."""
     buf = io.BytesIO()
     wav_array = np.asarray(wav_array, dtype=np.float32)
     wav_array = np.clip(wav_array, -1.0, 1.0)
@@ -64,7 +58,6 @@ def _audio_to_wav_bytes(wav_array, sample_rate=24000):
 
 
 def _is_wav(path):
-    """Verifică dacă fișierul este WAV valid."""
     try:
         sf.read(str(path))
         return True
@@ -73,10 +66,9 @@ def _is_wav(path):
 
 
 def _convert_to_wav(src_path, dst_path):
-    """Convertește orice format audio în WAV pentru compatibilitate cu XTTS."""
     data, sr = sf.read(str(src_path))
     if len(data.shape) > 1:
-        data = data.mean(axis=1)  # mono if stereo
+        data = data.mean(axis=1)
     sf.write(str(dst_path), data, sr, format="WAV", subtype="PCM_16")
     return str(dst_path)
 
@@ -92,8 +84,8 @@ class RegisterRequest(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     voice_id: str
-    exaggeration: float = 0.5   # intensitate emoțională (0=neutru, 1=dramatic)
-    cfg_weight: float = 0.5     # (ignorat de XTTS, păstrat pentru compatibilitate)
+    exaggeration: float = 0.5
+    cfg_weight: float = 0.5
 
 
 class PreviewRequest(BaseModel):
@@ -113,19 +105,17 @@ def health():
 
 @app.post("/warmup")
 def warmup():
-    """Pre-încarcă modelul în memorie fără a genera audio."""
     _load_model()
     return {"status": "ok"}
 
 
 @app.post("/register")
 def register(req: RegisterRequest):
-    """Salvează o mostră vocală pe disc, indexată după voice_id."""
     try:
         import base64
         sample_bytes = base64.b64decode(req.audio_b64)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Mostră audio invalidă: {exc}")
+        raise HTTPException(status_code=400, detail=f"Mostra audio invalida: {exc}")
 
     suffix = Path(req.sample_name).suffix.lower()
     if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
@@ -133,39 +123,25 @@ def register(req: RegisterRequest):
 
     voice_path = _VOICE_DIR / f"{req.voice_id}{suffix}"
     voice_path.write_bytes(sample_bytes)
-    log.info("Voce înregistrată: %s (%d bytes)", req.voice_id, len(sample_bytes))
+    log.info("Voce inregistrata: %s (%d bytes)", req.voice_id, len(sample_bytes))
 
-    # Convertește în WAV dacă e necesar (XTTS funcționează cel mai bine cu WAV)
+    # Convertim in WAV daca e necesar
+    final_path = str(voice_path)
     if suffix != ".wav":
         try:
             wav_path = _VOICE_DIR / f"{req.voice_id}.wav"
             _convert_to_wav(str(voice_path), str(wav_path))
-            voice_path = wav_path
-            log.info("Conversie în WAV compatată pentru: %s", req.voice_id)
-        except Exception as exc:
-            log.warning("Nu s-a putut converti în WAV: %s", exc)
-
-    # Verificăm că fișierul exista și re-verify
-    final_path = voice_path if str(voice_path).endswith(".wav") else None
-    if str(voice_path).endswith(".wav"):
-        final_path = str(voice_path)
-    elif voice_path.exists():
-        wav_path = _VOICE_DIR / f"{req.voice_id}.wav"
-        try:
-            _convert_to_wav(str(voice_path), str(wav_path))
             final_path = str(wav_path)
-        except Exception:
-            final_path = str(voice_path)
+            log.info("Convertit in WAV pentru: %s", req.voice_id)
+        except Exception as exc:
+            log.warning("Nu s-a putut converti in WAV: %s", exc)
 
-    if final_path and Path(final_path).exists():
-        _speaker_wavs[req.voice_id] = final_path
+    _speaker_wavs[req.voice_id] = final_path
     return {"status": "ok", "voice_id": req.voice_id}
 
 
 @app.post("/tts")
 def tts(req: TTSRequest):
-    """Generează audio pentru un text, folosind vocea indexată după voice_id."""
-    # Caută fișierul de mostră
     speaker_wav = _speaker_wavs.get(req.voice_id)
     if speaker_wav is None:
         for ext in [".wav", ".mp3", ".m4a", ".ogg", ".flac"]:
@@ -182,10 +158,7 @@ def tts(req: TTSRequest):
     if speaker_wav is None:
         raise HTTPException(
             status_code=404,
-            detail=(
-                "Mostra vocală nu a fost găsită. Editează personajul și "
-                "re-încarcă mostra audio."
-            ),
+            detail="Mostra vocala nu a fost gasita. Editeaza personajul si reincarca mostra audio.",
         )
 
     model = _load_model()
@@ -209,23 +182,20 @@ def tts(req: TTSRequest):
 
 @app.post("/preview")
 def preview(req: PreviewRequest):
-    """Generează un preview audio direct din bytes (înainte de salvare)."""
     try:
         import base64
         sample_bytes = base64.b64decode(req.audio_b64)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Mostră audio invalidă: {exc}")
+        raise HTTPException(status_code=400, detail=f"Mostra audio invalida: {exc}")
 
     suffix = Path(req.sample_name).suffix.lower()
     if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
         suffix = ".wav"
 
-    # Salvăm temporar
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(sample_bytes)
         tmp_path = tmp.name
 
-    # Convertim în WAV dacă e nevoie
     wav_tmp_path = None
     effective_path = tmp_path
     try:
@@ -268,7 +238,6 @@ def preview(req: PreviewRequest):
 
 @app.on_event("startup")
 async def _startup_warmup():
-    """Încarcă modelul în fundal imediat după pornirea serverului."""
     import threading
     threading.Thread(target=_load_model, daemon=True).start()
 
