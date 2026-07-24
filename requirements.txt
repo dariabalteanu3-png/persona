@@ -12,8 +12,4 @@ openai
 requests
 numpy
 soundfile
-
-# Bark TTS — clonare voce, intonatie, emotii, romana
-bark
-torch
-torchaudio
+edge-tts
