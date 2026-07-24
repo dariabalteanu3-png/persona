@@ -12,9 +12,8 @@ openai
 requests
 numpy
 soundfile
-librosa
-chatterbox-tts
-fastapi
-uvicorn[standard]
+
+# Bark TTS — clonare voce, intonatie, emotii, romana
+bark
 torch
 torchaudio

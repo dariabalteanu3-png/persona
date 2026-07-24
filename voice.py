@@ -1,7 +1,10 @@
-"""Generare vocală prin edge-tts (Microsoft Edge TTS).
+"""Generare vocala cu Bark TTS (Suno AI) — clonare voce, romana, emotii.
 
-Funcționează direct pe Streamlit Cloud — fără server separat.
-Gratuit, fără token, cu voci românești expresive emoțional.
+Bark este un model TTS open-source care:
+- Cloneaza vocea din mostre audio
+- Suporta limba romana cu intonatie naturala
+- Are control emotional (fericit, trist, calm, entuziasmat etc.)
+- Ruleaza gratuit, fara token, fara server separat
 """
 
 import asyncio
@@ -9,32 +12,38 @@ import base64
 import io
 import os
 import re
+import tempfile
+import wave
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
 
 class VoiceGenerationError(RuntimeError):
-    """Eroare user-facing de la serviciul de generare vocală."""
+    """Eroare user-facing de la serviciul de generare vocala."""
 
 
-# ── Voci românești Edge TTS ──────────────────────────────────────────
-# Fiecare voce are un nume friendly și un ID Edge TTS.
-ROMANIAN_VOICES = {
-    "Adrian":  "ro-RO-AdrianNeural",
-    "Emil":    "ro-RO-EmilNeural",
-    "Alina":   "ro-RO-AlinaNeural",
-    "Andreea": "ro-RO-AndreeaNeural",
-    "Anton":   "ro-RO-AntonNeural",
-    "Elena":   "ro-RO-ElenaNeural",
-    "Mihai":   "ro-RO-MihaiNeural",
-    "Mihaela": "ro-RO-MihaelaNeural",
+# ── Emoții Bark ───────────────────────────────────────────────
+
+BARK_EMOTIONS = {
+    "neutral":   None,
+    "calm":      "v2/ru_speaker_2",
+    "happy":     "v2/ru_speaker_3",
+    "excited":   "v2/ru_speaker_3",
+    "sad":       "v2/ru_speaker_1",
+    "angry":     "v2/ru_speaker_5",
+    "friendly":  "v2/ru_speaker_7",
+    "serious":   "v2/ru_speaker_4",
+    "surprised": "v2/ru_speaker_6",
+    "whisper":   None,
 }
 
 
-# ── Normalizare text ─────────────────────────────────────────────────
+# ── Normalizare text ──────────────────────────────────────────
 
 _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
@@ -60,86 +69,78 @@ def expressify(text):
     return text or "..."
 
 
-# ── Funcții async TTS ────────────────────────────────────────────────
+# ── Bark TTS ──────────────────────────────────────────────────
 
-async def _edge_tts_generate(text, voice_id, expression=0.5, rate="+0%"):
-    """Generează WAV bytes folosind edge-tts."""
-    import edge_tts
-
-    spoken = expressify(text)
-
-    # Alege vocea
-    if voice_id in ROMANIAN_VOICES:
-        voice = ROMANIAN_VOICES[voice_id]
-    elif voice_id in ("Adrian", "Emil", "Alina", "Andreea", "Anton", "Elena", "Mihai", "Mihaela"):
-        voice = ROMANIAN_VOICES.get(voice_id, "ro-RO-AdrianNeural")
-    else:
-        # voice_id e un ID direct (de la exemplul de mai sus) — îl folosim direct
-        voice = voice_id
-
-    # Exprimarea → edge-tts rate (cum se mișcă vocea)
-    # expression 0-1 → rate de la lent la rapid, cu efect emoțional
-    if expression > 0.7:
-        # Dramatic / emocionat
-        rate = "+10%"
-    elif expression > 0.4:
-        # Normal / echilibrat
-        rate = "+0%"
-    else:
-        # Calm / lent
-        rate = "-8%"
-
-    communicate = edge_tts.Communicate(spoken, voice, rate=rate)
-    buf = io.BytesIO()
-
-    # Primim chunk-uri de audio sub formă de base64
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            chunk_bytes = base64.b64decode(chunk["data"])
-            buf.write(chunk_bytes)
-
-    wav_bytes = _convert_mp3_to_wav(buf.getvalue())
-    return wav_bytes
+def _load_bark():
+    """Încarcă modelul Bark."""
+    from bark.api import load_model
+    model, processor, gpu_use = load_model(use_cuda=False)
+    return model, processor
 
 
-def _convert_mp3_to_wav(audio_bytes):
-    """Convertește MP3 bytes → WAV bytes folosind ffmpeg sau pydub."""
-    # edge-tts returnează MP3, trebuie convertit în WAV pentru Streamlit
-    try:
-        import subprocess
-        # Încercăm cu ffmpeg (disponibil pe Streamlit Cloud)
-        input_buf = io.BytesIO(audio_bytes)
-        input_buf.name = "input.mp3"
+def _bark_generate(text, history_prompt=None, emotion=None):
+    """Generează audio cu Bark."""
+    from bark.api import generate_audio
 
-        output_buf = io.BytesIO()
+    model, processor, _ = _load_bark()
 
-        cmd = [
-            "ffmpeg", "-i", "pipe:0",
-            "-acodec", "pcm_s16le",
-            "-ar", "24000",
-            "-ac", "1",
-            "-f", "wav",
-            "pipe:1"
-        ]
-        proc = subprocess.run(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            input=audio_bytes,
-            timeout=60,
-        )
-        if proc.returncode == 0 and proc.stdout:
-            return proc.stdout
-    except Exception:
-        pass
-
-    # Fallback: returnăm MP3 direct dacă conversia eșuează
-    # Streamlit poate reda și MP3
+    audio_bytes = generate_audio(
+        text,
+        history_prompt=history_prompt,
+        emotion=emotion,
+    )
     return audio_bytes
 
 
-# ── API public TTS ──────────────────────────────────────────────────
+def _sample_to_history_prompt(sample_bytes, sample_name="sample.wav"):
+    """Convertește o mostră audio în history prompt pentru Bark (clonare voce)."""
+    from bark.api import load_history_prompt
+
+    # Salvăm mostra temporar
+    suffix = Path(sample_name).suffix.lower()
+    if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
+        suffix = ".wav"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(sample_bytes)
+        tmp_path = tmp.name
+
+    try:
+        # Convertește în WAV dacă e nevoie
+        wav_path = tmp_path
+        if suffix != ".wav":
+            wav_path = tmp_path + ".wav"
+            data, sr = sf.read(tmp_path)
+            if len(data.shape) > 1:
+                data = data.mean(axis=1)
+            sf.write(wav_path, data, sr, format="WAV", subtype="PCM_16")
+
+        # Încarcă ca history prompt (clonează vocea)
+        history_prompt = load_history_prompt(wav_path)
+        return history_prompt
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        wav_path_clean = tmp_path + ".wav"
+        if wav_path_clean != tmp_path:
+            try:
+                os.unlink(wav_path_clean)
+            except OSError:
+                pass
+
+
+def _audio_bytes_to_wav(audio_array, sample_rate=24000):
+    """Convertește array numpy în bytes WAV."""
+    buf = io.BytesIO()
+    audio_array = np.asarray(audio_array, dtype=np.float32)
+    audio_array = np.clip(audio_array, -1.0, 1.0)
+    sf.write(buf, audio_array, sample_rate, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
+# ── API public TTS ────────────────────────────────────────────
 
 def text_to_speech(
     text,
@@ -150,60 +151,79 @@ def text_to_speech(
     expressive=True,
     tone=None,
 ):
-    """Generează WAV cu vocea persoanei (edge-tts).
-
-    voice_id poate fi:
-    - Un nume prietenos ('Adrian', 'Emil', 'Alina', etc.)
-    - Un ID direct de voce Edge TTS
-    """
-    if not voice_id:
-        voice_id = "Adrian"
-
+    """Generează WAV cu Bark TTS — clonează vocea și generează vorbire."""
     spoken = expressify(text) if expressive else (text or "...")
+
+    # Determinăm emoția
     exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
+    if exaggeration > 0.7:
+        emotion = "excited"
+    elif exaggeration > 0.4:
+        emotion = "happy"
+    elif exaggeration > 0.2:
+        emotion = "friendly"
+    else:
+        emotion = "calm"
 
-    loop = asyncio.new_event_loop()
+    # Aplicăm emoția
+    bark_emotion = BARK_EMOTIONS.get(emotion, None)
+
+    # Voice ID poate fi un nume de emoție sau un ID de mostră
+    if voice_id and voice_id in BARK_EMOTIONS:
+        emotion_name = voice_id
+        bark_emotion = BARK_EMOTIONS.get(emotion_name, None)
+
+    # Generăm cu Bark
     try:
-        wav_bytes = loop.run_until_complete(
-            _edge_tts_generate(spoken, voice_id, exaggeration)
-        )
-    finally:
-        loop.close()
-
-    return wav_bytes
+        audio_array = _bark_generate(spoken, emotion=bark_emotion)
+        return _audio_bytes_to_wav(audio_array)
+    except Exception as exc:
+        raise VoiceGenerationError(f"Erore Bark TTS: {exc}")
 
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Generează un preview direct din mostră.
+    """Generează preview cu clonare de voce din mostră audio."""
+    spoken = expressify(text) if True else (text or "...")
 
-    edge-tts nu clonează voci din mostre — folosește o vocea românească
-    prestabilită în schimb. Aceasta este compensația pentru a funcționa
-    pe Streamlit Cloud (fără server separat).
-    """
-    return text_to_speech(text, "Adrian", expressive=True)
+    try:
+        # Clonăm vocea din mostră
+        history_prompt = _sample_to_history_prompt(sample_bytes, sample_name)
+
+        audio_array = _bark_generate(spoken, history_prompt=history_prompt)
+        return _audio_bytes_to_wav(audio_array)
+    except Exception as exc:
+        # Fallback: generăm fără clonare
+        try:
+            audio_array = _bark_generate(spoken)
+            return _audio_bytes_to_wav(audio_array)
+        except Exception as exc2:
+            raise VoiceGenerationError(f"Eroare Bark TTS preview: {exc2}")
 
 
-# ── Voci disponibile ─────────────────────────────────────────────────
+# ── Voci disponibile ──────────────────────────────────────────
 
 def get_available_voices():
-    """Returnează lista de voci românești disponibile."""
-    return list(ROMANIAN_VOICES.keys())
+    """Returnează lista de voci/emoții Bark disponibile."""
+    return list(BARK_EMOTIONS.keys())
 
 
-# ── Sinteza ambientală DSP (neschimbată) ───────────────────────────
+# ════════════════════════════════════════════════════════════
+#  SINTEZA AMBIENTALĂ DSP (neschimbată)
+# ════════════════════════════════════════════════════════════
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
-    """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit."""
+    """DSP-based ambient synthesis using numpy."""
     try:
         import numpy as np
     except ImportError:
         output = io.BytesIO()
         with wave.open(output, "wb") as wf:
-            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sample_rate)
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
             wf.writeframes(b"\x00\x00" * int(sample_rate * duration))
         return output.getvalue()
 
-    import wave
     sr = int(sample_rate)
     dur = max(2.0, min(float(duration), 30.0))
     n = int(sr * dur)
