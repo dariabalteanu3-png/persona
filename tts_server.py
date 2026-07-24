@@ -179,8 +179,13 @@ def preview(req: PreviewRequest):
 
 # ── Startup ──────────────────────────────────────────────────────────────────
 
+@app.on_event("startup")
+async def _startup_warmup():
+    """Încarcă modelul în fundal imediat după pornirea serverului."""
+    import threading
+    threading.Thread(target=_load_model, daemon=True).start()
+
+
 if __name__ == "__main__":
     import uvicorn
-    # Modelul se încarcă lazy la primul apel TTS — portul 5001 se deschide imediat.
-    # Prima generare va dura 1-2 minute (download model ~2GB, o singură dată).
     uvicorn.run(app, host="0.0.0.0", port=5001, log_level="info")
