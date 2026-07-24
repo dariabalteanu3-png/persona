@@ -1,1 +1,1 @@
-- [F5-TTS voice integration](f5-tts-voice.md) — speech uses the public Gradio Space with persisted reference samples; no paid voice provider is required.
+- [Chatterbox TTS architecture](chatterbox-tts.md) — vocea folosește serverul local FastAPI (port 5001), nu HF Spaces; fără text de referință necesar.

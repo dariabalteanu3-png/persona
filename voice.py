@@ -1,8 +1,7 @@
-"""Free voice generation through the public Hugging Face F5-TTS Space.
+"""Generare vocală prin Chatterbox TTS (server local FastAPI pe portul 5001).
 
-The Space is intentionally accessed lazily so the app can still start when the
-optional Gradio client has not been installed yet (for example during a local
-syntax check).  No paid provider or API key is used here.
+Chatterbox clonează vocea direct din mostra audio — nu necesită transcrierea textului.
+Biblioteca de sunete ambientale (DSP cu numpy) rămâne neschimbată.
 """
 
 import base64
@@ -13,28 +12,23 @@ import os
 import random
 import re
 import tempfile
-import urllib.request
 import wave
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-F5_TTS_SPACE = os.environ.get("F5_TTS_SPACE", "mrfakename/E2-F5-TTS")
-_WHISPER_SPACE = os.environ.get("WHISPER_SPACE", "openai/whisper")
-# HF_TOKEN oferă cotă ZeroGPU mai mare și prioritate mai bună pe serverele HF.
-# Dacă lipsește, se încearcă anonim (cotă mai mică, mai lentă).
-_HF_TOKEN = os.environ.get("HF_TOKEN") or None
-_client = None
-_handle_file = None
-_voice_samples = {}
-_whisper_client = None
+_TTS_SERVER = os.environ.get("TTS_SERVER_URL", "http://localhost:5001")
+_voice_samples: dict = {}   # voice_id → (sample_bytes, suffix)
 
 
 class VoiceGenerationError(RuntimeError):
-    """A user-facing error from the free F5-TTS service."""
+    """Eroare user-facing de la serviciul de generare vocală."""
 
+
+# ── Helpers de bază ──────────────────────────────────────────────────────────
 
 def _decode_sample(sample_b64):
     if not sample_b64:
@@ -44,24 +38,22 @@ def _decode_sample(sample_b64):
     try:
         return base64.b64decode(sample_b64)
     except (ValueError, TypeError) as exc:
-        raise VoiceGenerationError("Mostra audio salvată invalidă.") from exc
+        raise VoiceGenerationError("Mostra audio salvată este invalidă.") from exc
 
 
 def voice_id_for_sample(sample_bytes):
-    """Return a stable local identifier for a reference sample."""
-    import hashlib
-
+    """Returnează un identificator local stabil pentru o mostră de referință."""
     if not sample_bytes:
         return None
-    return "f5tts:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
+    return "cbx:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
 
 
 def transcribe_sample(audio_bytes, filename="audio.wav", language="ro"):
-    """Transcribe an audio sample using the STT module (Groq/Gemini) if available,
-    otherwise fall back to a free public Whisper Gradio Space on Hugging Face.
-    Returns the transcribed text or raises VoiceGenerationError on failure."""
-    global _whisper_client
-    # Try existing STT providers first (Groq / Gemini) — they're faster
+    """Transcrie o mostră audio folosind Groq/Gemini (STT).
+
+    Această funcție este folosită OPȚIONAL — Chatterbox TTS nu necesită
+    transcriere pentru clonarea vocii. Poate fi utilă pentru alte scopuri.
+    """
     try:
         import stt as _stt
         from provider import USE_GROQ, USE_GEMINI
@@ -69,159 +61,169 @@ def transcribe_sample(audio_bytes, filename="audio.wav", language="ro"):
             return _stt.transcribe(audio_bytes, filename)
     except Exception:
         pass
-    # Fallback: free public Whisper space via gradio_client
-    try:
-        from gradio_client import Client, handle_file
-    except ImportError as exc:
-        raise VoiceGenerationError("gradio_client lipsește.") from exc
-    try:
-        if _whisper_client is None:
-            _whisper_client = Client(_WHISPER_SPACE, hf_token=_HF_TOKEN)
-        suffix = Path(str(filename or "audio.wav")).suffix.lower()
-        if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}:
-            suffix = ".wav"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-        try:
-            # openai/whisper space: predict(audio, task) → text string
-            result = _whisper_client.predict(
-                handle_file(tmp_path),
-                "transcribe",          # task: 'transcribe' (nu 'translate')
-                api_name="/predict",
-            )
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-        if isinstance(result, dict):
-            text = result.get("text") or result.get("output") or ""
-        elif isinstance(result, (list, tuple)):
-            text = str(result[0]) if result else ""
-        else:
-            text = str(result or "")
-        text = text.strip()
-        if not text:
-            raise VoiceGenerationError("Transcrierea nu a returnat text.")
-        return text
-    except VoiceGenerationError:
-        raise
-    except Exception as exc:
-        raise VoiceGenerationError(
-            f"Nu am putut transcrie automat mostra: {exc}"
-        ) from exc
+    raise VoiceGenerationError(
+        "Transcrierea automată nu este disponibilă. "
+        "Configurează un furnizor STT (Groq sau Gemini) în setări."
+    )
 
 
-def register_voice(voice_id, sample_b64, reference_text, sample_name="reference.wav"):
-    """Make a character's persisted reference sample available to the TTS call."""
+# ── Înregistrare voci ────────────────────────────────────────────────────────
+
+def register_voice(voice_id, sample_b64, reference_text=None, sample_name="reference.wav"):
+    """Stochează mostra vocală local și o trimite serverului TTS.
+
+    `reference_text` este ignorat (Chatterbox nu îl necesită) — păstrat pentru
+    compatibilitate cu datele existente din baza de date.
+    """
     if not voice_id or not sample_b64:
         return
     sample = _decode_sample(sample_b64)
-    if sample and reference_text:
-        suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
-        if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
-            suffix = ".wav"
-        _voice_samples[voice_id] = (sample, str(reference_text).strip(), suffix)
+    if not sample:
+        return
+    suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
+    if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
+        suffix = ".wav"
+    _voice_samples[voice_id] = (sample, suffix)
+    # Trimite mostra la server (non-fatal dacă serverul nu e gata încă)
+    _push_sample_to_server(voice_id, sample, sample_name or "reference.wav")
+
+
+def _push_sample_to_server(voice_id, sample_bytes, sample_name):
+    """Înregistrează mostra la serverul TTS local. Eroarea e ignorată silențios."""
+    try:
+        requests.post(
+            f"{_TTS_SERVER}/register",
+            json={
+                "voice_id": voice_id,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": sample_name,
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass  # Serverul se poate porni mai târziu; re-înregistrăm la generare
 
 
 def register_character_voice(character):
+    """Înregistrează vocea unui personaj din datele salvate în baza de date."""
     register_voice(
         character.get("voice_id"),
         character.get("voice_sample_b64"),
-        character.get("voice_ref_text"),
+        character.get("voice_ref_text"),       # ignorat, păstrat pentru compatibilitate
         character.get("voice_sample_name", "reference.wav"),
     )
 
 
-def _get_client():
-    global _client, _handle_file
-    if _client is not None:
-        return _client, _handle_file
-    try:
-        from gradio_client import Client, handle_file
-    except ImportError as exc:
+def forget_registered_voices(voice_ids=None):
+    """Șterge mostrele vocale din memorie (după ștergerea de către utilizator)."""
+    if voice_ids is None:
+        _voice_samples.clear()
+        return
+    for voice_id in voice_ids:
+        _voice_samples.pop(voice_id, None)
+
+
+# ── Comunicare cu serverul TTS ───────────────────────────────────────────────
+
+def _ensure_registered(voice_id):
+    """Asigură că serverul TTS are mostra, re-înregistrând dacă e necesar."""
+    info = _voice_samples.get(voice_id)
+    if not info:
         raise VoiceGenerationError(
-            "Lipsește pachetul gradio_client. Repornește aplicația după instalarea "
-            "dependențelor din requirements.txt."
-        ) from exc
-    try:
-        _client = Client(F5_TTS_SPACE, hf_token=_HF_TOKEN)
-        _handle_file = handle_file
-    except Exception as exc:  # noqa: broad-except
-        raise VoiceGenerationError(
-            "Nu m-am putut conecta la spațiul public F5-TTS. Încearcă din nou."
-        ) from exc
-    return _client, _handle_file
-
-
-def _read_generated_audio(result):
-    """Normalize Gradio's file output to WAV bytes."""
-    if isinstance(result, (list, tuple)):
-        result = result[0] if result else None
-    if isinstance(result, dict):
-        result = result.get("path") or result.get("url")
-    if result is None:
-        raise VoiceGenerationError("F5-TTS nu a returnat un fișier audio.")
-    if isinstance(result, bytes):
-        return result
-    if hasattr(result, "path"):
-        result = result.path
-    result = str(result)
-    if result.startswith(("http://", "https://")):
-        try:
-            with urllib.request.urlopen(result, timeout=60) as response:
-                return response.read()
-        except Exception as exc:  # noqa: broad-except
-            raise VoiceGenerationError("Nu am putut descărca WAV-ul generat.") from exc
-    try:
-        with open(result, "rb") as audio_file:
-            data = audio_file.read()
-    except OSError as exc:
-        raise VoiceGenerationError("F5-TTS a returnat o cale audio invalidă.") from exc
-    if not data:
-        raise VoiceGenerationError("F5-TTS a returnat un fișier audio gol.")
-    return data
-
-
-def _generate(text, sample_bytes, reference_text, sample_name="reference.wav"):
-    if not sample_bytes:
-        raise VoiceGenerationError(
-            "Personajul nu are o mostră audio. Încarcă o mostră pentru a-i activa vocea."
+            "Vocea acestui personaj nu are o mostră salvată. Editează personajul "
+            "și încarcă din nou mostra audio."
         )
-    if not reference_text or not str(reference_text).strip():
-        raise VoiceGenerationError(
-            "Completează textul exact rostit în mostra audio pentru F5-TTS."
+    sample_bytes, suffix = info
+    try:
+        requests.post(
+            f"{_TTS_SERVER}/register",
+            json={
+                "voice_id": voice_id,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": f"reference{suffix}",
+            },
+            timeout=10,
         )
+    except Exception as exc:
+        raise VoiceGenerationError(
+            "Serverul de voce nu răspunde. Verifică dacă workflow-ul "
+            "«Chatterbox TTS Server» este pornit."
+        ) from exc
 
-    client, handle_file = _get_client()
-    suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
-    if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
-        suffix = ".wav"
-    with tempfile.NamedTemporaryFile(suffix=suffix) as reference_file:
-        reference_file.write(sample_bytes)
-        reference_file.flush()
+
+def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
+    """Generează audio apelând serverul TTS local."""
+    _ensure_registered(voice_id)
+    try:
+        resp = requests.post(
+            f"{_TTS_SERVER}/tts",
+            json={
+                "text": text,
+                "voice_id": voice_id,
+                "exaggeration": exaggeration,
+                "cfg_weight": cfg_weight,
+            },
+            timeout=240,   # Chatterbox pe CPU poate dura 1-2 minute
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise VoiceGenerationError(
+            "Nu mă pot conecta la serverul de voce. "
+            "Verifică dacă workflow-ul «Chatterbox TTS Server» este pornit."
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise VoiceGenerationError(
+            "Generarea vocii a durat prea mult. Încearcă din nou cu un text mai scurt."
+        ) from exc
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare comunicare server TTS: {exc}") from exc
+
+    if resp.status_code != 200:
         try:
-            result = client.predict(
-                handle_file(reference_file.name),
-                str(reference_text).strip(),
-                str(text).strip() or "...",
-                True,   # remove_silence → voce mai curată, fără pauze lungi la început/sfârșit
-                api_name="/predict",
-            )
-        except Exception as exc:  # noqa: broad-except
-            detail = str(exc).lower()
-            if "queue" in detail or "timeout" in detail or "busy" in detail:
-                raise VoiceGenerationError(
-                    "Spațiul public F5-TTS este ocupat momentan. Încearcă din nou peste puțin."
-                ) from exc
-            raise VoiceGenerationError(
-                "Generarea F5-TTS a eșuat. Verifică mostra și textul de referință."
-            ) from exc
-    return _read_generated_audio(result)
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        raise VoiceGenerationError(f"Eroare server TTS: {detail}")
+    return resp.content
 
 
-# Emoji -> a clean speech string. F5-TTS does not support ElevenLabs-style tags.
+def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5):
+    """Generează un preview direct din bytes (înainte de salvarea personajului)."""
+    try:
+        resp = requests.post(
+            f"{_TTS_SERVER}/preview",
+            json={
+                "text": text,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": sample_name or "reference.wav",
+                "exaggeration": exaggeration,
+                "cfg_weight": cfg_weight,
+            },
+            timeout=240,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise VoiceGenerationError(
+            "Nu mă pot conecta la serverul de voce. "
+            "Verifică dacă workflow-ul «Chatterbox TTS Server» este pornit."
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise VoiceGenerationError(
+            "Generarea vocii a durat prea mult. Încearcă din nou cu un text mai scurt."
+        ) from exc
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare comunicare server TTS: {exc}") from exc
+
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        raise VoiceGenerationError(f"Eroare server TTS preview: {detail}")
+    return resp.content
+
+
+# ── Normalizare text ─────────────────────────────────────────────────────────
+
+# Emoji → eliminăm pentru TTS
 _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
     "\U00002190-\U000021FF\uFE0F\u2764]"
@@ -243,7 +245,7 @@ def _is_emotional(word):
 
 
 def extract_actions(text):
-    """Return physical (non-vocal) stage actions for the optional ambient layer."""
+    """Extrage acțiunile fizice (non-vocale) pentru stratul ambient opțional."""
     return [
         action.strip()
         for action in re.findall(r"\*([^*]+)\*", text or "")
@@ -252,9 +254,9 @@ def extract_actions(text):
 
 
 def expressify(text):
-    """Remove markup and normalize Romanian text for F5-TTS voice generation."""
+    """Curăță markup-ul și normalizează textul românesc pentru TTS."""
     text = str(text or "")
-    # Remove markdown formatting (keep the actual words, ditch the symbols)
+    # Elimină formatarea markdown (păstrează cuvintele)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)   # **bold** → text
     text = re.sub(r"\*([^*]+)\*", " ", text)           # *acțiune* → spațiu
     text = re.sub(r"__([^_]+)__", r"\1", text)         # __subliniat__ → text
@@ -262,7 +264,7 @@ def expressify(text):
     text = re.sub(r"#+\s*", "", text)                   # # titluri
     text = re.sub(r"`[^`]+`", "", text)                 # `cod`
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [link](url) → text
-    # Simboluri comune → cuvinte românești (ajută la pronunție naturală)
+    # Simboluri → cuvinte românești
     text = text.replace("&", " și ")
     text = text.replace("%", " la sută")
     text = re.sub(r"\.{3}", "… ", text)                # ... → pauză
@@ -272,6 +274,40 @@ def expressify(text):
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text or "..."
 
+
+# ── API public TTS ───────────────────────────────────────────────────────────
+
+def text_to_speech(
+    text,
+    voice_id,
+    stability=0.5,
+    similarity_boost=0.75,
+    style=0.0,
+    expressive=True,
+    tone=None,
+):
+    """Generează WAV cu vocea persoanei salvate (clonare Chatterbox)."""
+    if not _voice_samples.get(voice_id):
+        raise VoiceGenerationError(
+            "Vocea acestui personaj nu are o mostră salvată. Editează personajul "
+            "și încarcă din nou mostra audio."
+        )
+    spoken = expressify(text) if expressive else (text or "...")
+    # Mapare parametri ElevenLabs-style → Chatterbox
+    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
+    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
+    return _generate(spoken, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight)
+
+
+def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
+    """Generează un preview direct din mostră (înainte de salvarea personajului).
+
+    `reference_text` este ignorat — Chatterbox nu necesită transcriere.
+    """
+    return _generate_preview(expressify(text), sample_bytes, sample_name)
+
+
+# ── Sinteza ambientală DSP (neschimbată) ─────────────────────────────────────
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit (seed aleatoriu)."""
@@ -572,7 +608,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
 
 
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Return a locally synthesized ambience matching the description; no external API."""
+    """Returnează un sunet ambient sintetizat local; nu apelează niciun API extern."""
     text = str(prompt or "").lower()
     presets = (
         ("storm",         ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
@@ -603,37 +639,3 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         "room",
     )
     return _ambient_wav(preset, duration=duration)
-
-
-def forget_registered_voices(voice_ids=None):
-    """Forget persisted voice samples from this process after user deletion."""
-    if voice_ids is None:
-        _voice_samples.clear()
-        return
-    for voice_id in voice_ids:
-        _voice_samples.pop(voice_id, None)
-
-
-def text_to_speech(
-    text,
-    voice_id,
-    stability=0.5,
-    similarity_boost=0.75,
-    style=0.0,
-    expressive=True,
-    tone=None,
-):
-    """Generate a WAV response with the character's persisted reference voice."""
-    sample = _voice_samples.get(voice_id)
-    if not sample:
-        raise VoiceGenerationError(
-            "Vocea acestui personaj nu are o mostră F5-TTS salvată. Editează personajul "
-            "și încarcă din nou mostra audio."
-        )
-    spoken = expressify(text) if expressive else (text or "...")
-    return _generate(spoken, sample[0], sample[1], sample[2])
-
-
-def text_to_speech_from_sample(text, sample_bytes, reference_text, sample_name="reference.wav"):
-    """Generate a preview directly from an uploaded sample before saving it."""
-    return _generate(expressify(text), sample_bytes, reference_text, sample_name)

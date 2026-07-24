@@ -1188,7 +1188,7 @@ def sound_bytes(kind):
 
 
 def _voice_error_msg(e):
-    """Transformă o eroare F5-TTS într-un mesaj clar și accesibil."""
+    """Transformă o eroare TTS într-un mesaj clar și accesibil."""
     return f"Nu am putut reda vocea acum: {e}"
 
 
@@ -1234,7 +1234,7 @@ def _tts_kwargs(char):
 
 
 def _any_voice_id():
-    """Return the first saved F5-TTS voice for the current user."""
+    """Return the first saved Chatterbox voice for the current user."""
     try:
         for c in db.list_characters(owner_id=_identity_id()):
             if c.get("voice_id"):
@@ -2579,7 +2579,6 @@ def render_create():
             else "🗑️ Fără voce (doar text)"
         )
         st.session_state.cf_clone_name = edit_char.get("voice_name", "")
-        st.session_state.cf_ref_text = edit_char.get("voice_ref_text", "")
         st.session_state.cf_stab = float(edit_char.get("voice_stability", 0.5))
         st.session_state.cf_sim = float(edit_char.get("voice_similarity", 0.75))
         st.session_state.cf_style = float(edit_char.get("voice_style", 0.0))
@@ -2596,7 +2595,7 @@ def render_create():
         st.markdown(
             '<div class="hero"><h1>Creează un <span class="accent">personaj</span></h1>'
             "<p>Dă-i un nume, o personalitate și un scenariu. Încarcă o mostră audio "
-            "și textul rostit pentru o voce gratuită F5-TTS.</p></div>",
+            "pentru a-i clona vocea gratuit cu Chatterbox.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -2671,7 +2670,7 @@ def render_create():
     st.markdown("**Voce**")
     mode = st.radio(
         "Sursă voce",
-        ["Încarcă o mostră F5-TTS", "Folosește mostra salvată", "🗑️ Fără voce (doar text)"],
+        ["Încarcă o mostră vocală", "Folosește mostra salvată", "🗑️ Fără voce (doar text)"],
         horizontal=True,
         label_visibility="collapsed",
         key="cf_mode",
@@ -2688,16 +2687,6 @@ def render_create():
                 st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format="audio/wav")
             except Exception:  # noqa
                 st.warning("Mostra salvată nu poate fi previzualizată.")
-            _saved_ref = edit_char.get("voice_ref_text", "")
-            if _saved_ref:
-                st.markdown(
-                    f"**📝 Textul salvat al mostrei:**\n\n> {_saved_ref}",
-                    help="Acesta este textul rostit în mostra audio salvată. "
-                         "F5-TTS îl folosește pentru a recunoaște vocea."
-                )
-            else:
-                st.warning("⚠️ Nu există niciun text salvat pentru această mostră. "
-                           "Editează personajul și re-încarcă mostra cu textul rostit.")
         else:
             st.info("Încarcă întâi o mostră nouă pentru a activa vocea.")
     elif mode.startswith("🗑️"):
@@ -2712,36 +2701,9 @@ def render_create():
             type=["mp3", "wav", "m4a", "ogg", "flac"],
             key="cf_clone_file",
         )
-        # Auto-transcriere: când se încarcă un fișier nou, transcriem automat
         if clone_file is not None:
-            _fhash = hashlib.md5(clone_file.getvalue()).hexdigest()
-            if st.session_state.get("_cf_file_hash") != _fhash:
-                st.session_state["_cf_file_hash"] = _fhash
-                with st.spinner("🎙️ Transcriu automat mostra audio... (câteva secunde)"):
-                    try:
-                        _auto_text = voice.transcribe_sample(
-                            clone_file.getvalue(), clone_file.name
-                        )
-                        st.session_state.cf_ref_text = _auto_text
-                        st.session_state["_cf_auto_ok"] = True
-                    except Exception as _te:
-                        st.session_state["_cf_auto_ok"] = False
-                        st.session_state["_cf_auto_err"] = str(_te)
-            if st.session_state.get("_cf_auto_ok"):
-                st.success("✅ Textul a fost completat automat din înregistrare. Poți verifica sau corecta mai jos.")
-            elif st.session_state.get("_cf_auto_err"):
-                st.warning(f"⚠️ Nu am putut transcrie automat ({st.session_state['_cf_auto_err']}). "
-                           "Scrie tu textul mai jos sau reîncearcă.")
-        st.text_area(
-            "Textul rostit în mostră (completat automat sau scrie tu)",
-            placeholder="Textul se completează automat când încarci fișierul. "
-                        "Dacă nu s-a completat, scrie ce ai spus în înregistrare.",
-            key="cf_ref_text",
-            height=90,
-            help="F5-TTS folosește acest text pentru a recunoaște vocea. "
-                 "De obicei se completează automat — nu trebuie să scrii nimic.",
-        )
-        st.caption("Serviciu gratuit: F5-TTS + Whisper din Hugging Face. Transcrierea e automată.")
+            st.success("✅ Mostra a fost încărcată. Salvează personajul pentru a testa vocea.")
+        st.caption("Chatterbox TTS — clonare vocală gratuită și open-source, fără text de referință.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -2768,34 +2730,25 @@ def render_create():
             voice_id = voice_name = None
             voice_sample_b64 = voice_sample_name = voice_ref_text = None
         elif mode.startswith("Încarcă"):
-            _ref_txt = st.session_state.get("cf_ref_text", "").strip()
             if not clone_file:
                 st.error("Te rog încarcă un fișier audio pentru mostră.")
                 return
             if not (clone_name or "").strip():
                 st.error("Te rog dă un nume vocii (ex. «Vocea mea»).")
                 return
-            if not _ref_txt:
-                st.error(
-                    "Nu am putut transcrie automat mostra. "
-                    "Scrie în căsuța de mai sus exact ce ai spus în înregistrare, "
-                    "apoi apasă din nou «Salvează»."
-                )
-                return
             try:
                 sample_bytes = clone_file.getvalue()
-                ref_text = st.session_state.get("cf_ref_text", "").strip()
-                with st.spinner("Testez mostra cu F5-TTS (poate dura puțin)..."):
+                with st.spinner("Testez mostra cu Chatterbox (prima generare poate dura 1-2 minute)..."):
                     preview = voice.text_to_speech_from_sample(
                         "Salut! Aceasta este vocea personajului meu.",
                         sample_bytes,
-                        ref_text,
+                        None,
                         clone_file.name,
                     )
                 voice_id = voice.voice_id_for_sample(sample_bytes)
                 voice_sample_b64 = base64.b64encode(sample_bytes).decode("ascii")
                 voice_sample_name = clone_file.name
-                voice_ref_text = ref_text
+                voice_ref_text = None
                 st.session_state[f"sample_{voice_id}"] = preview
                 st.session_state[f"sample_play_{voice_id}"] = True
                 voice_name = clone_name.strip()
@@ -4397,7 +4350,7 @@ def render_gallery():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea gratuită F5-TTS. Alege un șablon de mai jos sau apasă "
+            "răspunsul cu vocea clonată gratuit prin Chatterbox. Alege un șablon de mai jos sau apasă "
             "<b>＋ Personaj nou</b>.</p></div>",
             unsafe_allow_html=True,
         )
@@ -4734,7 +4687,7 @@ def render_personaje():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea gratuită F5-TTS. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
+            "răspunsul cu vocea clonată gratuit prin Chatterbox. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
             unsafe_allow_html=True,
         )
 

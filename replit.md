@@ -13,20 +13,47 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headle
 
 ## Voice generation
 
-Character speech uses the public Hugging Face `mrfakename/E2-F5-TTS` Space through
-`gradio_client`. No ElevenLabs or Replicate subscription/API key is required.
-When creating a character, upload a short reference recording and enter the exact
-words spoken in it. Generated speech is returned and downloaded as WAV.
+Character speech uses **Chatterbox TTS** (open-source, `chatterbox-tts` pip package) running
+as a local FastAPI service on port 5001 (`tts_server.py`). No ElevenLabs, Hugging Face, or any
+paid provider is used. No commercial limits (no characters/month, no credits).
 
-Background ambience is now generated locally as WAV presets inside the app
+**No reference text needed** — Chatterbox clones a voice directly from a short audio sample
+(10–30 seconds recommended). Just upload the recording and Chatterbox does the rest.
+
+Background ambience is generated locally as WAV presets inside the app
 (rain, storm, ocean, forest, fire, café, wind, crickets, city, snow, room,
 countryside, river, and train). Selecting and playing these sounds does not call
-an external audio provider or require a subscription.
+any external API.
 
-From the profile settings, “Șterge vocile mele” removes the saved reference
+From the profile settings, "Șterge vocile mele" removes the saved reference
 samples and voice settings from the user's characters while preserving the
 characters, conversations, and messages. The action requires an explicit
 confirmation phrase.
+
+## Architecture
+
+- **Streamlit app** (`app.py`) — port 5000 — main UI
+- **Chatterbox TTS server** (`tts_server.py`) — port 5001 — local FastAPI service
+  - POST `/register` — saves voice sample to `/tmp/persona_voices/`
+  - POST `/tts` — generates WAV from text + voice_id
+  - POST `/preview` — generates WAV from raw bytes (before saving a character)
+  - GET `/health` — service status
+- **voice.py** — calls the TTS server via HTTP (localhost:5001); ambient DSP unchanged
+- **stt.py** — speech-to-text via Groq/Gemini (separate from TTS)
+
+## Run
+
+The app runs through two parallel workflows:
+```bash
+# Workflow 1: Chatterbox TTS Server
+python tts_server.py
+
+# Workflow 2: Streamlit app
+streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true
+```
+
+The TTS server loads the Chatterbox model on first use (~1-2 minutes, ~2GB download).
+Subsequent calls are fast once the model is in memory.
 
 ## Project preferences
 
@@ -34,13 +61,4 @@ confirmation phrase.
 - Prefer free/open-source services for voice generation.
 - Keep user-facing text in Romanian.
 - The primary user is visually impaired — minimize required manual text input wherever possible.
-
-## Recent fixes
-
-- **Transcriere automată voce** (`voice.py`, `app.py`): când utilizatoarea încarcă o mostră audio,
-  aplicația o transcrie automat prin Whisper (spațiu public Hugging Face). Textul de referință
-  F5-TTS se completează singur — nu mai trebuie scris manual.
-- **Sunete ambientale lipsă** (`voice.py`): preseturile `forest`, `cafe`, `city`, `countryside`,
-  `snow` aveau sinteze proprii, nu mai cad pe ramura generică.
-- **Afișare text referință salvat** (`app.py`): în modul „Folosește mostra salvată" se afișează
-  acum textul salvat ca referință, pentru verificare.
+- Chatterbox TTS is the active voice backend — do not revert to F5-TTS or HF Spaces for TTS.

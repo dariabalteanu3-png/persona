@@ -10,5 +10,12 @@ gradio_client
 resend
 openai
 requests
-# numpy is required by gradio_client's audio transport
+# numpy este necesar pentru sinteza ambientală DSP și pentru Chatterbox
 numpy
+# Chatterbox TTS — clonare vocală open-source, fără text de referință
+chatterbox-tts
+# torch și torchaudio se instalează împreună cu chatterbox-tts
+# Server TTS local
+fastapi
+uvicorn[standard]
+soundfile
