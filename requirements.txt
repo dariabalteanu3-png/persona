@@ -12,4 +12,8 @@ openai
 requests
 numpy
 soundfile
-edge-tts
+chatterbox-tts
+fastapi
+uvicorn[standard]
+torch
+torchaudio

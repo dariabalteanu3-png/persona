@@ -1,80 +1,204 @@
-"""Generare vocală prin edge-tts (Microsoft Edge TTS) + DSP ambient sounds.
+"""Generare vocală prin server XTTS v2 (Coqui TTS).
 
-Funcționează pe Streamlit Cloud fără server separat.
-100% gratuit, fără token, fără plată.
-Voci românești cu intonație naturală.
+Comunică cu serverul XTTS v2 pornit pe Render Background Worker.
+Suportă clonare voce + română + emoții. 100% gratuit!
 """
 
-import asyncio
 import base64
+import hashlib
 import io
 import os
-import random
 import re
 import tempfile
-import wave
 from pathlib import Path
 
-import numpy as np
-import soundfile as sf
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# URL-ul serverului TTS de pe Render
+_TTS_SERVER = os.environ.get("TTS_SERVER_URL", "http://localhost:5001")
+_voice_samples: dict = {}
+
 
 class VoiceGenerationError(RuntimeError):
-    """Eroare user-facing de la serviciul de generare vocală."""
+    pass
 
 
-# ════════════════════════════════════════════════════
-#  EDGE TTS — voci românești cu intonație naturală
-# ════════════════════════════════════════════════════
-
-ROMANIAN_VOICES = {
-    "Adrian":   "ro-RO-AdrianNeural",
-    "Emil":     "ro-RO-EmilNeural",
-    "Alina":    "ro-RO-AlinaNeural",
-    "Andreea":  "ro-RO-AndreeaNeural",
-    "Anton":    "ro-RO-AntonNeural",
-    "Elena":    "ro-RO-ElenaNeural",
-    "Mihai":    "ro-RO-MihaiNeural",
-    "Mihaela":  "ro-RO-MihaelaNeural",
-    "Ioana":    "ro-RO-IoanaNeural",
-    "Cristian": "ro-RO-CristianNeural",
-}
-
-# Emoții → ajustare ritm vorbire
-EMOTION_RATE = {
-    "neutral":   "+0%",
-    "calm":      "-8%",
-    "happy":     "+5%",
-    "excited":   "+12%",
-    "sad":       "-12%",
-    "angry":     "+8%",
-    "friendly":  "+3%",
-    "serious":   "-5%",
-    "surprised": "+10%",
-    "whisper":   "-15%",
-}
+def _decode_sample(sample_b64):
+    if not sample_b64:
+        return None
+    if sample_b64.startswith("data:"):
+        sample_b64 = sample_b64.split(",", 1)[-1]
+    try:
+        return base64.b64decode(sample_b64)
+    except Exception as exc:
+        raise VoiceGenerationError("Mostra audio este invalidă.") from exc
 
 
-# ════════════════════════════════════════════════════
-#  NORMALIZARE TEXT
-# ════════════════════════════════════════════════════
+def voice_id_for_sample(sample_bytes):
+    if not sample_bytes:
+        return None
+    return "xts:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
+
+
+def register_voice(voice_id, sample_b64, sample_name="reference.wav"):
+    if not voice_id or not sample_b64:
+        return
+    sample = _decode_sample(sample_b64)
+    if not sample:
+        return
+    suffix = Path(sample_name or "reference.wav").suffix.lower()
+    if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
+        suffix = ".wav"
+    _voice_samples[voice_id] = (sample, suffix)
+    _push_sample_to_server(voice_id, sample, f"reference{suffix}")
+
+
+def register_character_voice(character):
+    register_voice(
+        character.get("voice_id"),
+        character.get("voice_sample_b64"),
+        character.get("voice_sample_name", "reference.wav"),
+    )
+
+
+def forget_registered_voices(voice_ids=None):
+    if voice_ids is None:
+        _voice_samples.clear()
+        return
+    for voice_id in voice_ids:
+        _voice_samples.pop(voice_id, None)
+
+
+def _push_sample_to_server(voice_id, sample_bytes, sample_name):
+    try:
+        import requests
+        requests.post(
+            f"{_TTS_SERVER}/register",
+            json={
+                "voice_id": voice_id,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": sample_name,
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _ensure_registered(voice_id):
+    info = _voice_samples.get(voice_id)
+    if not info:
+        raise VoiceGenerationError(
+            "Vocea personajului nu are o mostră salvată. "
+            "Editează personajul și reîncarcă mostra audio."
+        )
+    sample_bytes, suffix = info
+    try:
+        import requests
+        requests.post(
+            f"{_TTS_SERVER}/register",
+            json={
+                "voice_id": voice_id,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": f"reference{suffix}",
+            },
+            timeout=10,
+        )
+    except Exception as exc:
+        raise VoiceGenerationError(
+            "Serverul de voce nu răspunde. "
+            "Verifică dacă aplicația este pornită."
+        ) from exc
+
+
+def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
+    _ensure_registered(voice_id)
+    import requests
+    try:
+        resp = requests.post(
+            f"{_TTS_SERVER}/tts",
+            json={
+                "text": text,
+                "voice_id": voice_id,
+                "exaggeration": exaggeration,
+                "cfg_weight": cfg_weight,
+            },
+            timeout=240,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise VoiceGenerationError(
+            "Serverul de voce nu este disponibil. "
+            "Verifică dacă aplicația este pornită."
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise VoiceGenerationError(
+            "Generarea vocii a durat prea mult. Încearcă cu un text mai scurt."
+        ) from exc
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare la serverul de voce: {exc}") from exc
+
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        raise VoiceGenerationError(f"Eroare server TTS: {detail}")
+    return resp.content
+
+
+def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5):
+    import requests
+    try:
+        resp = requests.post(
+            f"{_TTS_SERVER}/preview",
+            json={
+                "text": text,
+                "audio_b64": base64.b64encode(sample_bytes).decode(),
+                "sample_name": sample_name or "reference.wav",
+                "exaggeration": exaggeration,
+                "cfg_weight": cfg_weight,
+            },
+            timeout=240,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise VoiceGenerationError(
+            "Serverul de voce nu este disponibil."
+        ) from exc
+    except requests.exceptions.Timeout as exc:
+        raise VoiceGenerationError(
+            "Generarea preview-ului a durat prea mult."
+        ) from exc
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare preview TTS: {exc}") from exc
+
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        raise VoiceGenerationError(f"Eroare preview TTS: {detail}")
+    return resp.content
+
+
+# ── Normalizare text ─────────────────────────────────────────────────
 
 _EMOJI_RE = re.compile(
-    "["
-    "\U0001F000-\U0001FAFF"
-    "\U00002600-\U000027BF"
-    "\U0001F1E6-\U0001F1FF"
-    "\U00002190-\U000021FF"
-    "\uFE0F\u2764"
-    "]"
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U00002190-\U000021FF\uFE0F\u2764]"
 )
 
 
+def extract_actions(text):
+    return [
+        a.strip()
+        for a in re.findall(r"\*([^*]+)\*", text or "")
+        if a.strip()
+    ]
+
+
 def expressify(text):
-    """Curăță markup-ul și normalizează textul românesc pentru TTS."""
     text = str(text or "")
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", " ", text)
@@ -91,50 +215,7 @@ def expressify(text):
     return text or "..."
 
 
-# ════════════════════════════════════════════════════
-#  GENERARE VOCALĂ EDGE TTS
-# ════════════════════════════════════════════════════
-
-async def _edge_tts_generate(text, voice_name, rate="+0%"):
-    """Generează WAV bytes folosind edge-tts."""
-    import edge_tts
-
-    spoken = expressify(text)
-
-    # Alege vocea
-    if voice_name in ROMANIAN_VOICES:
-        voice = ROMANIAN_VOICES[voice_name]
-    elif voice_name in ROMANIAN_VOICES.values():
-        voice = voice_name
-    else:
-        voice = "ro-RO-AdrianNeural"
-
-    communicate = edge_tts.Communicate(spoken, voice, rate=rate)
-    buf = io.BytesIO()
-
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            buf.write(base64.b64decode(chunk["data"]))
-
-    return _mp3_to_wav(buf.getvalue())
-
-
-def _mp3_to_wav(audio_bytes):
-    """Convertește MP3 → WAV."""
-    try:
-        import subprocess
-        proc = subprocess.run(
-            ["ffmpeg", "-i", "pipe:0", "-acodec", "pcm_s16le",
-             "-ar", "24000", "-ac", "1", "-f", "wav", "pipe:1"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, input=audio_bytes, timeout=60,
-        )
-        if proc.returncode == 0 and proc.stdout:
-            return proc.stdout
-    except Exception:
-        pass
-    return audio_bytes
-
+# ── API public TTS ───────────────────────────────────────────────────
 
 def text_to_speech(
     text,
@@ -145,52 +226,28 @@ def text_to_speech(
     expressive=True,
     tone=None,
 ):
-    """Generează WAV cu vocea (edge-tts)."""
-    if not voice_id:
-        voice_id = "Adrian"
-
+    """Generează WAV cu vocea clonată (XTTS v2)."""
+    if not _voice_samples.get(voice_id):
+        raise VoiceGenerationError(
+            "Vocea personajului nu are o mostră salvată. "
+            "Editează personajul și reîncarcă mostra audio."
+        )
     spoken = expressify(text) if expressive else (text or "...")
     exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
-
-    # Mapare expresie → emoție → rată
-    if exaggeration > 0.7:
-        emotion = "excited"
-    elif exaggeration > 0.4:
-        emotion = "happy"
-    elif exaggeration > 0.2:
-        emotion = "friendly"
-    else:
-        emotion = "calm"
-
-    rate = EMOTION_RATE.get(emotion, "+0%")
-
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(
-            _edge_tts_generate(spoken, voice_id, rate)
-        )
-    finally:
-        loop.close()
+    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
+    return _generate(spoken, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight)
 
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Generează preview — edge-tts nu clonează, dar generează cu voce românească."""
-    return text_to_speech(text, "Adrian", expressive=True)
+    """Generează un preview direct din mostră (înainte de salvare)."""
+    return _generate_preview(expressify(text), sample_bytes, sample_name)
 
 
-def get_available_voices():
-    """Returnează lista de voci românești disponibile."""
-    return list(ROMANIAN_VOICES.keys())
-
-
-# ════════════════════════════════════════════════════
-#  SINTEZA AMBIENTALĂ DSP (neschimbată)
-# ════════════════════════════════════════════════════
+# ── Sinteza ambientală DSP (neschimbată) ────────────────────────────
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
-    """DSP-based ambient synthesis using numpy."""
     try:
-        import numpy as np_test
+        import numpy as np
     except ImportError:
         output = io.BytesIO()
         with wave.open(output, "wb") as wf:
@@ -198,6 +255,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
             wf.writeframes(b"\x00\x00" * int(sample_rate * duration))
         return output.getvalue()
 
+    import wave
     sr = int(sample_rate)
     dur = max(2.0, min(float(duration), 30.0))
     n = int(sr * dur)
@@ -459,31 +517,30 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
 
 
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Returnează un sunet ambient sintetizat local."""
     text = str(prompt or "").lower()
     presets = (
-        ("storm",         ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
-        ("blizzard",      ("crivăț", "viscol", "blizzard", "howling wind", "strong wind", "vânt puternic")),
-        ("rain",          ("ploaie", "rain", "drizzle", "shower", "picături")),
-        ("ocean",         ("mare", "val", "ocean", "wave", "beach", "litoral", "coastă")),
-        ("fire",          ("foc", "campfire", "fire", "șemineu", "flacăr", "lumânare", "jar")),
-        ("wind",          ("vânt", "wind", "breeze", "adiere", "suflare")),
-        ("forest_walk",   ("pași pădure", "walking forest", "footsteps leaves", "leaves underfoot",
+        ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
+        ("blizzard", ("crivăț", "viscol", "blizzard", "howling wind", "strong wind", "vânt puternic")),
+        ("rain", ("ploaie", "rain", "drizzle", "shower", "picături")),
+        ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coastă")),
+        ("fire", ("foc", "campfire", "fire", "șemineu", "flacăr", "lumânare", "jar")),
+        ("wind", ("vânt", "wind", "breeze", "adiere", "suflare")),
+        ("forest_walk", ("pași pădure", "walking forest", "footsteps leaves", "leaves underfoot",
                            "crunch leaves", "rustling underfoot", "mers pădure", "foșnet pași")),
-        ("crickets",      ("greier", "cricket", "noapte liniștit", "quiet night", "seară câmp")),
-        ("river",         ("râu", "river", "pârâu", "brook", "stream", "cascadă", "waterfall")),
-        ("train",         ("tren", "train", "railroad", "railway", "șine", "vagon")),
-        ("forest",        ("pădure", "forest", "frunze", "copac", "woods", "jungle", "livadă")),
-        ("cafe",          ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainărie")),
-        ("city",          ("oraș", "city", "trafic", "traffic", "stradă", "street", "urban", "bulevard")),
-        ("countryside",   ("țară", "sat", "countryside", "fermă", "câmp", "rural", "birds chirp", "livadă")),
-        ("station",       ("gară", "station", "peron", "aeroport", "airport", "terminal",
+        ("crickets", ("greier", "cricket", "noapte liniștit", "quiet night", "seară câmp")),
+        ("river", ("râu", "river", "pârâu", "brook", "stream", "cascadă", "waterfall")),
+        ("train", ("tren", "train", "railroad", "railway", "șine", "vagon")),
+        ("forest", ("pădure", "forest", "frunze", "copac", "woods", "jungle", "livadă")),
+        ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainărie")),
+        ("city", ("oraș", "city", "trafic", "traffic", "stradă", "street", "urban", "bulevard")),
+        ("countryside", ("țară", "sat", "countryside", "fermă", "câmp", "rural", "birds chirp", "livadă")),
+        ("station", ("gară", "station", "peron", "aeroport", "airport", "terminal",
                            "announcement", "anunț", "metrou", "autogară")),
         ("heels_parquet", ("tocuri", "heels", "parchet", "parquet", "podea", "floor click",
                            "toc pantof", "pantof cu toc", "lemn podea")),
-        ("snow_walk",     ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow",
+        ("snow_walk", ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow",
                            "snow underfoot", "zăpadă pași")),
-        ("snow",          ("ninso", "zăpad", "snow", "iarnă liniș", "fulgi")),
+        ("snow", ("ninso", "zăpad", "snow", "iarnă liniș", "fulgi")),
     )
     preset = next(
         (name for name, words in presets if any(word in text for word in words)),
