@@ -2,7 +2,7 @@ modules = ["python-3.12"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["cacert", "cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "rustc", "tcl", "tk", "zlib"]
+packages = ["cacert", "cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "rustc", "tcl", "tk", "zlib", "ffmpeg", "libsndfile"]
 
 [workflows]
 runButton = "Project"
@@ -18,7 +18,7 @@ args = "Start application"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Chatterbox TTS Server"
+args = "Coqui XTTS v2 Server"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -33,7 +33,7 @@ waitForPort = 5000
 outputType = "webview"
 
 [[workflows.workflow]]
-name = "Chatterbox TTS Server"
+name = "Coqui XTTS v2 Server"
 author = "agent"
 
 [[workflows.workflow.tasks]]
