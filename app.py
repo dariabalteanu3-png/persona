@@ -926,19 +926,24 @@ def avatar_html(char, size=56, radius=14):
 # WAV din voice.py; nu sunt prompturi și nu trimit nimic către un serviciu extern.
 AMBIENT_LIBRARY = {
     "🌧️ Ploaie liniștită": "rain",
-    "⛈️ Ploaie cu tunete": "storm",
+    "⛈️ Furtună cu tunete": "storm",
     "🌊 Valuri la mare": "ocean",
     "🌲 Pădure": "forest",
+    "🌲👣 Mers prin pădure": "forest_walk",
     "🔥 Foc de tabără": "fire",
     "☕ Cafenea": "cafe",
     "🌬️ Vânt liniștit": "wind",
+    "🌀 Crivăț / Viscol": "blizzard",
     "🦗 Noapte cu greieri": "crickets",
     "🏙️ Oraș": "city",
     "❄️ Ninsoare liniștită": "snow",
+    "❄️👣 Pași prin zăpadă": "snow_walk",
     "🕊️ Cameră liniștită": "room",
     "🌅 Dimineață la țară": "countryside",
     "🌊 Râu de munte": "river",
-    "🚂 Tren liniștit": "train",
+    "🚂 Tren": "train",
+    "🚉 Gară": "station",
+    "👠 Tocuri pe parchet": "heels_parquet",
 }
 
 
@@ -3806,7 +3811,39 @@ def render_chat(char):
             # butonul „🔄 Încearcă din nou" (de sub mesaje), în loc de o eroare trecătoare.
             st.rerun()
         else:
-            # bulele apar UNA CÂTE UNA, cu o mică pauză + „scrie..." între ele (ca un om real)
+            reply = " ".join(parts)
+
+            # ── AMBIANȚĂ CA PRIM MESAJ ─────────────────────────────────────────
+            # Generăm rapid ambianța din cuvintele-cheie din răspuns (fără LLM),
+            # o afișăm ca un mesaj separat care rulează în buclă ÎNAINTE de text,
+            # și o stocăm la nivel de conversație ca să persiste.
+            _scene_amb = None
+            if st.session_state.get("ambient_fx"):
+                try:
+                    _amb_cue = reply + " " + (char.get("scenario") or "") + " " + (char.get("ambiance") or "")
+                    _scene_amb = voice.sound_effect(_amb_cue, duration=28.0)
+                    st.session_state[f"conv_scene_amb_{active_conv}"] = _scene_amb
+                except Exception:
+                    _scene_amb = st.session_state.get(f"conv_scene_amb_{active_conv}")
+
+            if _scene_amb:
+                _suid = f"sca_{active_conv}_{len(reply)}"
+                _svol = max(0.0, min(1.0, st.session_state.get("ambient_volume", 100) / 100.0))
+                _sb64 = base64.b64encode(_scene_amb).decode()
+                with st.chat_message("assistant", avatar="🎵"):
+                    st.caption("🎵 Ambianță scenă")
+                    components.html(
+                        f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
+                        f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
+                        f'<script>(function(){{'
+                        f'var a=document.getElementById("{_suid}");'
+                        f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
+                        f'}})();</script>',
+                        height=0,
+                    )
+                    st.audio(_scene_amb, format="audio/wav")
+
+            # ── MESAJELE TEXT (una câte una, cu pauze naturale) ────────────────
             for _i, _p in enumerate(parts):
                 if _i > 0:
                     _tph = st.empty()
@@ -3817,16 +3854,15 @@ def render_chat(char):
                     _tph.empty()
                 with st.chat_message("assistant", avatar=char.get("avatar", "🎭")):
                     st.markdown(_p)
+
         if parts:
-            reply = " ".join(parts)
             haptic(25)
             msgs = [db.add_message(active_conv, "assistant", p) for p in parts]
             st.session_state["notif_sound"] = True
-            # fundal ambiental pentru toată rafala (pe baza întregului text)
-            if st.session_state.get("ambient_fx"):
-                with st.spinner("Creez ambianța..."):
-                    maybe_ambient(char, msgs[0]["id"], reply)
-            # voce pentru fiecare mesaj (se redau unul după altul, cu ambient sub ele)
+            # Stocăm ambianța pe primul mesaj (pentru redarea manuală „Ascultă")
+            if _scene_amb:
+                st.session_state[f"sfx_{msgs[0]['id']}"] = _scene_amb
+            # voce pentru fiecare mesaj — ambianța rulează deja în buclă din mesajul 🎵
             did_voice = False
             _force_voice = st.session_state.pop("force_voice_reply", False)
             if (st.session_state.get("auto_play") or user_audio or _force_voice) and char.get("voice_id"):
@@ -3838,12 +3874,13 @@ def render_chat(char):
                             )
                         except Exception:  # noqa
                             pass
+                # Vocea se redă FĂRĂ ambient suplimentar (ambianța deja rulează în buclă)
                 st.session_state["autoplay_burst"] = {
                     "ids": [_m["id"] for _m in msgs],
                     "uid": "burst_" + msgs[-1]["id"][:8],
                 }
                 did_voice = True
-            # dacă nu redăm voce, ambientul pornește singur pe primul mesaj
+            # dacă nu redăm voce, ambientul a pornit deja din mesajul 🎵
             if not did_voice and st.session_state.get(f"sfx_{msgs[0]['id']}"):
                 st.session_state["ambient_play_mid"] = msgs[0]["id"]
             # refresh long-term memory in the background (non-blocking)
