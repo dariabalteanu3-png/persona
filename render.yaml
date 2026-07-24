@@ -1,27 +1,12 @@
 services:
-  # WEB SERVICE - Aplicația Streamlit (acesta este site-ul tău public)
+  # Serviciul Web - Aplicația Streamlit + Server TTS
   - type: web
     name: persona
     repo: https://github.com/dariabalteanu3-png/persona.git
     branch: main
-    runCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
     buildCommand: "pip install -r requirements.txt"
+    startCommand: "bash run.sh"
     plan: free
     envVars:
       - key: PORT
-        value: 10000
-      - key: TTS_SERVER_URL
-        value: "https://persona-tts.onrender.com"
-
-  # BACKGROUND WORKER - Serverul XTTS v2 de clonare voce (rulează mereu în fundal)
-  - type: background_worker
-    name: persona-tts
-    repo: https://github.com/dariabalteanu3-png/persona.git
-    branch: main
-    runCommand: "python tts_server.py"
-    buildCommand: "pip install -r requirements.txt"
-    plan: free
-    envVars:
-      - key: PORT
-        value: 5001
-      - TTS_SERVER_URL: "http://0.0.0.0:5001"
+        value: "10000"
