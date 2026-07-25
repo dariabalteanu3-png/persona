@@ -12,7 +12,6 @@ _log = logging.getLogger("persona")
 _APP_BUILD = "2026-06-run-coro-v2"
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 # Bring Streamlit Cloud secrets into os.environ so the config modules
 # (db, llm, provider, ...) can read them at import time. No-op locally.
@@ -779,7 +778,7 @@ def _fix_autofill_js():
     text stânga→dreapta). NU mai rescrie valoarea inputului la tastare — asta putea reseta
     cursorul și inversa literele („daria"→„airad") cu cititorul de ecran / tastatura de telefon,
     blocând autentificarea."""
-    components.html(
+    st.html(
         """
         <script>
         function fixAF(){
@@ -1003,7 +1002,7 @@ def play_ui_sound(name, vol=None):
     if vol is None:
         vol = int(st.session_state.get("notif_volume", 70))
     vol = max(0.0, min(1.0, int(vol) / 100.0))
-    components.html(
+    st.html(
         f'<audio id="ns" autoplay><source src="data:{mime};base64,{b64}" type="{mime}"></audio>'
         f'<script>var a=document.getElementById("ns");if(a){{a.volume={vol};}}</script>',
         height=0,
@@ -1016,7 +1015,7 @@ def _autoplay_voice(audio_bytes, uid):
     if not audio_bytes:
         return
     b64 = base64.b64encode(audio_bytes).decode()
-    components.html(
+    st.html(
         f'''
         <audio id="cv_{uid}" autoplay playsinline preload="auto">
           <source src="data:audio/wav;base64,{b64}" type="audio/wav">
@@ -1136,7 +1135,7 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
         .replace("__SPD__", repr(spd))
         .replace("__UID__", str(uid))
     )
-    components.html(
+    st.html(
         f'<audio id="v_{uid}" playsinline preload="auto"></audio>{amb_html}<script>{js}</script>',
         height=0,
     )
@@ -1145,7 +1144,7 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
 
 
 def _request_notify_permission_js():
-    components.html(
+    st.html(
         """
         <script>
         try {
@@ -1159,7 +1158,7 @@ def _request_notify_permission_js():
 
 def _browser_notify(title, body):
     t = json.dumps(str(title)); bdy = json.dumps(str(body)[:180])
-    components.html(
+    st.html(
         f"""
         <script>
         try {{
@@ -1193,7 +1192,7 @@ def _voice_error_msg(e):
 
 
 def haptic(ms=15):
-    components.html(
+    st.html(
         f"<script>try{{window.parent.navigator.vibrate&&window.parent.navigator.vibrate({ms});"
         f"navigator.vibrate&&navigator.vibrate({ms});}}catch(e){{}}</script>",
         height=0,
@@ -1422,7 +1421,7 @@ def _render_playlist(char, key_prefix="", readonly=False):
         tj = json.dumps(tracks)
         btn = ("background:#FF7A59;color:#12121a;border:none;border-radius:12px;"
                "padding:12px 14px;font-weight:700;font-size:15px;cursor:pointer;flex:1;")
-        components.html(
+        st.html(
             f'''
             <div style="font-family:Manrope,system-ui,sans-serif;background:#1a1a24;
                         border:1px solid #2a2a38;border-radius:16px;padding:16px;color:#fff;">
@@ -3785,7 +3784,7 @@ def render_chat(char):
                 _sb64 = base64.b64encode(_scene_amb).decode()
                 with st.chat_message("assistant", avatar="🎵"):
                     st.caption("🎵 Ambianță scenă")
-                    components.html(
+                    st.html(
                         f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
                         f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
                         f'<script>(function(){{'
@@ -4049,7 +4048,7 @@ def clone_public_char(c):
 
 def _copy_button(text, key):
     safe = text.replace("\\", "\\\\").replace("'", "\\'")
-    components.html(
+    st.html(
         f"""
         <button id="cb_{key}" style="width:100%;padding:.45rem;border-radius:10px;
           border:1px solid #FF7A59;background:#20140f;color:#FF7A59;font-weight:600;
