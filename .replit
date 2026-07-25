@@ -51,3 +51,7 @@ externalPort = 80
 [[ports]]
 localPort = 5001
 externalPort = 3000
+
+[deployment]
+deploymentTarget = "vm"
+run = ["bash", "-c", "python tts_server.py & streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true"]
