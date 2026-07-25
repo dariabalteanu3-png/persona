@@ -1,8 +1,8 @@
-modules = ["python-3.12"]
+modules = ["python-3.12", "postgresql-16"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["cacert", "cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "rustc", "tcl", "tk", "zlib", "ffmpeg", "libsndfile"]
+packages = ["cacert", "cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "rustc", "tcl", "tk", "zlib"]
 
 [workflows]
 runButton = "Project"
@@ -18,7 +18,7 @@ args = "Start application"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Coqui XTTS v2 Server"
+args = "Chatterbox TTS Server"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -33,7 +33,7 @@ waitForPort = 5000
 outputType = "webview"
 
 [[workflows.workflow]]
-name = "Coqui XTTS v2 Server"
+name = "Chatterbox TTS Server"
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -51,3 +51,7 @@ externalPort = 80
 [[ports]]
 localPort = 5001
 externalPort = 3000
+
+[deployment]
+deploymentTarget = "vm"
+run = ["bash", "-c", "python tts_server.py & streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true"]

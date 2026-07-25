@@ -1,6 +1,5 @@
 streamlit==1.59.2
-pymongo
-dnspython
+psycopg2-binary
 mongomock
 python-dotenv
 bcrypt
