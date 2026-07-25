@@ -1,10 +1,19 @@
+"""
+db.py — strat de persistență PostgreSQL (Replit built-in).
+
+Fiecare tabel are coloane indexate pentru interogări + o coloană `doc` JSONB
+care stochează documentul complet, păstrând API-ul identic cu versiunea MongoDB.
+"""
+
 import os
 import uuid
+import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
+import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
-from pymongo import MongoClient
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -14,177 +23,126 @@ from provider import clean_key as _clean_key
 def _clean_tok(raw):
     return _clean_key(raw, "gh") if raw else raw
 
-_mongo_url = os.environ.get("MONGO_URL")
-if _mongo_url:
-    _client = MongoClient(_mongo_url)
-else:
-    # No external DB configured -> use a built-in in-memory store (mongomock).
-    # Simplest setup; data resets if the hosting container restarts.
-    import mongomock
-    _client = mongomock.MongoClient()
-_db = _client[os.environ.get("DB_NAME", "persona")]
 
-characters = _db.characters
-messages = _db.messages
-conversations = _db.conversations
-users = _db.users
-sessions = _db.sessions
-email_codes = _db.email_codes
+# ---------------------------------------------------------------------------
+# Conexiune
+# ---------------------------------------------------------------------------
+
+def _conn():
+    return psycopg2.connect(
+        os.environ["DATABASE_URL"],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Schema
+# ---------------------------------------------------------------------------
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS users (
+    id          TEXT PRIMARY KEY,
+    email       TEXT UNIQUE NOT NULL,
+    doc         JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS characters (
+    id          TEXT PRIMARY KEY,
+    owner_id    TEXT,
+    visibility  TEXT DEFAULT 'private',
+    created_at  TEXT,
+    doc         JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_chars_owner ON characters(owner_id);
+CREATE INDEX IF NOT EXISTS idx_chars_vis   ON characters(visibility);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id           TEXT PRIMARY KEY,
+    character_id TEXT,
+    created_at   TEXT,
+    doc          JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_convs_char ON conversations(character_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    created_at      TEXT,
+    role            TEXT,
+    media_kind      TEXT,
+    doc             JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_msgs_conv ON messages(conversation_id);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token    TEXT PRIMARY KEY,
+    user_id  TEXT,
+    doc      JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS email_codes (
+    id      SERIAL PRIMARY KEY,
+    email   TEXT,
+    purpose TEXT,
+    doc     JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_ecodes ON email_codes(email, purpose);
+"""
+
+
+def _init_schema():
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(_DDL)
+        c.commit()
+
 
 try:
-    users.create_index("email", unique=True)
-    sessions.create_index("token", unique=True)
-except Exception:  # noqa
-    pass
+    _init_schema()
+except Exception as _e:
+    import sys
+    print(f"[db] Schema init error: {_e}", file=sys.stderr)
 
 
-# ------------------------- persistență automată pe GitHub (opțional) -------------------------
-# Când NU există MONGO_URL, dar sunt setate GITHUB_TOKEN + GITHUB_DATA_REPO în secrets,
-# datele (conturi, personaje, conversații, mesaje) se salvează automat într-un fișier JSON
-# dintr-un repo GitHub privat, ca să rămână salvate chiar și după ce Streamlit repornește.
-_GH_TOKEN = _clean_tok(os.environ.get("GITHUB_TOKEN"))
-_GH_REPO = os.environ.get("GITHUB_DATA_REPO")
-_GH_FILE = os.environ.get("GITHUB_DATA_FILE", "persona_db.json")
-_GH_COLLECTIONS = ["characters", "messages", "conversations", "users", "sessions", "email_codes"]
-_gh_enabled = bool(_GH_TOKEN and _GH_REPO and not _mongo_url)
-_gh_last_snapshot = None
+# ---------------------------------------------------------------------------
+# Helpers JSONB
+# ---------------------------------------------------------------------------
+
+def _row(row):
+    """Returnează doc-ul Python dintr-un rând de tabel."""
+    if row is None:
+        return None
+    d = dict(row["doc"])
+    return d
 
 
-def _gh_api(method, url, data=None):
-    import urllib.request
-    import urllib.error
-    import json as _json
-    req = urllib.request.Request(url, method=method)
-    req.add_header("Authorization", f"token {_GH_TOKEN}")
-    req.add_header("Accept", "application/vnd.github+json")
-    body = _json.dumps(data).encode() if data is not None else None
-    if body:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, body, timeout=25) as r:
-            return _json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+def _rows(rows):
+    return [_row(r) for r in rows]
 
 
-def _gh_url():
-    return f"https://api.github.com/repos/{_GH_REPO}/contents/{_GH_FILE}"
+def _jdump(d):
+    return psycopg2.extras.Json(d)
 
 
-_gh_config_cache = None
-
+# ---------------------------------------------------------------------------
+# get_config (citit din os.environ; GitHub fallback eliminat)
+# ---------------------------------------------------------------------------
 
 def get_config(name, default=None):
-    """Citește o valoare de configurare: întâi din os.environ (secrets/.env), apoi dintr-un fișier
-    `persona_config.json` din repo-ul privat de date (ca să nu fie nevoie de acces la Secrets).
-    Folosit pentru chei de rezervă (ex: EMERGENT_LLM_KEY) fără a le pune în codul public."""
-    global _gh_config_cache
-    v = os.environ.get(name)
-    if v:
-        return v
-    if not (_GH_TOKEN and _GH_REPO):
-        return default
-    if _gh_config_cache is None:
-        import json as _json
-        import base64 as _b64
-        _gh_config_cache = {}
-        try:
-            res = _gh_api("GET", f"https://api.github.com/repos/{_GH_REPO}/contents/persona_config.json")
-            if res and res.get("content"):
-                _gh_config_cache = _json.loads(_b64.b64decode(res["content"]).decode() or "{}")
-        except Exception:  # noqa
-            _gh_config_cache = {}
-    return _gh_config_cache.get(name, default)
+    return os.environ.get(name, default)
 
 
-def _gh_serialize():
-    import json as _json
-    out = {c: list(_db[c].find({}, {"_id": 0})) for c in _GH_COLLECTIONS}
-    return _json.dumps(out, ensure_ascii=False)
+# ---------------------------------------------------------------------------
+# users / auth
+# ---------------------------------------------------------------------------
 
-
-def _gh_load():
-    import json as _json
-    import base64 as _b64
-    res = _gh_api("GET", _gh_url())
-    if not res:
-        return
-    content = res.get("content")
-    if not content:
-        # Fișierul e prea mare (>1MB) pentru API-ul Contents -> îl luăm prin API-ul Blobs (până la 100MB).
-        sha = res.get("sha")
-        if not sha:
-            return
-        blob = _gh_api("GET", f"https://api.github.com/repos/{_GH_REPO}/git/blobs/{sha}")
-        content = blob.get("content") if blob else None
-        if not content:
-            return
-    try:
-        raw = _b64.b64decode(content).decode()
-        data = _json.loads(raw) if raw.strip() else {}
-    except Exception:  # noqa
-        return
-    for c in _GH_COLLECTIONS:
-        docs = data.get(c, [])
-        for d in docs:
-            d.pop("_id", None)
-        _db[c].delete_many({})
-        if docs:
-            _db[c].insert_many(docs)
-
-
-def _gh_save():
-    import base64 as _b64
-    content = _b64.b64encode(_gh_serialize().encode()).decode()
-    for _attempt in range(3):
-        body = {"message": "update persona data", "content": content}
-        cur = _gh_api("GET", _gh_url())
-        if cur and cur.get("sha"):
-            body["sha"] = cur["sha"]
-        try:
-            _gh_api("PUT", _gh_url(), body)
-            return
-        except Exception as e:  # noqa
-            import urllib.error
-            if isinstance(e, urllib.error.HTTPError) and e.code == 409 and _attempt < 2:
-                import time as _t
-                _t.sleep(1)
-                continue
-            raise
-
-
-def _gh_autosave_loop():
-    import time as _time
-    global _gh_last_snapshot
-    while True:
-        _time.sleep(20)
-        try:
-            # Protecție: nu suprascrie datele bune din GitHub cu o bază goală
-            # (ex: dacă încărcarea la pornire a eșuat). Evită pierderea conturilor/personajelor.
-            if users.count_documents({}) == 0 and characters.count_documents({}) == 0:
-                continue
-            snap = _gh_serialize()
-            if snap != _gh_last_snapshot:
-                _gh_save()
-                _gh_last_snapshot = snap
-        except Exception:  # noqa
-            pass
-
-
-if _gh_enabled:
-    try:
-        _gh_load()
-        _gh_last_snapshot = _gh_serialize()
-    except Exception:  # noqa
-        pass
-    import threading as _threading
-    _threading.Thread(target=_gh_autosave_loop, daemon=True).start()
-
-
-# ------------------------- users / auth -------------------------
-def create_user(email, password_hash, name, verified=False, security_question=None, security_answer_hash=None):
+def create_user(email, password_hash, name, verified=False,
+                security_question=None, security_answer_hash=None):
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
@@ -194,32 +152,71 @@ def create_user(email, password_hash, name, verified=False, security_question=No
         "avatar_image": None,
         "security_question": security_question,
         "security_answer_hash": security_answer_hash,
+        "favorites": [],
+        "prefs": {},
         "created_at": _now(),
     }
-    users.insert_one(doc)
-    doc.pop("_id", None)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (id, email, doc) VALUES (%s, %s, %s)"
+                " ON CONFLICT (email) DO NOTHING",
+                (doc["id"], email, _jdump(doc)),
+            )
+        c.commit()
     return doc
 
 
 def get_user_by_email(email):
-    return users.find_one({"email": email}, {"_id": 0})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc FROM users WHERE email = %s", (email,))
+            return _row(cur.fetchone())
 
 
 def get_user_by_id(uid):
-    return users.find_one({"id": uid}, {"_id": 0})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc FROM users WHERE id = %s", (uid,))
+            return _row(cur.fetchone())
 
 
 def update_user(uid, data):
-    users.update_one({"id": uid}, {"$set": data})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET doc = doc || %s::jsonb WHERE id = %s",
+                (_jdump(data), uid),
+            )
+            # dacă email-ul s-a schimbat, actualizăm și coloana indexată
+            if "email" in data:
+                cur.execute(
+                    "UPDATE users SET email = %s WHERE id = %s",
+                    (data["email"], uid),
+                )
+        c.commit()
     return get_user_by_id(uid)
 
 
 def set_user_verified(email):
-    users.update_one({"email": email}, {"$set": {"verified": True}})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET doc = doc || '{\"verified\": true}'::jsonb"
+                " WHERE email = %s",
+                (email,),
+            )
+        c.commit()
 
 
 def set_user_password(email, password_hash):
-    users.update_one({"email": email}, {"$set": {"password_hash": password_hash}})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET doc = doc || %s::jsonb WHERE email = %s",
+                (_jdump({"password_hash": password_hash}), email),
+            )
+        c.commit()
 
 
 def toggle_favorite(user_id, char_id):
@@ -231,7 +228,7 @@ def toggle_favorite(user_id, char_id):
     else:
         favs.append(char_id)
         state = True
-    users.update_one({"id": user_id}, {"$set": {"favorites": favs}})
+    update_user(user_id, {"favorites": favs})
     return state
 
 
@@ -242,151 +239,294 @@ def get_favorites(user_id):
 
 def favorite_counts():
     counts = {}
-    for u in users.find({}, {"favorites": 1, "_id": 0}):
-        for cid in (u.get("favorites") or []):
-            counts[cid] = counts.get(cid, 0) + 1
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc->>'favorites' AS favs FROM users")
+            for row in cur.fetchall():
+                raw = row["favs"]
+                if not raw:
+                    continue
+                try:
+                    for cid in json.loads(raw):
+                        counts[cid] = counts.get(cid, 0) + 1
+                except Exception:
+                    pass
     return counts
-
-
-def increment_stat(char_id, field, n=1):
-    characters.update_one({"id": char_id}, {"$inc": {field: n}})
-
-
-def character_message_count(char_id):
-    conv_ids = [c["id"] for c in list_conversations(char_id)]
-    if not conv_ids:
-        return 0
-    return messages.count_documents({"conversation_id": {"$in": conv_ids}})
 
 
 def delete_user(user_id):
     u = get_user_by_id(user_id)
     if not u:
         return
-    for c in list_characters(owner_id=user_id):
-        delete_character(c["id"])
-    sessions.delete_many({"user_id": user_id})
-    email_codes.delete_many({"email": u.get("email")})
-    users.delete_one({"id": user_id})
+    for ch in list_characters(owner_id=user_id):
+        delete_character(ch["id"])
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+            cur.execute(
+                "DELETE FROM email_codes WHERE email = %s", (u.get("email"),)
+            )
+            cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        c.commit()
 
 
-# ------------------------- email codes -------------------------
+# ---------------------------------------------------------------------------
+# email codes / sessions
+# ---------------------------------------------------------------------------
+
 def create_email_code(email, code, purpose, ttl_minutes=15):
-    email_codes.delete_many({"email": email, "purpose": purpose})
-    email_codes.insert_one({
+    doc = {
         "email": email,
         "code": code,
         "purpose": purpose,
         "created_at": _now(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat(),
-    })
+        "expires_at": (
+            datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+        ).isoformat(),
+    }
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "DELETE FROM email_codes WHERE email = %s AND purpose = %s",
+                (email, purpose),
+            )
+            cur.execute(
+                "INSERT INTO email_codes (email, purpose, doc) VALUES (%s, %s, %s)",
+                (email, purpose, _jdump(doc)),
+            )
+        c.commit()
 
 
 def check_email_code(email, code, purpose):
-    doc = email_codes.find_one({"email": email, "purpose": purpose, "code": (code or "").strip()})
-    if not doc:
-        return False
-    try:
-        if datetime.fromisoformat(doc["expires_at"]) < datetime.now(timezone.utc):
-            email_codes.delete_one({"_id": doc["_id"]})
-            return False
-    except Exception:  # noqa
-        pass
-    email_codes.delete_one({"_id": doc["_id"]})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT id, doc FROM email_codes"
+                " WHERE email = %s AND purpose = %s AND doc->>'code' = %s",
+                (email, purpose, (code or "").strip()),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            doc = dict(row["doc"])
+            try:
+                if (
+                    datetime.fromisoformat(doc["expires_at"])
+                    < datetime.now(timezone.utc)
+                ):
+                    cur.execute(
+                        "DELETE FROM email_codes WHERE id = %s", (row["id"],)
+                    )
+                    c.commit()
+                    return False
+            except Exception:
+                pass
+            cur.execute("DELETE FROM email_codes WHERE id = %s", (row["id"],))
+            c.commit()
     return True
 
 
 def create_session(token, user_id, expires_days=30):
-    sessions.insert_one({
+    doc = {
         "token": token,
         "user_id": user_id,
         "created_at": _now(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat(),
-    })
+        "expires_at": (
+            datetime.now(timezone.utc) + timedelta(days=expires_days)
+        ).isoformat(),
+    }
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sessions (token, user_id, doc) VALUES (%s, %s, %s)"
+                " ON CONFLICT (token) DO NOTHING",
+                (token, user_id, _jdump(doc)),
+            )
+        c.commit()
 
 
 def get_session(token):
-    s = sessions.find_one({"token": token}, {"_id": 0})
-    if not s:
-        return None
-    try:
-        if datetime.fromisoformat(s["expires_at"]) < datetime.now(timezone.utc):
-            sessions.delete_one({"token": token})
-            return None
-    except Exception:  # noqa
-        pass
-    return s
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc FROM sessions WHERE token = %s", (token,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            s = dict(row["doc"])
+            try:
+                if (
+                    datetime.fromisoformat(s["expires_at"])
+                    < datetime.now(timezone.utc)
+                ):
+                    cur.execute(
+                        "DELETE FROM sessions WHERE token = %s", (token,)
+                    )
+                    c.commit()
+                    return None
+            except Exception:
+                pass
+            return s
 
 
 def delete_session(token):
-    sessions.delete_one({"token": token})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE token = %s", (token,))
+        c.commit()
 
 
-def _now():
-    return datetime.now(timezone.utc).isoformat()
-
+# ---------------------------------------------------------------------------
+# characters
+# ---------------------------------------------------------------------------
 
 def create_character(data):
     doc = {"id": str(uuid.uuid4()), "created_at": _now(), **data}
-    characters.insert_one(doc)
-    doc.pop("_id", None)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO characters (id, owner_id, visibility, created_at, doc)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (
+                    doc["id"],
+                    doc.get("owner_id"),
+                    doc.get("visibility", "private"),
+                    doc["created_at"],
+                    _jdump(doc),
+                ),
+            )
+        c.commit()
     return doc
 
 
 def list_characters(owner_id=None):
-    q = {} if owner_id is None else {"owner_id": owner_id}
-    return list(characters.find(q, {"_id": 0}).sort("created_at", -1))
+    with _conn() as c:
+        with c.cursor() as cur:
+            if owner_id is None:
+                cur.execute(
+                    "SELECT doc FROM characters ORDER BY created_at DESC"
+                )
+            else:
+                cur.execute(
+                    "SELECT doc FROM characters WHERE owner_id = %s"
+                    " ORDER BY created_at DESC",
+                    (owner_id,),
+                )
+            return _rows(cur.fetchall())
 
 
 def reassign_owner(old_owner_id, new_owner_id):
-    """Mută toate personajele de la un proprietar la altul (ex: guest -> cont)."""
-    characters.update_many(
-        {"owner_id": old_owner_id}, {"$set": {"owner_id": new_owner_id}}
-    )
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE characters SET owner_id = %s,"
+                " doc = doc || %s::jsonb WHERE owner_id = %s",
+                (new_owner_id, _jdump({"owner_id": new_owner_id}), old_owner_id),
+            )
+        c.commit()
 
 
 def list_public_characters():
-    return list(characters.find({"visibility": "public"}, {"_id": 0}).sort("created_at", -1))
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM characters WHERE visibility = 'public'"
+                " ORDER BY created_at DESC"
+            )
+            return _rows(cur.fetchall())
 
 
 def get_character(cid):
-    return characters.find_one({"id": cid}, {"_id": 0})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc FROM characters WHERE id = %s", (cid,))
+            return _row(cur.fetchone())
 
 
 def update_character(cid, data):
-    characters.update_one({"id": cid}, {"$set": data})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE characters SET doc = doc || %s::jsonb WHERE id = %s",
+                (_jdump(data), cid),
+            )
+            # actualizează coloanele indexate dacă e cazul
+            if "owner_id" in data or "visibility" in data:
+                sets, vals = [], []
+                if "owner_id" in data:
+                    sets.append("owner_id = %s")
+                    vals.append(data["owner_id"])
+                if "visibility" in data:
+                    sets.append("visibility = %s")
+                    vals.append(data["visibility"])
+                vals.append(cid)
+                cur.execute(
+                    f"UPDATE characters SET {', '.join(sets)} WHERE id = %s",
+                    vals,
+                )
+        c.commit()
     return get_character(cid)
 
 
 def delete_user_voices(user_id):
-    """Remove only voice data from a user's characters; keep characters and chats."""
-    result = characters.update_many(
-        {"owner_id": user_id},
-        {
-            "$unset": {
-                "voice_id": "",
-                "voice_name": "",
-                "voice_sample_b64": "",
-                "voice_sample_name": "",
-                "voice_ref_text": "",
-                "voice_stability": "",
-                "voice_similarity": "",
-                "voice_style": "",
-                "voice_tone": "",
-            }
-        },
-    )
-    return result.modified_count
+    """Șterge doar datele vocale din personajele utilizatorului."""
+    chars = list_characters(owner_id=user_id)
+    fields = [
+        "voice_id", "voice_name", "voice_sample_b64", "voice_sample_name",
+        "voice_ref_text", "voice_stability", "voice_similarity",
+        "voice_style", "voice_tone",
+    ]
+    count = 0
+    for ch in chars:
+        update_character(
+            ch["id"],
+            {f: None for f in fields},
+        )
+        count += 1
+    return count
+
+
+def increment_stat(char_id, field, n=1):
+    ch = get_character(char_id)
+    if ch is None:
+        return
+    current = ch.get(field, 0) or 0
+    update_character(char_id, {field: current + n})
+
+
+def character_message_count(char_id):
+    conv_ids = [c["id"] for c in list_conversations(char_id)]
+    if not conv_ids:
+        return 0
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM messages WHERE conversation_id = ANY(%s)",
+                (conv_ids,),
+            )
+            row = cur.fetchone()
+            return row["cnt"] if row else 0
 
 
 def delete_character(cid):
     conv_ids = [c["id"] for c in list_conversations(cid)]
-    characters.delete_one({"id": cid})
-    conversations.delete_many({"character_id": cid})
-    messages.delete_many({"conversation_id": {"$in": conv_ids}})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM characters WHERE id = %s", (cid,))
+            cur.execute(
+                "DELETE FROM conversations WHERE character_id = %s", (cid,)
+            )
+            if conv_ids:
+                cur.execute(
+                    "DELETE FROM messages WHERE conversation_id = ANY(%s)",
+                    (conv_ids,),
+                )
+        c.commit()
 
 
-# ------------------------- conversations -------------------------
+# ---------------------------------------------------------------------------
+# conversations
+# ---------------------------------------------------------------------------
+
 def create_conversation(character_id, title="Conversație nouă"):
     doc = {
         "id": str(uuid.uuid4()),
@@ -395,35 +535,71 @@ def create_conversation(character_id, title="Conversație nouă"):
         "created_at": _now(),
         "updated_at": _now(),
     }
-    conversations.insert_one(doc)
-    doc.pop("_id", None)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO conversations (id, character_id, created_at, doc)"
+                " VALUES (%s, %s, %s, %s)",
+                (doc["id"], character_id, doc["created_at"], _jdump(doc)),
+            )
+        c.commit()
     return doc
 
 
 def list_conversations(character_id):
-    return list(
-        conversations.find({"character_id": character_id}, {"_id": 0}).sort("created_at", 1)
-    )
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM conversations WHERE character_id = %s"
+                " ORDER BY created_at ASC",
+                (character_id,),
+            )
+            return _rows(cur.fetchall())
 
 
 def get_conversation(conv_id):
-    return conversations.find_one({"id": conv_id}, {"_id": 0})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM conversations WHERE id = %s", (conv_id,)
+            )
+            return _row(cur.fetchone())
 
 
 def rename_conversation(conv_id, title):
-    conversations.update_one({"id": conv_id}, {"$set": {"title": title, "updated_at": _now()}})
+    _update_conv(conv_id, {"title": title, "updated_at": _now()})
 
 
 def touch_conversation(conv_id):
-    conversations.update_one({"id": conv_id}, {"$set": {"updated_at": _now()}})
+    _update_conv(conv_id, {"updated_at": _now()})
+
+
+def _update_conv(conv_id, data):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE conversations SET doc = doc || %s::jsonb WHERE id = %s",
+                (_jdump(data), conv_id),
+            )
+        c.commit()
 
 
 def delete_conversation(conv_id):
-    conversations.delete_one({"id": conv_id})
-    messages.delete_many({"conversation_id": conv_id})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "DELETE FROM conversations WHERE id = %s", (conv_id,)
+            )
+            cur.execute(
+                "DELETE FROM messages WHERE conversation_id = %s", (conv_id,)
+            )
+        c.commit()
 
 
-# ------------------------- messages -------------------------
+# ---------------------------------------------------------------------------
+# messages
+# ---------------------------------------------------------------------------
+
 def add_message(conversation_id, role, content, audio_b64=None, extra=None):
     doc = {
         "id": str(uuid.uuid4()),
@@ -436,114 +612,160 @@ def add_message(conversation_id, role, content, audio_b64=None, extra=None):
         doc["audio_b64"] = audio_b64
     if extra:
         doc.update(extra)
-    messages.insert_one(doc)
+    media_kind = doc.get("media_kind")
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO messages"
+                " (id, conversation_id, created_at, role, media_kind, doc)"
+                " VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    doc["id"],
+                    conversation_id,
+                    doc["created_at"],
+                    role,
+                    media_kind,
+                    _jdump(doc),
+                ),
+            )
+        c.commit()
     touch_conversation(conversation_id)
-    doc.pop("_id", None)
     return doc
 
 
 def get_messages(conversation_id):
-    return list(
-        messages.find({"conversation_id": conversation_id}, {"_id": 0}).sort("created_at", 1)
-    )
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM messages WHERE conversation_id = %s"
+                " ORDER BY created_at ASC",
+                (conversation_id,),
+            )
+            return _rows(cur.fetchall())
 
 
 def list_media(owner_id):
-    """All photos/songs/videos the user shared, newest first, with character info."""
     out = []
     for ch in list_characters(owner_id=owner_id):
         conv_ids = [c["id"] for c in list_conversations(ch["id"])]
         if not conv_ids:
             continue
-        cur = messages.find(
-            {"conversation_id": {"$in": conv_ids},
-             "media_kind": {"$in": ["photo", "song", "video"]}},
-            {"_id": 0},
-        )
-        for m in cur:
-            out.append({
-                "char_id": ch["id"],
-                "char_name": ch.get("name", "Personaj"),
-                "char_avatar": ch.get("avatar", "🎭"),
-                "media_kind": m.get("media_kind"),
-                "song_name": m.get("song_name"),
-                "image_b64": m.get("image_b64"),
-                "song_b64": m.get("song_b64"),
-                "video_b64": m.get("video_b64"),
-                "created_at": m.get("created_at"),
-            })
+        with _conn() as c:
+            with c.cursor() as cur:
+                cur.execute(
+                    "SELECT doc FROM messages WHERE conversation_id = ANY(%s)"
+                    " AND media_kind IN ('photo','song','video')",
+                    (conv_ids,),
+                )
+                for row in cur.fetchall():
+                    m = dict(row["doc"])
+                    out.append({
+                        "char_id": ch["id"],
+                        "char_name": ch.get("name", "Personaj"),
+                        "char_avatar": ch.get("avatar", "🎭"),
+                        "media_kind": m.get("media_kind"),
+                        "song_name": m.get("song_name"),
+                        "image_b64": m.get("image_b64"),
+                        "song_b64": m.get("song_b64"),
+                        "video_b64": m.get("video_b64"),
+                        "created_at": m.get("created_at"),
+                    })
     out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return out
 
 
 def list_letters(owner_id):
-    """All 'letters' characters wrote to the user, newest first, with character info."""
     out = []
     for ch in list_characters(owner_id=owner_id):
         conv_ids = [c["id"] for c in list_conversations(ch["id"])]
         if not conv_ids:
             continue
-        cur = messages.find(
-            {"conversation_id": {"$in": conv_ids}, "role": "assistant"},
-            {"_id": 0},
-        )
-        for m in cur:
-            content = m.get("content") or ""
-            if content.startswith("💌 O scrisoare pentru tine:"):
-                out.append({
-                    "id": m.get("id"),
-                    "char_id": ch["id"],
-                    "char_name": ch.get("name", "Personaj"),
-                    "char_avatar": ch.get("avatar", "🎭"),
-                    "voice_id": ch.get("voice_id"),
-                    "content": content,
-                    "created_at": m.get("created_at"),
-                })
+        with _conn() as c:
+            with c.cursor() as cur:
+                cur.execute(
+                    "SELECT doc FROM messages WHERE conversation_id = ANY(%s)"
+                    " AND role = 'assistant'",
+                    (conv_ids,),
+                )
+                for row in cur.fetchall():
+                    m = dict(row["doc"])
+                    content = m.get("content") or ""
+                    if content.startswith("💌 O scrisoare pentru tine:"):
+                        out.append({
+                            "id": m.get("id"),
+                            "char_id": ch["id"],
+                            "char_name": ch.get("name", "Personaj"),
+                            "char_avatar": ch.get("avatar", "🎭"),
+                            "voice_id": ch.get("voice_id"),
+                            "content": content,
+                            "created_at": m.get("created_at"),
+                        })
     out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return out
 
 
 def list_song_names(character_id):
-    """Distinct song names the user shared with a character (order preserved)."""
     conv_ids = [c["id"] for c in list_conversations(character_id)]
     if not conv_ids:
         return []
-    cur = messages.find(
-        {"conversation_id": {"$in": conv_ids}, "media_kind": "song"},
-        {"_id": 0, "song_name": 1, "created_at": 1},
-    ).sort("created_at", 1)
-    seen, out = set(), []
-    for m in cur:
-        n = m.get("song_name")
-        if n and n not in seen:
-            seen.add(n)
-            out.append(n)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM messages WHERE conversation_id = ANY(%s)"
+                " AND media_kind = 'song' ORDER BY created_at ASC",
+                (conv_ids,),
+            )
+            seen, out = set(), []
+            for row in cur.fetchall():
+                n = dict(row["doc"]).get("song_name")
+                if n and n not in seen:
+                    seen.add(n)
+                    out.append(n)
     return out
 
 
 def list_songs(character_id):
-    """All songs the user shared with a character, oldest first (for «playlist-ul nostru»)."""
     conv_ids = [c["id"] for c in list_conversations(character_id)]
     if not conv_ids:
         return []
-    return list(messages.find(
-        {"conversation_id": {"$in": conv_ids}, "media_kind": "song", "role": "user"},
-        {"_id": 0, "id": 1, "song_name": 1, "song_b64": 1, "created_at": 1},
-    ).sort("created_at", 1))
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM messages WHERE conversation_id = ANY(%s)"
+                " AND media_kind = 'song' AND role = 'user'"
+                " ORDER BY created_at ASC",
+                (conv_ids,),
+            )
+            rows = []
+            for row in cur.fetchall():
+                d = dict(row["doc"])
+                rows.append({
+                    "id": d.get("id"),
+                    "song_name": d.get("song_name"),
+                    "song_b64": d.get("song_b64"),
+                    "created_at": d.get("created_at"),
+                })
+    return rows
 
 
 def delete_song(message_id):
-    """Remove a single song message from a playlist."""
-    messages.delete_one({"id": message_id})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM messages WHERE id = %s", (message_id,))
+        c.commit()
 
 
 def rename_song(message_id, new_name):
-    """Change the display name of a single song in a playlist."""
-    messages.update_one({"id": message_id}, {"$set": {"song_name": new_name}})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE messages SET doc = doc || %s::jsonb WHERE id = %s",
+                (_jdump({"song_name": new_name}), message_id),
+            )
+        c.commit()
 
 
 def random_song(character_id):
-    """Pick a random song the user shared (prefer ones with stored audio) for «melodia noastră»."""
     songs = list_songs(character_id)
     if not songs:
         return None
@@ -556,19 +778,28 @@ def has_media(character_id):
     conv_ids = [c["id"] for c in list_conversations(character_id)]
     if not conv_ids:
         return False
-    return messages.count_documents(
-        {"conversation_id": {"$in": conv_ids}, "media_kind": {"$in": ["photo", "song", "video"]}}
-    ) > 0
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM messages WHERE conversation_id = ANY(%s)"
+                " AND media_kind IN ('photo','song','video') LIMIT 1",
+                (conv_ids,),
+            )
+            return cur.fetchone() is not None
 
 
 def random_media(character_id):
     conv_ids = [c["id"] for c in list_conversations(character_id)]
     if not conv_ids:
         return None
-    items = list(messages.find(
-        {"conversation_id": {"$in": conv_ids}, "media_kind": {"$in": ["photo", "song"]}},
-        {"_id": 0},
-    ))
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM messages WHERE conversation_id = ANY(%s)"
+                " AND media_kind IN ('photo','song')",
+                (conv_ids,),
+            )
+            items = _rows(cur.fetchall())
     if not items:
         return None
     import random
@@ -576,9 +807,20 @@ def random_media(character_id):
 
 
 def clear_messages(conversation_id):
-    messages.delete_many({"conversation_id": conversation_id})
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "DELETE FROM messages WHERE conversation_id = %s",
+                (conversation_id,),
+            )
+        c.commit()
 
 
 def set_reaction(message_id, emoji):
-    messages.update_one({"id": message_id}, {"$set": {"reaction": emoji}})
-
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "UPDATE messages SET doc = doc || %s::jsonb WHERE id = %s",
+                (_jdump({"reaction": emoji}), message_id),
+            )
+        c.commit()

@@ -1,7 +1,5 @@
 streamlit==1.59.2
-pymongo
-dnspython
-mongomock
+psycopg2-binary
 python-dotenv
 bcrypt
 Pillow
