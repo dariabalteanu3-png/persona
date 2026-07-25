@@ -1,7 +1,11 @@
-"""Generare vocală prin server XTTS v2 (Coqui TTS).
+"""Generare vocală cu Chatterbox TTS — funcționează direct în procesul Streamlit, fără server separat.
 
-Comunică cu serverul XTTS v2 pornit pe Render Background Worker.
-Suportă clonare voce + română + emoții. 100% gratuit!
+Suportă:
+- Clonare voce din mostră audio
+- Limbă română
+- Expresivitate emoțională
+- 30+ limbi
+- 100% gratuit, open-source
 """
 
 import base64
@@ -9,20 +13,35 @@ import hashlib
 import io
 import os
 import re
-import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-# URL-ul serverului TTS de pe Render
-_TTS_SERVER = os.environ.get("TTS_SERVER_URL", "http://localhost:5001")
-_voice_samples: dict = {}
-
 
 class VoiceGenerationError(RuntimeError):
-    pass
+    """Eroare user-facing de la serviciul de generare vocală."""
+
+
+# ════════════════════════════════════════════════════
+#  Chatterbox TTS — funcționează direct în proces
+# ════════════════════════════════════════════════════
+
+_model = None
+_voice_samples: dict = {}  # voice_id → sample_bytes
+
+
+def _load_model():
+    """Încarcă modelul Chatterbox TTS (prima dată durează 2-3 minute)."""
+    global _model
+    if _model is not None:
+        return _model
+    print("⏳ Se încarcă modelul Chatterbox TTS (prima dată durează 2-3 minute)...")
+    from chatterbox.tts import ChatterboxTTS
+    _model = ChatterboxTTS.from_pretrained(device="cpu")
+    print("✅ Modelul Chatterbox este încărcat!")
+    return _model
 
 
 def _decode_sample(sample_b64):
@@ -39,28 +58,7 @@ def _decode_sample(sample_b64):
 def voice_id_for_sample(sample_bytes):
     if not sample_bytes:
         return None
-    return "xts:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
-
-
-def register_voice(voice_id, sample_b64, sample_name="reference.wav"):
-    if not voice_id or not sample_b64:
-        return
-    sample = _decode_sample(sample_b64)
-    if not sample:
-        return
-    suffix = Path(sample_name or "reference.wav").suffix.lower()
-    if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
-        suffix = ".wav"
-    _voice_samples[voice_id] = (sample, suffix)
-    _push_sample_to_server(voice_id, sample, f"reference{suffix}")
-
-
-def register_character_voice(character):
-    register_voice(
-        character.get("voice_id"),
-        character.get("voice_sample_b64"),
-        character.get("voice_sample_name", "reference.wav"),
-    )
+    return "cbx:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
 
 
 def forget_registered_voices(voice_ids=None):
@@ -71,118 +69,79 @@ def forget_registered_voices(voice_ids=None):
         _voice_samples.pop(voice_id, None)
 
 
-def _push_sample_to_server(voice_id, sample_bytes, sample_name):
-    try:
-        import requests
-        requests.post(
-            f"{_TTS_SERVER}/register",
-            json={
-                "voice_id": voice_id,
-                "audio_b64": base64.b64encode(sample_bytes).decode(),
-                "sample_name": sample_name,
-            },
-            timeout=10,
-        )
-    except Exception:
-        pass
+# ════════════════════════════════════════════════════
+#  API PUBLIC TTS
+# ════════════════════════════════════════════════════
 
+def text_to_speech(
+    text,
+    voice_id,
+    stability=0.5,
+    similarity_boost=0.75,
+    style=0.0,
+    expressive=True,
+    tone=None,
+):
+    """Generează WAV cu vocea clonată din mostră (Chatterbox TTS).
+    Rulează direct în proces — fără server separat."""
 
-def _ensure_registered(voice_id):
-    info = _voice_samples.get(voice_id)
-    if not info:
+    sample_bytes = _voice_samples.get(voice_id)
+    if not sample_bytes:
         raise VoiceGenerationError(
             "Vocea personajului nu are o mostră salvată. "
             "Editează personajul și reîncarcă mostra audio."
         )
-    sample_bytes, suffix = info
-    try:
-        import requests
-        requests.post(
-            f"{_TTS_SERVER}/register",
-            json={
-                "voice_id": voice_id,
-                "audio_b64": base64.b64encode(sample_bytes).decode(),
-                "sample_name": f"reference{suffix}",
-            },
-            timeout=10,
-        )
-    except Exception as exc:
-        raise VoiceGenerationError(
-            "Serverul de voce nu răspunde. "
-            "Verifică dacă aplicația este pornită."
-        ) from exc
+
+    model = _load_model()
+
+    import torchaudio
+    import numpy as np
+
+    spoken = _expressify(str(text) if expressive else (text or "..."))
+    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
+    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
+
+    print(f"🔊 Generare voce Chatterbox: {len(spoken)} caractere...")
+    wav = model.generate(
+        text=spoken,
+        audio_prompt=sample_bytes,
+        exaggeration=exaggeration,
+        cfg_weight=cfg_weight,
+    )
+
+    # Convertește tensor → bytes WAV
+    buf = io.BytesIO()
+    torchaudio.save(buf, wav, model.sr, format="wav")
+    print(f"✅ Voce generată: {buf.tell()} bytes")
+    return buf.getvalue()
 
 
-def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
-    _ensure_registered(voice_id)
-    import requests
-    try:
-        resp = requests.post(
-            f"{_TTS_SERVER}/tts",
-            json={
-                "text": text,
-                "voice_id": voice_id,
-                "exaggeration": exaggeration,
-                "cfg_weight": cfg_weight,
-            },
-            timeout=240,
-        )
-    except requests.exceptions.ConnectionError as exc:
-        raise VoiceGenerationError(
-            "Serverul de voce nu este disponibil. "
-            "Verifică dacă aplicația este pornită."
-        ) from exc
-    except requests.exceptions.Timeout as exc:
-        raise VoiceGenerationError(
-            "Generarea vocii a durat prea mult. Încearcă cu un text mai scurt."
-        ) from exc
-    except Exception as exc:
-        raise VoiceGenerationError(f"Eroare la serverul de voce: {exc}") from exc
+def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
+    """Generează un preview direct din mostră (înainte de salvarea personajului)."""
+    model = _load_model()
 
-    if resp.status_code != 200:
-        try:
-            detail = resp.json().get("detail", resp.text)
-        except Exception:
-            detail = resp.text
-        raise VoiceGenerationError(f"Eroare server TTS: {detail}")
-    return resp.content
+    import torchaudio
+    import numpy as np
+
+    spoken = _expressify(str(text) or "...")
+    exaggeration = 0.5
+    cfg_weight = 0.5
+
+    wav = model.generate(
+        text=spoken,
+        audio_prompt=sample_bytes,
+        exaggeration=exaggeration,
+        cfg_weight=cfg_weight,
+    )
+
+    buf = io.BytesIO()
+    torchaudio.save(buf, wav, model.sr, format="wav")
+    return buf.getvalue()
 
 
-def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5):
-    import requests
-    try:
-        resp = requests.post(
-            f"{_TTS_SERVER}/preview",
-            json={
-                "text": text,
-                "audio_b64": base64.b64encode(sample_bytes).decode(),
-                "sample_name": sample_name or "reference.wav",
-                "exaggeration": exaggeration,
-                "cfg_weight": cfg_weight,
-            },
-            timeout=240,
-        )
-    except requests.exceptions.ConnectionError as exc:
-        raise VoiceGenerationError(
-            "Serverul de voce nu este disponibil."
-        ) from exc
-    except requests.exceptions.Timeout as exc:
-        raise VoiceGenerationError(
-            "Generarea preview-ului a durat prea mult."
-        ) from exc
-    except Exception as exc:
-        raise VoiceGenerationError(f"Eroare preview TTS: {exc}") from exc
-
-    if resp.status_code != 200:
-        try:
-            detail = resp.json().get("detail", resp.text)
-        except Exception:
-            detail = resp.text
-        raise VoiceGenerationError(f"Eroare preview TTS: {detail}")
-    return resp.content
-
-
-# ── Normalizare text ─────────────────────────────────────────────────
+# ════════════════════════════════════════════════════
+#  Normalizare text
+# ════════════════════════════════════════════════════
 
 _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
@@ -190,15 +149,8 @@ _EMOJI_RE = re.compile(
 )
 
 
-def extract_actions(text):
-    return [
-        a.strip()
-        for a in re.findall(r"\*([^*]+)\*", text or "")
-        if a.strip()
-    ]
-
-
-def expressify(text):
+def _expressify(text):
+    """Curăță markup-ul și normalizează textul românesc pentru TTS."""
     text = str(text or "")
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", " ", text)
@@ -215,37 +167,12 @@ def expressify(text):
     return text or "..."
 
 
-# ── API public TTS ───────────────────────────────────────────────────
-
-def text_to_speech(
-    text,
-    voice_id,
-    stability=0.5,
-    similarity_boost=0.75,
-    style=0.0,
-    expressive=True,
-    tone=None,
-):
-    """Generează WAV cu vocea clonată (XTTS v2)."""
-    if not _voice_samples.get(voice_id):
-        raise VoiceGenerationError(
-            "Vocea personajului nu are o mostră salvată. "
-            "Editează personajul și reîncarcă mostra audio."
-        )
-    spoken = expressify(text) if expressive else (text or "...")
-    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
-    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
-    return _generate(spoken, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight)
-
-
-def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Generează un preview direct din mostră (înainte de salvare)."""
-    return _generate_preview(expressify(text), sample_bytes, sample_name)
-
-
-# ── Sinteza ambientală DSP (neschimbată) ────────────────────────────
+# ════════════════════════════════════════════════════
+#  SINTEZA AMBIENTALĂ DSP (neschimbată, de la original voice.py)
+# ════════════════════════════════════════════════════
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
+    """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit."""
     try:
         import numpy as np
     except ImportError:
@@ -268,10 +195,8 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     def fband(sig, lo=0, hi=None):
         S = np.fft.rfft(sig)
         f = np.fft.rfftfreq(len(sig), 1 / sr)
-        if lo > 0:
-            S[f < lo] = 0
-        if hi:
-            S[f > hi] = 0
+        if lo > 0: S[f < lo] = 0
+        if hi: S[f > hi] = 0
         return np.fft.irfft(S, len(sig))
 
     def pink(lo=20, hi=8000, size=n):
@@ -279,8 +204,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         with np.errstate(divide="ignore", invalid="ignore"):
             mag = np.where(f > 0, 1.0 / np.sqrt(np.maximum(f, 0.1)), 0)
         mag[f < lo] = 0
-        if hi:
-            mag[f > hi] = 0
+        if hi: mag[f > hi] = 0
         ph = rng.uniform(0, 2 * np.pi, len(f))
         return np.fft.irfft(mag * np.exp(1j * ph), size)
 
@@ -324,6 +248,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
                 out[pos:pos + clen] += tone * env * float(rng.uniform(0.15, 0.5))
         return out
 
+    # Preseturi
     if preset == "rain":
         base = pink(100, 8000) * am(rng.uniform(0.05, 0.15), 0.1, 0.9) * 0.55
         drops = footsteps(float(rng.uniform(10, 18)), lo=1500, hi=6000, amp=0.22)
@@ -337,10 +262,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
             tlen = min(int(rng.uniform(0.8, 2.8) * sr), n - pos)
             if tlen > 0:
                 boom = pink(18, 450, tlen)
-                env = np.concatenate([
-                    np.linspace(0, 1, max(1, tlen // 8)),
-                    np.exp(-np.linspace(0, 5, tlen - tlen // 8))
-                ])[:tlen]
+                env = np.concatenate([np.linspace(0, 1, max(1, tlen // 8)), np.exp(-np.linspace(0, 5, tlen - tlen // 8))])[:tlen]
                 thunder[pos:pos + tlen] += boom * env * float(rng.uniform(0.55, 1.0))
         sig = rain + rumble + thunder * 0.90
     elif preset == "ocean":
@@ -407,7 +329,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         machine = np.zeros(n)
         mpos = int(sr * float(rng.uniform(2, 6)))
         while mpos < n:
-            mlen = min(int(rng.uniform(0.9, 2.6) * sr), n - mpos)
+            mlen = min(int(rng.uniform(0.9, 2.6 * sr)), n - mpos)
             if mlen > 0:
                 hiss = fband(rng.uniform(-1, 1, mlen), 1800, 9000)
                 menv = np.sin(np.pi * np.linspace(0, 1, mlen)) ** 0.5
@@ -421,7 +343,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         horns = np.zeros(n)
         for _ in range(int(rng.integers(1, 5))):
             p = int(rng.integers(0, n))
-            hlen = min(int(rng.uniform(0.3, 2.0) * sr), n - p)
+            hlen = min(int(rng.uniform(0.3, 2.0 * sr)), n - p)
             if hlen > 0:
                 freq = float(rng.uniform(300, 750))
                 env = np.sin(np.pi * np.linspace(0, 1, hlen)) ** 0.28
@@ -451,29 +373,25 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         trains = np.zeros(n)
         for _ in range(int(rng.integers(1, 4))):
             p = int(rng.integers(0, int(0.7 * n)))
-            tlen = min(int(rng.uniform(3, 9) * sr), n - p)
+            tlen = min(int(rng.uniform(3, 9 * sr)), n - p)
             if tlen > 0:
                 rumble = pink(28, 550, tlen)
                 third = tlen // 3
-                env = np.concatenate([
-                    np.linspace(0, 1, third),
-                    np.ones(third),
-                    np.linspace(1, 0, tlen - 2 * third)
-                ])[:tlen]
+                env = np.concatenate([np.linspace(0, 1, third), np.ones(third), np.linspace(1, 0, tlen - 2 * third)])[:tlen]
                 trains[p:p + tlen] += rumble * env * float(rng.uniform(0.24, 0.56))
         pa = np.zeros(n)
         for _ in range(int(rng.integers(1, 3))):
             p = int(rng.integers(int(0.1 * n), int(0.75 * n)))
-            alen = min(int(rng.uniform(3, 9) * sr), n - p)
+            alen = min(int(rng.uniform(3, 9 * sr)), n - p)
             if alen > 0:
                 pa_noise = fband(pink(280, 3500, alen), 280, 3500)
                 syl_env = np.zeros(alen)
                 sp = 0
                 while sp < alen:
-                    sdur = int(rng.uniform(0.05, 0.19) * sr)
+                    sdur = int(rng.uniform(0.05, 0.19 * sr))
                     se = min(sp + sdur, alen)
                     syl_env[sp:se] = float(rng.uniform(0.28, 1.0))
-                    sp += sdur + int(rng.uniform(0.02, 0.11) * sr)
+                    sp += sdur + int(rng.uniform(0.02, 0.11 * sr))
                 frame = np.sin(np.pi * np.linspace(0, 1, alen)) ** 0.28
                 pa[p:p + alen] += pa_noise * syl_env * frame * float(rng.uniform(0.17, 0.38))
         sig = crowd + trains * 0.50 + pa * 0.55
@@ -484,13 +402,13 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         spread = max(1, step_n // 6)
         pos = int(rng.integers(0, step_n // 2))
         while pos < n:
-            clen = min(int(rng.uniform(0.008, 0.032) * sr), n - pos)
+            clen = min(int(rng.uniform(0.008, 0.032 * sr)), n - pos)
             if clen > 0:
                 click = fband(rng.uniform(-1, 1, clen), 1100, 9500)
                 clicks[pos:pos + clen] += click * np.exp(-np.linspace(0, 18, clen)) * float(rng.uniform(0.5, 1.0))
                 if float(rng.random()) < 0.62:
                     cp = pos + clen
-                    crk_len = min(int(rng.uniform(0.06, 0.28) * sr), n - cp)
+                    crk_len = min(int(rng.uniform(0.06, 0.28 * sr)), n - cp)
                     if crk_len > 0:
                         crk_f = float(rng.uniform(190, 620))
                         crk = fband(rng.uniform(-1, 1, crk_len), crk_f - 80, crk_f + 240)
@@ -517,6 +435,7 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
 
 
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
+    """Returnează un sunet ambient sintetizat local."""
     text = str(prompt or "").lower()
     presets = (
         ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
@@ -525,8 +444,7 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coastă")),
         ("fire", ("foc", "campfire", "fire", "șemineu", "flacăr", "lumânare", "jar")),
         ("wind", ("vânt", "wind", "breeze", "adiere", "suflare")),
-        ("forest_walk", ("pași pădure", "walking forest", "footsteps leaves", "leaves underfoot",
-                           "crunch leaves", "rustling underfoot", "mers pădure", "foșnet pași")),
+        ("forest_walk", ("pași pădure", "walking forest", "footsteps leaves", "leaves underfoot", "crunch leaves", "rustling underfoot", "mers pădure", "foșnet pași")),
         ("crickets", ("greier", "cricket", "noapte liniștit", "quiet night", "seară câmp")),
         ("river", ("râu", "river", "pârâu", "brook", "stream", "cascadă", "waterfall")),
         ("train", ("tren", "train", "railroad", "railway", "șine", "vagon")),
@@ -534,12 +452,9 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainărie")),
         ("city", ("oraș", "city", "trafic", "traffic", "stradă", "street", "urban", "bulevard")),
         ("countryside", ("țară", "sat", "countryside", "fermă", "câmp", "rural", "birds chirp", "livadă")),
-        ("station", ("gară", "station", "peron", "aeroport", "airport", "terminal",
-                           "announcement", "anunț", "metrou", "autogară")),
-        ("heels_parquet", ("tocuri", "heels", "parchet", "parquet", "podea", "floor click",
-                           "toc pantof", "pantof cu toc", "lemn podea")),
-        ("snow_walk", ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow",
-                           "snow underfoot", "zăpadă pași")),
+        ("station", ("gară", "station", "peron", "aeroport", "airport", "terminal", "announcement", "anunț", "metrou", "autogară")),
+        ("heels_parquet", ("tocuri", "heels", "parchet", "parquet", "podea", "floor click", "toc pantof", "pantof cu toc", "lemn podea")),
+        ("snow_walk", ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow", "snow underfoot", "zăpadă pași")),
         ("snow", ("ninso", "zăpad", "snow", "iarnă liniș", "fulgi")),
     )
     preset = next(

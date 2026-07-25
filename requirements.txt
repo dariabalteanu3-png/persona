@@ -13,7 +13,5 @@ requests
 numpy
 soundfile
 chatterbox-tts
-fastapi
-uvicorn[standard]
 torch
 torchaudio
