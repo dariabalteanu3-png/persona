@@ -2579,16 +2579,68 @@ def render_create():
     with c2:
         avatar = st.selectbox("Avatar", EMOJIS, key="cf_avatar")
 
+    # Sugestii de personalitate în română
+    st.markdown("**💭 Sugestii de personalitate** (click pentru a selecta)")
+    
+    personality_suggestions = [
+        "Prietenos, cald și empatic. Ascultă cu adevărat și oferă sfaturi sincere.",
+        "Inteligent și sarcastic. Răspunde cu umor și observații ascuțite.",
+        "Romantic și poetic. Vorbește în imagini frumoase și emoții profunde.",
+        "Misterios și enigmatic. Dezvăluie lucrurile treptat, cu multe înțelesuri.",
+        "Bucuros și optimist. Räspunde cu entuziasm și energie pozitivă.",
+        "Calm și înțelept. Oferă perspective echilibrate și răbdare infinită.",
+        "Jucăuș și copilăros. Adoră glumele și momentele amuzante.",
+        "Autoritar și hotărât. Vorbește clar, direct, fără ocolișuri.",
+        "Blând și răbdător. Ascultă fără să judecă, oferă confort.",
+        "Curajos și aventuros. Îndrăznește să exploreze idei neobișnuite.",
+        "Drăguț și afectuos. Arată interes și grijă în conversații.",
+        "Practical și realist. Se concentrează pe soluții concrete.",
+    ]
+    
+    # Afișare sugestii ca butoane
+    cols = st.columns(3)
+    for i, suggestion in enumerate(personality_suggestions):
+        with cols[i % 3]:
+            if st.button(f"💭 {suggestion[:40]}...", key=f"pers_sug_{i}", use_container_width=True):
+                st.session_state.cf_pers = suggestion
+    
+    st.markdown("")  # Spatiu
+    
     personality = st.text_area(
-        "Personalitate",
-        placeholder="ex. Sarcastic, inteligent, vorbește scurt și direct. Iubește misterele.",
-        height=110,
+        "✨ Personalitate personalizată (sau modifică sugestia de mai sus)",
+        placeholder="Scrie personalitatea ta sau selectează o sugestie de mai sus...",
+        height=100,
         key="cf_pers",
     )
+    # Sugestii de scenariu în română
+    st.markdown("**🎬 Sugestii de scenariu** (click pentru a selecta)")
+    
+    scenario_suggestions = [
+        "O cafenea liniștită în centrul orașului, într-o seară ploioasă.",
+        "Un birou de detectivi din anii '40, cu fum de țigară șicase vechi.",
+        "Un turn magic plin de cărți și lumânări, unde se întâmplă lucruri misterioase.",
+        "O stație spațială în viitorul îndepărtat, în timpul unei misiuni importante.",
+        "Sala tronului unui castel medieval, cu pereți de piatră și ferestre înalte.",
+        "O pădure fermecată la apus, plină de viață și surprize.",
+        "O terasă sub cerul înstelat, într-o seară liniștită de vară.",
+        "Un laborator secret, plin de experimente ciudate și invenții neobișnuite.",
+        "O bibliotecă veche și mare, cu cărți rare și secrete ascunse.",
+        "Un vapor elegant care traversează marea într-o noapte senină.",
+    ]
+    
+    # Afișare sugestii scenariu ca butoane
+    cols = st.columns(2)
+    for i, suggestion in enumerate(scenario_suggestions):
+        with cols[i % 2]:
+            if st.button(f"🎭 {suggestion[:50]}...", key=f"scen_sug_{i}", use_container_width=True):
+                st.session_state.cf_scen = suggestion
+    
+    st.markdown("")
+    
     scenario = st.text_area(
-        "Scenariu / context",
-        placeholder="ex. Ești într-un birou de detectivi din anii '40, tocmai ai primit un caz nou.",
-        height=110,
+        "✨ Scenariu personalizat (sau modifică sugestia de mai sus)",
+        placeholder="Scrie scenariul tău sau selectează o sugestie de mai sus...",
+        height=100,
         key="cf_scen",
     )
     if st.session_state.get("_pending_amb"):
