@@ -5,8 +5,6 @@ and optionally generating speech from a user's reference recording.
 
 ## Run
 
-The app runs through the `Start application` workflow:
-
 ```bash
 streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true
 ```
@@ -14,46 +12,29 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headle
 ## Voice generation
 
 Character speech uses **Chatterbox TTS** (open-source, `chatterbox-tts` pip package) running
-as a local FastAPI service on port 5001 (`tts_server.py`). No ElevenLabs, Hugging Face, or any
-paid provider is used. No commercial limits (no characters/month, no credits).
+**directly in the Streamlit process** — no separate server, no external API.
 
-**No reference text needed** — Chatterbox clones a voice directly from a short audio sample
-(10–30 seconds recommended). Just upload the recording and Chatterbox does the rest.
+✅ Suportă limba română
+✅ Clonare vocală dintr-o mostră audio (10–30 secunde recomandat)
+✅ Fără text de referință — Chatterbox clonează vocea direct din mostră
+✅ Fără limite comerciale (minute, caractere, credite)
+✅ 100% gratuit și open-source
 
-Background ambience is generated locally as WAV presets inside the app
-(rain, storm, ocean, forest, fire, café, wind, crickets, city, snow, room,
-countryside, river, and train). Selecting and playing these sounds does not call
-any external API.
+Sunetele ambientale sunt sintetizate local ca preseturi WAV
+(ploaie, furtună, ocean, foc, vânt, pădure, cafea, greieri, oraș, tren, etc.)
+— fără API extern.
 
-From the profile settings, "Șterge vocile mele" removes the saved reference
-samples and voice settings from the user's characters while preserving the
-characters, conversations, and messages. The action requires an explicit
-confirmation phrase.
+Din setările de profil, "Șterge vocile mele" elimină mostrele vocale salvate
+și setările de voce ale personajelor, păstrând personajele și conversațiile.
 
 ## Architecture
 
-- **Streamlit app** (`app.py`) — port 5000 — main UI
-- **Chatterbox TTS server** (`tts_server.py`) — port 5001 — local FastAPI service
-  - POST `/register` — saves voice sample to `/tmp/persona_voices/`
-  - POST `/tts` — generates WAV from text + voice_id
-  - POST `/preview` — generates WAV from raw bytes (before saving a character)
-  - GET `/health` — service status
-- **voice.py** — calls the TTS server via HTTP (localhost:5001); ambient DSP unchanged
-- **stt.py** — speech-to-text via Groq/Gemini (separate from TTS)
+- **Streamlit app** (`app.py`) — port 5000 — UI principal + TTS in-proces
+- **voice.py** — Chatterbox TTS inline (fără server HTTP); sunete ambientale locale
+- **stt.py** — speech-to-text via Groq/Gemini (separat de TTS)
 
-## Run
-
-The app runs through two parallel workflows:
-```bash
-# Workflow 1: Chatterbox TTS Server
-python tts_server.py
-
-# Workflow 2: Streamlit app
-streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true
-```
-
-The TTS server loads the Chatterbox model on first use (~1-2 minutes, ~2GB download).
-Subsequent calls are fast once the model is in memory.
+Chatterbox TTS încarcă modelul la primul apel (~1-2 minute, ~2GB download).
+Comenzile ulterioare sunt rapide după ce modelul e în memorie.
 
 ## Project preferences
 
@@ -61,4 +42,4 @@ Subsequent calls are fast once the model is in memory.
 - Prefer free/open-source services for voice generation.
 - Keep user-facing text in Romanian.
 - The primary user is visually impaired — minimize required manual text input wherever possible.
-- Chatterbox TTS is the active voice backend — do not revert to F5-TTS or HF Spaces for TTS.
+- Chatterbox TTS rulează in-proces — nu mai există `tts_server.py`.

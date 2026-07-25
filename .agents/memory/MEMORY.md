@@ -1,1 +1,1 @@
-- [Chatterbox TTS architecture](chatterbox-tts.md) — vocea folosește serverul local FastAPI (port 5001), nu HF Spaces; fără text de referință necesar.
+- [Chatterbox TTS architecture](chatterbox-tts.md) — vocea rulează in-proces Chatterbox TTS (fără server separat); suportă limba română și clonare vocală.

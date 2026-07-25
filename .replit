@@ -16,10 +16,6 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Chatterbox TTS Server"
-
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -32,26 +28,10 @@ waitForPort = 5000
 [workflows.workflow.metadata]
 outputType = "webview"
 
-[[workflows.workflow]]
-name = "Chatterbox TTS Server"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python tts_server.py"
-waitForPort = 5001
-
-[workflows.workflow.metadata]
-outputType = "console"
-
 [[ports]]
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 5001
-externalPort = 3000
-
 [deployment]
 deploymentTarget = "vm"
-run = ["bash", "-c", "python tts_server.py & streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true"]
+run = ["bash", "-c", "streamlit run app.py --server.address 0.0.0.0 --server.port 5000 --server.headless true"]

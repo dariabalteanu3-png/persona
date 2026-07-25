@@ -1,11 +1,11 @@
-"""Generare vocală cu Chatterbox TTS — funcționează direct în procesul Streamlit, fără server separat.
+"""Generare vocală cu XTTS-v2 Romanian v2 (primar) + Chatterbox TTS (fallback).
 
 Suportă:
 - Clonare voce din mostră audio
-- Limbă română
+- Limbă română (model XTTS finetuning specific)
 - Expresivitate emoțională
-- 30+ limbi
 - 100% gratuit, open-source
+- Funcționează direct în procesul Streamlit, fără server separat
 """
 
 import base64
@@ -13,11 +13,14 @@ import hashlib
 import io
 import os
 import re
+import time
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
+_log = logging.getLogger("voice")
 
 
 class VoiceGenerationError(RuntimeError):
@@ -25,24 +28,200 @@ class VoiceGenerationError(RuntimeError):
 
 
 # ════════════════════════════════════════════════════
-#  Chatterbox TTS — funcționează direct în proces
+#  Configurare
 # ════════════════════════════════════════════════════
 
-_model = None
+XTTS_MODEL_REPO = "eduardem/xtts-v2-romanian-v2"
+XTTS_MODEL_DIR = os.environ.get("XTTS_MODEL_DIR", "/tmp/xtts_v2_romanian_model")
+
+_engines: dict = {}  # "xtts" | "chatterbox" → model instance
+_engine_available: dict = {}  # cache engine availability checks
 _voice_samples: dict = {}  # voice_id → sample_bytes
 
 
-def _load_model():
-    """Încarcă modelul Chatterbox TTS (prima dată durează 2-3 minute)."""
-    global _model
-    if _model is not None:
-        return _model
-    print("⏳ Se încarcă modelul Chatterbox TTS (prima dată durează 2-3 minute)...")
-    from chatterbox.tts import ChatterboxTTS
-    _model = ChatterboxTTS.from_pretrained(device="cpu")
-    print("✅ Modelul Chatterbox este încărcat!")
-    return _model
+# ════════════════════════════════════════════════════
+#  Detectare motor disponibil
+# ════════════════════════════════════════════════════
 
+def _check_xtts():
+    """Verifică dacă XTTS-v2 poate fi importat (Coqui TTS trebuie instalat)."""
+    if "xtts" in _engine_available:
+        return _engine_available["xtts"]
+    try:
+        from TTS.tts.configs.xtts_config import XttsConfig  # noqa
+        from TTS.tts.models.xtts import Xtts  # noqa
+        _engine_available["xtts"] = True
+        print("🔊 Motor XTTS-v2 disponibil")
+        return True
+    except ImportError:
+        _engine_available["xtts"] = False
+        print("⚠️  Motor XTTS-v2 nu e disponibil (TTS package neinstalat)")
+        return False
+
+
+def _check_chatterbox():
+    """Verifică dacă Chatterbox TTS poate fi importat."""
+    if "chatterbox" in _engine_available:
+        return _engine_available["chatterbox"]
+    try:
+        from chatterbox.tts import ChatterboxTTS  # noqa
+        _engine_available["chatterbox"] = True
+        print("🔊 Motor Chatterbox TTS disponibil")
+        return True
+    except ImportError:
+        _engine_available["chatterbox"] = False
+        print("⚠️  Motor Chatterbox TTS nu e disponibil")
+        return False
+
+
+# ════════════════════════════════════════════════════
+#  Motor XTTS-v2 Romanian v2
+# ════════════════════════════════════════════════════
+
+def _ensure_xtts_model():
+    """Descarcă modelul XTTS-v2 Romanian v2 (dacă nu e deja) și îl încarcă."""
+    if "xtts" in _engines:
+        return _engines["xtts"]
+
+    print(f"⏳ Se descarcă modelul XTTS-v2 Romanian v2 ({XTTS_MODEL_REPO})...")
+    start = time.time()
+
+    from huggingface_hub import snapshot_download
+    from TTS.tts.configs.xtts_config import XttsConfig
+    from TTS.tts.models.xtts import Xtts
+    import torch
+
+    # Descarcă model (doar prima dată, cache în /tmp)
+    os.makedirs(XTTS_MODEL_DIR, exist_ok=True)
+    snapshot_download(
+        repo_id=XTTS_MODEL_REPO,
+        local_dir=XTTS_MODEL_DIR,
+        local_dir_use_symlinks=False,
+    )
+
+    # Încarcă
+    config = XttsConfig()
+    config.load_json(os.path.join(XTTS_MODEL_DIR, "config.json"))
+
+    model = Xtts(config)
+    model.load_checkpoint(
+        config,
+        checkpoint_path=os.path.join(XTTS_MODEL_DIR, "model.pth"),
+        use_deepspeed=False,
+    )
+    model = model.to("cpu")
+    model.eval()
+
+    elapsed = time.time() - start
+    print(f"✅ Model XTTS-v2 Romanian v2 încărcat în {elapsed:.1f}s")
+    _engines["xtts"] = model
+    return model
+
+
+def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
+    """Generează WAV cu XTTS-v2 Romanian v2."""
+    import torch
+    import numpy as np
+    import wave
+
+    model = _ensure_xtts_model()
+
+    # Salvează mostra temporar
+    ref_path = "/tmp/_xtts_ref.wav"
+    with open(ref_path, "wb") as f:
+        f.write(sample_bytes)
+
+    # Obține condiționare
+    gpt_cond, speaker_emb = model.get_conditioning_latents(
+        audio_path=ref_path,
+        gpt_cond_len=3,
+        max_ref_length=60,
+    )
+
+    # Generează
+    temperature = max(0.1, 1.0 - float(similarity_boost) * 0.6)
+    top_p = max(0.5, float(similarity_boost))
+    length_penalty = 1.0 + float(style) * 0.3
+
+    outputs = model.inference(
+        text=text,
+        language="ro",
+        gpt_cond_latent=gpt_cond,
+        speaker_embedding=speaker_emb,
+        temperature=temperature,
+        length_penalty=length_penalty,
+        repetition_penalty=2.0,
+        top_k=50,
+        top_p=top_p,
+    )
+
+    wav = outputs.get("wav") if isinstance(outputs, dict) else outputs
+    if torch.is_tensor(wav):
+        wav_np = wav.cpu().numpy()
+    else:
+        wav_np = np.array(wav, dtype=np.float32)
+    if wav_np.ndim > 1:
+        wav_np = wav_np.squeeze()
+
+    output_sr = 24000
+    wav_int = (np.clip(wav_np, -1.0, 1.0) * 32767).astype("<i2")
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(output_sr)
+        wf.writeframes(wav_int.tobytes())
+
+    return buf.getvalue()
+
+
+# ════════════════════════════════════════════════════
+#  Motor Chatterbox TTS (fallback)
+# ════════════════════════════════════════════════════
+
+def _ensure_chatterbox():
+    """Încarcă Chatterbox TTS (doar dacă e disponibil)."""
+    if "chatterbox" in _engines:
+        return _engines["chatterbox"]
+
+    if not _check_chatterbox():
+        raise VoiceGenerationError("Chatterbox TTS nu e instalat.")
+
+    print("⏳ Se încarcă modelul Chatterbox TTS (poate dura 2-3 minute)...")
+    from chatterbox.tts import ChatterboxTTS
+
+    model = ChatterboxTTS.from_pretrained(device="cpu")
+    print("✅ Model Chatterbox încărcat!")
+    _engines["chatterbox"] = model
+    return model
+
+
+def _chatterbox_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
+    """Generează WAV cu Chatterbox TTS."""
+    import torchaudio
+    import numpy as np
+
+    model = _ensure_chatterbox()
+
+    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
+    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
+
+    wav = model.generate(
+        text=text,
+        audio_prompt=sample_bytes,
+        exaggeration=exaggeration,
+        cfg_weight=cfg_weight,
+    )
+
+    buf = io.BytesIO()
+    torchaudio.save(buf, wav, model.sr, format="wav")
+    return buf.getvalue()
+
+
+# ════════════════════════════════════════════════════
+#  Decodare mostră
+# ════════════════════════════════════════════════════
 
 def _decode_sample(sample_b64):
     if not sample_b64:
@@ -58,7 +237,7 @@ def _decode_sample(sample_b64):
 def voice_id_for_sample(sample_bytes):
     if not sample_bytes:
         return None
-    return "cbx:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
+    return "v:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
 
 
 def forget_registered_voices(voice_ids=None):
@@ -82,9 +261,11 @@ def text_to_speech(
     expressive=True,
     tone=None,
 ):
-    """Generează WAV cu vocea clonată din mostră (Chatterbox TTS).
-    Rulează direct în proces — fără server separat."""
-
+    """Generează WAV cu vocea clonată.
+    
+    Încearcă: XTTS-v2 Romanian v2 → Chatterbox TTS → VoiceGenerationError
+    Rulează direct în proces — fără server separat.
+    """
     sample_bytes = _voice_samples.get(voice_id)
     if not sample_bytes:
         raise VoiceGenerationError(
@@ -92,51 +273,68 @@ def text_to_speech(
             "Editează personajul și reîncarcă mostra audio."
         )
 
-    model = _load_model()
-
-    import torchaudio
-    import numpy as np
-
     spoken = _expressify(str(text) if expressive else (text or "..."))
-    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
-    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
 
-    print(f"🔊 Generare voce Chatterbox: {len(spoken)} caractere...")
-    wav = model.generate(
-        text=spoken,
-        audio_prompt=sample_bytes,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
+    # Încearcă XTTS-v2 Romanian v2
+    xtts_ok = _check_xtts()
+    if xtts_ok:
+        try:
+            print(f"🔊 Generare XTTS-v2 (română): {len(spoken)} caractere...")
+            wav = _xtts_generate(
+                spoken,
+                sample_bytes,
+                similarity_boost=similarity_boost,
+                style=style,
+            )
+            print(f"✅ Voce generată: {len(wav)} bytes (XTTS-v2)")
+            return wav
+        except Exception as exc:
+            msg = str(exc)
+            if "Killed" in msg or "OutOfMemory" in msg or "SIGKILL" in msg:
+                print("⚠️  XTTS-v2: OOM, trec la Chatterbox TTS")
+                _engine_available["xtts"] = False
+            else:
+                print(f"⚠️  XTTS-v2: eroare {exc}, trec la Chatterbox TTS")
+
+    # Fallback: Chatterbox TTS
+    if _check_chatterbox():
+        try:
+            print(f"🔊 Generare Chatterbox: {len(spoken)} caractere...")
+            wav = _chatterbox_generate(
+                spoken,
+                sample_bytes,
+                similarity_boost=similarity_boost,
+                style=style,
+            )
+            print(f"✅ Voce generată: {len(wav)} bytes (Chatterbox)")
+            return wav
+        except Exception as exc:
+            print(f"⚠️  Chatterbox: eroare {exc}")
+
+    raise VoiceGenerationError(
+        "Niciun motor TTS disponibil. Instalează coqui-tts (pentru XTTS) "
+        "sau chatterbox-tts. Vezi README pentru instrucțiuni."
     )
-
-    # Convertește tensor → bytes WAV
-    buf = io.BytesIO()
-    torchaudio.save(buf, wav, model.sr, format="wav")
-    print(f"✅ Voce generată: {buf.tell()} bytes")
-    return buf.getvalue()
 
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Generează un preview direct din mostră (înainte de salvarea personajului)."""
-    model = _load_model()
-
-    import torchaudio
-    import numpy as np
-
+    """Generează preview direct din mostră (înainte de salvarea personajului)."""
+    xtts_ok = _check_xtts()
     spoken = _expressify(str(text) or "...")
-    exaggeration = 0.5
-    cfg_weight = 0.5
 
-    wav = model.generate(
-        text=spoken,
-        audio_prompt=sample_bytes,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-    )
+    if xtts_ok:
+        try:
+            return _xtts_generate(spoken, sample_bytes, similarity_boost=0.7, style=0.3)
+        except Exception:
+            pass
 
-    buf = io.BytesIO()
-    torchaudio.save(buf, wav, model.sr, format="wav")
-    return buf.getvalue()
+    if _check_chatterbox():
+        try:
+            return _chatterbox_generate(spoken, sample_bytes, similarity_boost=0.5, style=0.0)
+        except Exception:
+            pass
+
+    raise VoiceGenerationError("Niciun motor TTS disponibil.")
 
 
 # ════════════════════════════════════════════════════
@@ -166,10 +364,10 @@ def _expressify(text):
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text or "..."
 
-
 # ════════════════════════════════════════════════════
-#  SINTEZA AMBIENTALĂ DSP (neschimbată, de la original voice.py)
+#  SINTEZA AMBIENTALĂ DSP (neschimbată)
 # ════════════════════════════════════════════════════
+# [Pastrăm funcțiile _ambient_wav și sound_effect exact ca în versiunea anterioară]
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit."""
