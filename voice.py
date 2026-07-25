@@ -1,21 +1,25 @@
-"""Generare vocală cu XTTS-v2 Romanian v2 (primar) + Chatterbox TTS (fallback).
+"""Generare vocala cu XTTS-v2 Romanian v2 pentru clonare voce.
 
-Suportă:
-- Clonare voce din mostră audio
-- Limbă română (model XTTS finetuning specific)
-- Expresivitate emoțională
+Suporta:
+- Clonare voce din mostra audio
+- Limba romana (model XTTS finetuning specific)
+- Expresivitate emotionala
 - 100% gratuit, open-source
-- Funcționează direct în procesul Streamlit, fără server separat
+- Functioneaza direct in procesul Streamlit, fara server separat
 """
 
+import asyncio
 import base64
 import hashlib
 import io
+import logging
 import os
 import re
 import time
-import logging
+import wave
 from pathlib import Path
+
+import numpy as np
 
 from dotenv import load_dotenv
 
@@ -24,7 +28,7 @@ _log = logging.getLogger("voice")
 
 
 class VoiceGenerationError(RuntimeError):
-    """Eroare user-facing de la serviciul de generare vocală."""
+    """Eroare user-facing de la serviciul de generare vocala."""
 
 
 # ════════════════════════════════════════════════════
@@ -34,111 +38,171 @@ class VoiceGenerationError(RuntimeError):
 XTTS_MODEL_REPO = "eduardem/xtts-v2-romanian-v2"
 XTTS_MODEL_DIR = os.environ.get("XTTS_MODEL_DIR", "/tmp/xtts_v2_romanian_model")
 
-_engines: dict = {}  # "xtts" | "chatterbox" → model instance
-_engine_available: dict = {}  # cache engine availability checks
-_voice_samples: dict = {}  # voice_id → sample_bytes
+_engines = {}  # model instance cache
+_engine_available = None  # cache engine availability
+_voice_samples = {}  # voice_id -> sample_bytes
+_model_loading = False
 
 
 # ════════════════════════════════════════════════════
-#  Detectare motor disponibil
+#  Normalizare text pentru TTS
 # ════════════════════════════════════════════════════
 
-def _check_xtts():
-    """Verifică dacă XTTS-v2 poate fi importat (Coqui TTS trebuie instalat)."""
-    if "xtts" in _engine_available:
-        return _engine_available["xtts"]
-    try:
-        from TTS.tts.configs.xtts_config import XttsConfig  # noqa
-        from TTS.tts.models.xtts import Xtts  # noqa
-        _engine_available["xtts"] = True
-        print("🔊 Motor XTTS-v2 disponibil")
-        return True
-    except ImportError:
-        _engine_available["xtts"] = False
-        print("⚠️  Motor XTTS-v2 nu e disponibil (TTS package neinstalat)")
-        return False
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U00002190-\U000021FF\uFE0F\u2764]"
+)
+
+# Normalizare cedilla pentru romana
+_CEDILLA_TO_COMMA = str.maketrans({
+    "\u015f": "\u0219",  # s -> s (lowercase)
+    "\u0163": "\u021b",  # t -> t (lowercase)
+    "\u015e": "\u0218",  # S -> S (uppercase)
+    "\u0162": "\u021a",  # T -> T (uppercase)
+})
 
 
-def _check_chatterbox():
-    """Verifică dacă Chatterbox TTS poate fi importat."""
-    if "chatterbox" in _engine_available:
-        return _engine_available["chatterbox"]
-    try:
-        from chatterbox.tts import ChatterboxTTS  # noqa
-        _engine_available["chatterbox"] = True
-        print("🔊 Motor Chatterbox TTS disponibil")
-        return True
-    except ImportError:
-        _engine_available["chatterbox"] = False
-        print("⚠️  Motor Chatterbox TTS nu e disponibil")
-        return False
+def _normalize_romanian(text: str) -> str:
+    """Normalizeaza caracterele cedilla pentru XTTS-v2."""
+    return str(text).translate(_CEDILLA_TO_COMMA)
+
+
+def _expressify(text):
+    """Curata markup-ul si normalizeaza textul romanesc pentru TTS."""
+    text = str(text or "")
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", " ", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"_([^_]+)_", r"\1", text)
+    text = re.sub(r"#+\s*", "", text)
+    text = re.sub(r"`[^`]+`", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = text.replace("&", " si ")
+    text = text.replace("%", " la suta")
+    text = re.sub(r"\.{3}", "... ", text)
+    text = _EMOJI_RE.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text or "..."
 
 
 # ════════════════════════════════════════════════════
 #  Motor XTTS-v2 Romanian v2
 # ════════════════════════════════════════════════════
 
+def _check_xtts():
+    """Verifica daca XTTS-v2 poate fi importat."""
+    global _engine_available
+    if _engine_available is not None:
+        return _engine_available
+    
+    try:
+        from TTS.tts.configs.xtts_config import XttsConfig
+        from TTS.tts.models.xtts import Xtts
+        _engine_available = True
+        print("🔊 Motor XTTS-v2 disponibil")
+        return True
+    except ImportError as e:
+        _engine_available = False
+        print(f"⚠️ Motor XTTS-v2 nu e disponibil: {e}")
+        return False
+
+
 def _ensure_xtts_model():
-    """Descarcă modelul XTTS-v2 Romanian v2 (dacă nu e deja) și îl încarcă."""
+    """Descarca modelul XTTS-v2 Romanian v2 (daca nu e deja) si il incarca."""
+    global _model_loading
+    
     if "xtts" in _engines:
         return _engines["xtts"]
+    
+    if _model_loading:
+        # Asteapta daca alt fir incarca deja modelul
+        while _model_loading:
+            time.sleep(0.5)
+        return _engines.get("xtts")
+    
+    _model_loading = True
+    
+    try:
+        print(f"⏳ Se descarca modelul XTTS-v2 Romanian v2 ({XTTS_MODEL_REPO})...")
+        start = time.time()
 
-    print(f"⏳ Se descarcă modelul XTTS-v2 Romanian v2 ({XTTS_MODEL_REPO})...")
-    start = time.time()
+        from huggingface_hub import snapshot_download
+        from TTS.tts.configs.xtts_config import XttsConfig
+        from TTS.tts.models.xtts import Xtts
 
-    from huggingface_hub import snapshot_download
-    from TTS.tts.configs.xtts_config import XttsConfig
-    from TTS.tts.models.xtts import Xtts
-    import torch
+        # Descarca model (doar prima data, cache in /tmp)
+        os.makedirs(XTTS_MODEL_DIR, exist_ok=True)
+        snapshot_download(
+            repo_id=XTTS_MODEL_REPO,
+            local_dir=XTTS_MODEL_DIR,
+            local_dir_use_symlinks=False,
+        )
 
-    # Descarcă model (doar prima dată, cache în /tmp)
-    os.makedirs(XTTS_MODEL_DIR, exist_ok=True)
-    snapshot_download(
-        repo_id=XTTS_MODEL_REPO,
-        local_dir=XTTS_MODEL_DIR,
-        local_dir_use_symlinks=False,
-    )
+        # Incarca
+        config = XttsConfig()
+        config.load_json(os.path.join(XTTS_MODEL_DIR, "config.json"))
 
-    # Încarcă
-    config = XttsConfig()
-    config.load_json(os.path.join(XTTS_MODEL_DIR, "config.json"))
+        model = Xtts(config)
+        model.load_checkpoint(
+            config,
+            checkpoint_path=os.path.join(XTTS_MODEL_DIR, "model.pth"),
+            use_deepspeed=False,
+        )
+        
+        # Incearca GPU daca e disponibil
+        try:
+            import torch
+            if torch.cuda.is_available():
+                model = model.to("cuda")
+                print("🚀 XTTS-v2 foloseste GPU")
+            else:
+                model = model.to("cpu")
+                print("💻 XTTS-v2 foloseste CPU")
+        except:
+            model = model.to("cpu")
+            print("💻 XTTS-v2 foloseste CPU")
+        
+        model.eval()
 
-    model = Xtts(config)
-    model.load_checkpoint(
-        config,
-        checkpoint_path=os.path.join(XTTS_MODEL_DIR, "model.pth"),
-        use_deepspeed=False,
-    )
-    model = model.to("cpu")
-    model.eval()
-
-    elapsed = time.time() - start
-    print(f"✅ Model XTTS-v2 Romanian v2 încărcat în {elapsed:.1f}s")
-    _engines["xtts"] = model
-    return model
+        elapsed = time.time() - start
+        print(f"✅ Model XTTS-v2 Romanian v2 incarcat in {elapsed:.1f}s")
+        _engines["xtts"] = model
+        return model
+        
+    finally:
+        _model_loading = False
 
 
 def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
-    """Generează WAV cu XTTS-v2 Romanian v2."""
+    """Genereaza WAV cu XTTS-v2 Romanian v2."""
     import torch
-    import numpy as np
-    import wave
 
     model = _ensure_xtts_model()
 
-    # Salvează mostra temporar
+    # Salveaza mostra temporar
     ref_path = "/tmp/_xtts_ref.wav"
     with open(ref_path, "wb") as f:
         f.write(sample_bytes)
 
-    # Obține condiționare
+    # Normalizeaza textul pentru romana
+    text = _normalize_romanian(text)
+    
+    # Mareste limita de caractere pentru romana
+    if hasattr(model, 'tokenizer') and hasattr(model.tokenizer, 'char_limits'):
+        model.tokenizer.char_limits["ro"] = 250
+
+    # Obtine conditionare
     gpt_cond, speaker_emb = model.get_conditioning_latents(
         audio_path=ref_path,
         gpt_cond_len=3,
         max_ref_length=60,
     )
 
-    # Generează
+    # Calculeaza max_new_tokens pentru a preveni hallucination
+    word_count = len(text.split())
+    max_gen_tokens = max(min(word_count * 50, 500), 150)
+
+    # Genereaza
     temperature = max(0.1, 1.0 - float(similarity_boost) * 0.6)
     top_p = max(0.5, float(similarity_boost))
     length_penalty = 1.0 + float(style) * 0.3
@@ -153,6 +217,8 @@ def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
         repetition_penalty=2.0,
         top_k=50,
         top_p=top_p,
+        enable_text_splitting=True,
+        max_new_tokens=max_gen_tokens,
     )
 
     wav = outputs.get("wav") if isinstance(outputs, dict) else outputs
@@ -162,6 +228,9 @@ def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
         wav_np = np.array(wav, dtype=np.float32)
     if wav_np.ndim > 1:
         wav_np = wav_np.squeeze()
+
+    # Elimina tacerile de la final
+    wav_np = _trim_trailing_silence(wav_np, sr=24000)
 
     output_sr = 24000
     wav_int = (np.clip(wav_np, -1.0, 1.0) * 32767).astype("<i2")
@@ -176,76 +245,19 @@ def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
     return buf.getvalue()
 
 
-# ════════════════════════════════════════════════════
-#  Motor Chatterbox TTS (fallback)
-# ════════════════════════════════════════════════════
-
-def _ensure_chatterbox():
-    """Încarcă Chatterbox TTS (doar dacă e disponibil)."""
-    if "chatterbox" in _engines:
-        return _engines["chatterbox"]
-
-    if not _check_chatterbox():
-        raise VoiceGenerationError("Chatterbox TTS nu e instalat.")
-
-    print("⏳ Se încarcă modelul Chatterbox TTS (poate dura 2-3 minute)...")
-    from chatterbox.tts import ChatterboxTTS
-
-    model = ChatterboxTTS.from_pretrained(device="cpu")
-    print("✅ Model Chatterbox încărcat!")
-    _engines["chatterbox"] = model
-    return model
-
-
-def _chatterbox_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
-    """Generează WAV cu Chatterbox TTS."""
-    import torchaudio
-    import numpy as np
-
-    model = _ensure_chatterbox()
-
-    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
-    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
-
-    wav = model.generate(
-        text=text,
-        audio_prompt=sample_bytes,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-    )
-
-    buf = io.BytesIO()
-    torchaudio.save(buf, wav, model.sr, format="wav")
-    return buf.getvalue()
-
-
-# ════════════════════════════════════════════════════
-#  Decodare mostră
-# ════════════════════════════════════════════════════
-
-def _decode_sample(sample_b64):
-    if not sample_b64:
-        return None
-    if sample_b64.startswith("data:"):
-        sample_b64 = sample_b64.split(",", 1)[-1]
-    try:
-        return base64.b64decode(sample_b64)
-    except Exception as exc:
-        raise VoiceGenerationError("Mostra audio este invalidă.") from exc
-
-
-def voice_id_for_sample(sample_bytes):
-    if not sample_bytes:
-        return None
-    return "v:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
-
-
-def forget_registered_voices(voice_ids=None):
-    if voice_ids is None:
-        _voice_samples.clear()
-        return
-    for voice_id in voice_ids:
-        _voice_samples.pop(voice_id, None)
+def _trim_trailing_silence(wav_np, sr=24000, threshold_db=-40, window_ms=25, margin_ms=50):
+    """Elimina tacerile de la finalul audio-ului."""
+    window = int(sr * window_ms / 1000)
+    margin = int(sr * margin_ms / 1000)
+    threshold = 10 ** (threshold_db / 20)
+    
+    for i in range(len(wav_np) - window, 0, -window):
+        rms = np.sqrt(np.mean(wav_np[i:i+window] ** 2))
+        if rms > threshold:
+            end = min(i + window + margin, len(wav_np))
+            return wav_np[:end]
+    
+    return wav_np
 
 
 # ════════════════════════════════════════════════════
@@ -261,116 +273,172 @@ def text_to_speech(
     expressive=True,
     tone=None,
 ):
-    """Generează WAV cu vocea clonată.
+    """Genereaza WAV cu vocea clonata.
     
-    Încearcă: XTTS-v2 Romanian v2 → Chatterbox TTS → VoiceGenerationError
-    Rulează direct în proces — fără server separat.
+    XTTS-v2 Romanian v2 foloseste mostra audio pentru a clona vocea.
+    
+    Args:
+        text: Textul de generat
+        voice_id: ID-ul vocii (asociat cu mostra salvata)
+        stability: Stabilitate (0-1)
+        similarity_boost: Similaritate (0-1) - cat de aproape de mostra
+        style: Stil (0-1) - expresivitate
+        expressive: Daca textul trebuie procesat
+        tone: Tonul vocii (optional)
+    
+    Returns:
+        bytes: Audio WAV
     """
     sample_bytes = _voice_samples.get(voice_id)
     if not sample_bytes:
         raise VoiceGenerationError(
-            "Vocea personajului nu are o mostră salvată. "
-            "Editează personajul și reîncarcă mostra audio."
+            "Vocea nu are o mostra salvata. "
+            "Incarca o mostra audio pentru acest personaj."
         )
 
     spoken = _expressify(str(text) if expressive else (text or "..."))
+    
+    if not spoken or spoken == "...":
+        return _generate_silence(duration=0.5)
 
-    # Încearcă XTTS-v2 Romanian v2
-    xtts_ok = _check_xtts()
-    if xtts_ok:
-        try:
-            print(f"🔊 Generare XTTS-v2 (română): {len(spoken)} caractere...")
-            wav = _xtts_generate(
-                spoken,
-                sample_bytes,
-                similarity_boost=similarity_boost,
-                style=style,
-            )
-            print(f"✅ Voce generată: {len(wav)} bytes (XTTS-v2)")
-            return wav
-        except Exception as exc:
-            msg = str(exc)
-            if "Killed" in msg or "OutOfMemory" in msg or "SIGKILL" in msg:
-                print("⚠️  XTTS-v2: OOM, trec la Chatterbox TTS")
-                _engine_available["xtts"] = False
-            else:
-                print(f"⚠️  XTTS-v2: eroare {exc}, trec la Chatterbox TTS")
+    try:
+        print(f"🔊 Generare XTTS-v2 (romana, clonare voce): {len(spoken)} caractere...")
+        wav = _xtts_generate(
+            spoken,
+            sample_bytes,
+            similarity_boost=similarity_boost,
+            style=style,
+        )
+        print(f"✅ Voce clonata generata: {len(wav)} bytes")
+        return wav
+        
+    except Exception as exc:
+        error_msg = str(exc)
+        if "Killed" in error_msg or "OutOfMemory" in error_msg or "SIGKILL" in error_msg:
+            raise VoiceGenerationError(
+                "Memorie insuficienta pentru XTTS-v2. "
+                "Incearca sa folosesti o mostra audio mai scurta sau reporneste aplicatia."
+            ) from exc
+        elif "CUDA" in error_msg or "GPU" in error_msg:
+            raise VoiceGenerationError(
+                "Eroare GPU. XTTS-v2 are nevoie de CUDA disponibil."
+            ) from exc
+        else:
+            raise VoiceGenerationError(f"Eroare generare vocala: {exc}") from exc
 
-    # Fallback: Chatterbox TTS
-    if _check_chatterbox():
-        try:
-            print(f"🔊 Generare Chatterbox: {len(spoken)} caractere...")
-            wav = _chatterbox_generate(
-                spoken,
-                sample_bytes,
-                similarity_boost=similarity_boost,
-                style=style,
-            )
-            print(f"✅ Voce generată: {len(wav)} bytes (Chatterbox)")
-            return wav
-        except Exception as exc:
-            print(f"⚠️  Chatterbox: eroare {exc}")
 
-    raise VoiceGenerationError(
-        "Niciun motor TTS disponibil. Instalează coqui-tts (pentru XTTS) "
-        "sau chatterbox-tts. Vezi README pentru instrucțiuni."
-    )
+def _generate_silence(duration=1.0, sample_rate=24000) -> bytes:
+    """Genereaza tacere WAV."""
+    n_samples = int(sample_rate * duration)
+    silence = np.zeros(n_samples, dtype=np.int16)
+    
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(silence.tobytes())
+    
+    return buf.getvalue()
 
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Generează preview direct din mostră (înainte de salvarea personajului)."""
-    xtts_ok = _check_xtts()
+    """Genereaza preview direct din mostra audio.
+    
+    Folosit pentru a testa mostra inainte de salvare.
+    """
     spoken = _expressify(str(text) or "...")
-
-    if xtts_ok:
-        try:
-            return _xtts_generate(spoken, sample_bytes, similarity_boost=0.7, style=0.3)
-        except Exception:
-            pass
-
-    if _check_chatterbox():
-        try:
-            return _chatterbox_generate(spoken, sample_bytes, similarity_boost=0.5, style=0.0)
-        except Exception:
-            pass
-
-    raise VoiceGenerationError("Niciun motor TTS disponibil.")
+    
+    try:
+        return _xtts_generate(spoken, sample_bytes, similarity_boost=0.7, style=0.3)
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare generare preview: {exc}") from exc
 
 
 # ════════════════════════════════════════════════════
-#  Normalizare text
+#  Gestionare mostre de voce
 # ════════════════════════════════════════════════════
 
-_EMOJI_RE = re.compile(
-    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
-    "\U00002190-\U000021FF\uFE0F\u2764]"
-)
+def _decode_sample(sample_b64):
+    """Decodeaza mostra audio din base64."""
+    if not sample_b64:
+        return None
+    if sample_b64.startswith("data:"):
+        sample_b64 = sample_b64.split(",", 1)[-1]
+    try:
+        return base64.b64decode(sample_b64)
+    except Exception as exc:
+        raise VoiceGenerationError("Mostra audio este invalida.") from exc
 
 
-def _expressify(text):
-    """Curăță markup-ul și normalizează textul românesc pentru TTS."""
-    text = str(text or "")
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"\*([^*]+)\*", " ", text)
-    text = re.sub(r"__([^_]+)__", r"\1", text)
-    text = re.sub(r"_([^_]+)_", r"\1", text)
-    text = re.sub(r"#+\s*", "", text)
-    text = re.sub(r"`[^`]+`", "", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    text = text.replace("&", " și ")
-    text = text.replace("%", " la sută")
-    text = re.sub(r"\.{3}", "… ", text)
-    text = _EMOJI_RE.sub("", text)
-    text = re.sub(r"\s{2,}", " ", text).strip()
-    return text or "..."
+def voice_id_for_sample(sample_bytes):
+    """Genereaza un ID unic pentru mostra de voce."""
+    if not sample_bytes:
+        return None
+    return "v:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
+
+
+def register_character_voice(char):
+    """Inregistreaza mostra de voce pentru un character.
+    
+    Stocheaza mostra in memorie pentru utilizare la generarea audio.
+    
+    Args:
+        char: Dict cu campurile 'voice_id' si optional 'voice_sample_b64'
+    """
+    voice_id = char.get("voice_id")
+    sample_b64 = char.get("voice_sample_b64")
+    
+    if voice_id and sample_b64:
+        sample_bytes = _decode_sample(sample_b64)
+        if sample_bytes:
+            _voice_samples[voice_id] = sample_bytes
+            print(f"🔊 Mostra de voce inregistrata pentru {voice_id[:20]}...")
+            
+            # Verifica daca modelul XTTS e disponibil
+            if _check_xtts():
+                try:
+                    _ensure_xtts_model()
+                    print("✅ Model XTTS-v2 gata pentru generare")
+                except Exception as e:
+                    print(f"⚠️ Model XTTS-v2 nu poate fi incarcat: {e}")
+
+
+def forget_registered_voices(voice_ids=None):
+    """Sterge mostrele de voce din memorie."""
+    if voice_ids is None:
+        _voice_samples.clear()
+        return
+    for voice_id in voice_ids:
+        _voice_samples.pop(voice_id, None)
+
 
 # ════════════════════════════════════════════════════
-#  SINTEZA AMBIENTALĂ DSP (neschimbată)
+#  Acces la lista de voci disponibile
 # ════════════════════════════════════════════════════
-# [Pastrăm funcțiile _ambient_wav și sound_effect exact ca în versiunea anterioară]
+
+def get_available_voices():
+    """Returneaza informatii despre modelul XTTS-v2 disponibil."""
+    return {
+        "xtts-v2-romanian": {
+            "name": "XTTS-v2 Romanian v2",
+            "description": "Clonare vocala cu model finetuned pentru romana",
+            "features": ["voice cloning", "romanian", "emotional expression"]
+        }
+    }
+
+
+def get_default_voice():
+    """Returneaza tipul de voce implicit."""
+    return "xtts-v2-cloned"
+
+
+# ════════════════════════════════════════════════════
+#  SINTEZA AMBIENTALA DSP
+# ════════════════════════════════════════════════════
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
-    """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit."""
+    """DSP-based ambient synthesis using numpy."""
     try:
         import numpy as np
     except ImportError:
@@ -380,7 +448,6 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
             wf.writeframes(b"\x00\x00" * int(sample_rate * duration))
         return output.getvalue()
 
-    import wave
     sr = int(sample_rate)
     dur = max(2.0, min(float(duration), 30.0))
     n = int(sr * dur)
@@ -446,7 +513,6 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
                 out[pos:pos + clen] += tone * env * float(rng.uniform(0.15, 0.5))
         return out
 
-    # Preseturi
     if preset == "rain":
         base = pink(100, 8000) * am(rng.uniform(0.05, 0.15), 0.1, 0.9) * 0.55
         drops = footsteps(float(rng.uniform(10, 18)), lo=1500, hi=6000, amp=0.22)
@@ -633,27 +699,27 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
 
 
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Returnează un sunet ambient sintetizat local."""
+    """Returneaza un sunet ambient sintetizat local."""
     text = str(prompt or "").lower()
     presets = (
-        ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
-        ("blizzard", ("crivăț", "viscol", "blizzard", "howling wind", "strong wind", "vânt puternic")),
-        ("rain", ("ploaie", "rain", "drizzle", "shower", "picături")),
-        ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coastă")),
-        ("fire", ("foc", "campfire", "fire", "șemineu", "flacăr", "lumânare", "jar")),
-        ("wind", ("vânt", "wind", "breeze", "adiere", "suflare")),
-        ("forest_walk", ("pași pădure", "walking forest", "footsteps leaves", "leaves underfoot", "crunch leaves", "rustling underfoot", "mers pădure", "foșnet pași")),
-        ("crickets", ("greier", "cricket", "noapte liniștit", "quiet night", "seară câmp")),
-        ("river", ("râu", "river", "pârâu", "brook", "stream", "cascadă", "waterfall")),
-        ("train", ("tren", "train", "railroad", "railway", "șine", "vagon")),
-        ("forest", ("pădure", "forest", "frunze", "copac", "woods", "jungle", "livadă")),
-        ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainărie")),
-        ("city", ("oraș", "city", "trafic", "traffic", "stradă", "street", "urban", "bulevard")),
-        ("countryside", ("țară", "sat", "countryside", "fermă", "câmp", "rural", "birds chirp", "livadă")),
-        ("station", ("gară", "station", "peron", "aeroport", "airport", "terminal", "announcement", "anunț", "metrou", "autogară")),
+        ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindina")),
+        ("blizzard", ("crivat", "viscol", "blizzard", "howling wind", "strong wind", "vant puternic")),
+        ("rain", ("ploaie", "rain", "drizzle", "shower", "picaturi")),
+        ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coasta")),
+        ("fire", ("foc", "campfire", "fire", "semineu", "flacara", "lumanare", "jar")),
+        ("wind", ("vant", "wind", "breeze", "adiere", "suflare")),
+        ("forest_walk", ("pasi padure", "walking forest", "footsteps leaves", "leaves underfoot", "crunch leaves", "rustling underfoot", "mers padure", "fosnet pasi")),
+        ("crickets", ("greier", "cricket", "noapte linistita", "quiet night", "seara camp")),
+        ("river", ("rau", "river", "parau", "brook", "stream", "cascada", "waterfall")),
+        ("train", ("tren", "train", "railroad", "railway", "sine", "vagon")),
+        ("forest", ("padure", "forest", "frunze", "copac", "woods", "jungle", "livada")),
+        ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainarie")),
+        ("city", ("oras", "city", "trafic", "traffic", "strada", "street", "urban", "bulevard")),
+        ("countryside", ("tara", "sat", "countryside", "ferma", "cimp", "rural", "birds chirp", "livada")),
+        ("station", ("gara", "station", "peron", "aeroport", "airport", "terminal", "announcement", "anunt", "metrou", "autogara")),
         ("heels_parquet", ("tocuri", "heels", "parchet", "parquet", "podea", "floor click", "toc pantof", "pantof cu toc", "lemn podea")),
-        ("snow_walk", ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow", "snow underfoot", "zăpadă pași")),
-        ("snow", ("ninso", "zăpad", "snow", "iarnă liniș", "fulgi")),
+        ("snow_walk", ("pasi zapada", "walking snow", "snow crunch", "footsteps snow", "snow underfoot", "zapada pasi")),
+        ("snow", ("ninso", "zapad", "snow", "iarna linist", "fulgi")),
     )
     preset = next(
         (name for name, words in presets if any(word in text for word in words)),
