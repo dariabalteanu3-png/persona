@@ -774,44 +774,19 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Setează DOAR atribute pe câmpurile de login/parolă (autocomplete corect + direcție
-    text stânga→dreapta). NU mai rescrie valoarea inputului la tastare — asta putea reseta
-    cursorul și inversa literele („daria"→„airad") cu cititorul de ecran / tastatura de telefon,
-    blocând autentificarea."""
-    st.html(
-        """
-        <script>
-        function fixAF(){
-          try{
-            var doc = window.parent.document;
-            var inputs = doc.querySelectorAll('input, textarea');
-            inputs.forEach(function(inp){
-              inp.setAttribute('dir','ltr');
-              inp.style.direction = 'ltr';
-              inp.style.textAlign = 'left';
-              inp.style.unicodeBidi = 'plaintext';
-              var al = inp.getAttribute('aria-label') || '';
-              if (al === 'Nume utilizator'){
-                inp.setAttribute('autocomplete','username');
-                inp.setAttribute('name','username');
-              } else if (al === 'Parolă'){
-                inp.setAttribute('autocomplete','current-password');
-                inp.setAttribute('name','password');
-              } else if (al === 'Parolă (min. 6 caractere)'){
-                inp.setAttribute('autocomplete','new-password');
-                inp.setAttribute('name','new-password');
-              }
-            });
-          }catch(e){}
+    """Setează atributele pentru câmpurile de login/parolă folosind CSS custom.
+    Această versiune este compatibilă cu toate versiunile de Streamlit."""
+    # CSS pentru direcție text stânga→dreapta și autocomplete
+    st.markdown("""
+        <style>
+        /* Forțează direcția textului de la stânga la dreapta pentru toate inputurile */
+        input, textarea {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: plaintext !important;
         }
-        fixAF();
-        setTimeout(fixAF, 400);
-        setTimeout(fixAF, 1200);
-        setTimeout(fixAF, 2500);
-        </script>
-        """,
-        height=0,
-    )
+        </style>
+    """, unsafe_allow_html=True)
 
 
 def _render_login_register():
