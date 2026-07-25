@@ -1,5 +1,6 @@
 streamlit==1.59.2
 psycopg2-binary
+mongomock
 python-dotenv
 bcrypt
 Pillow
