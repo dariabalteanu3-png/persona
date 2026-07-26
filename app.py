@@ -3222,6 +3222,13 @@ def render_chat(char):
                             st.rerun()
             if m["role"] == "assistant" and char.get("voice_id"):
                 mid = m["id"]
+                # Încarcă audio din DB dacă există
+                if not st.session_state.get(f"audio_{mid}") and m.get("audio_b64"):
+                    try:
+                        st.session_state[f"audio_{mid}"] = base64.b64decode(m["audio_b64"])
+                        print(f"✅ Audio încărcat din DB pentru {mid[:16]}...")
+                    except Exception:
+                        pass
                 if st.button("🔊 Ascultă (cu fundal)", key=f"tts_{mid}",
                              help="Reascultă mesajul cu vocea + sunetul de fundal, de câte ori vrei"):
                     try:
