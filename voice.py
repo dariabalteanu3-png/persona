@@ -507,6 +507,105 @@ def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_n
         raise VoiceGenerationError(f"Eroare generare preview: {exc}") from exc
 
 
+
+# ════════════════════════════════════════════════════
+#  Voice Library - Bibliotecă de voci clonate
+# ════════════════════════════════════════════════════
+
+_speaker_cache = {}  # voice_id -> (gpt_cond_latent, speaker_embedding)
+
+
+def get_speaker_embeddings(voice_id, sample_bytes):
+    """Preia sau calculează speaker embeddings pentru o voce.
+    
+    Folosește cache pentru a evita recalcularea.
+    """
+    if voice_id in _speaker_cache:
+        return _speaker_cache[voice_id]
+    
+    if not _check_xtts():
+        return None, None
+    
+    try:
+        _ensure_xtts_model()
+        model = _get_xtts_model()
+        
+        # salvăm mostra temporar
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            temp_path = f.name
+            f.write(sample_bytes)
+        
+        try:
+            gpt_cond, speaker_emb = model.get_conditioning_latents(
+                audio_path=temp_path
+            )
+            # salvăm în cache
+            _speaker_cache[voice_id] = (gpt_cond, speaker_emb)
+            print(f"✅ Speaker embeddings calculate pentru {voice_id[:16]}...")
+            return gpt_cond, speaker_emb
+        finally:
+            os.remove(temp_path)
+    except Exception as e:
+        print(f"⚠️ Nu pot calcula speaker embeddings: {e}")
+        return None, None
+
+
+def clear_speaker_cache(voice_id=None):
+    """Șterge cache-ul de speaker embeddings."""
+    if voice_id:
+        _speaker_cache.pop(voice_id, None)
+    else:
+        _speaker_cache.clear()
+
+
+def generate_with_voice_library(text, voice_id, sample_bytes, **kwargs):
+    """Generează audio folosind o voce din biblioteca de voci.
+    
+    Folosește speaker embeddings salvate dacă sunt disponibile.
+    """
+    spoken = _expressify(str(text))
+    if not spoken:
+        return _generate_silence(duration=0.5)
+    
+    if not _check_xtts():
+        raise VoiceGenerationError("XTTS-v2 nu este disponibil.")
+    
+    try:
+        _ensure_xtts_model()
+        model = _get_xtts_model()
+        
+        # Verificăm dacă avem speaker embeddings în cache
+        gpt_cond, speaker_emb = get_speaker_embeddings(voice_id, sample_bytes)
+        
+        if gpt_cond is None:
+            # Fallback: generăm fără speaker embeddings (folosește modelul default)
+            print("⚠️ Folosesc XTTS fără speaker embeddings...")
+            return _xtts_generate_fallback(spoken, **kwargs)
+        
+        print(f"🔊 Generare XTTS-v2 cu voce clonata: {len(spoken)} caractere...")
+        wav = model.inference(
+            text=spoken,
+            language="ro",
+            gpt_cond_latent=gpt_cond,
+            speaker_embedding=speaker_emb,
+            temperature=kwargs.get("temperature", 0.3),
+            top_p=kwargs.get("top_p", 0.7),
+            top_k=kwargs.get("top_k", 30),
+            length_penalty=kwargs.get("length_penalty", 0.8),
+            repetition_penalty=kwargs.get("repetition_penalty", 10.0),
+            enable_text_splitting=True,
+            max_new_tokens=kwargs.get("max_new_tokens", 500),
+        )
+        return _mel_to_wav(wav)
+        
+    except Exception as e:
+        print(f"❌ XTTS error: {e}")
+        raise
+
+
+
 # ════════════════════════════════════════════════════
 #  Gestionare mostre de voce
 # ════════════════════════════════════════════════════

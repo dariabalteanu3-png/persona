@@ -92,6 +92,22 @@ CREATE TABLE IF NOT EXISTS email_codes (
     doc     JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_ecodes ON email_codes(email, purpose);
+
+CREATE TABLE IF NOT EXISTS voice_library (
+    id              TEXT PRIMARY KEY,
+    owner_id        TEXT,
+    visibility      TEXT DEFAULT 'public',
+    created_at      TEXT,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    sample_b64      TEXT,
+    sample_name     TEXT,
+    speaker_embedding JSONB,
+    voice_params    JSONB DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_voice_owner ON voice_library(owner_id);
+CREATE INDEX IF NOT EXISTS idx_voice_vis   ON voice_library(visibility);
+
 """
 
 
@@ -824,3 +840,165 @@ def set_reaction(message_id, emoji):
                 (_jdump({"reaction": emoji}), message_id),
             )
         c.commit()
+
+
+# ==============================================================================
+# Voice Library - Clonare vocală
+# ==============================================================================
+
+def create_voice(owner_id, name, sample_b64=None, sample_name=None, 
+                 description=None, visibility="public", speaker_embedding=None,
+                 voice_params=None):
+    """Creează o voce în biblioteca de voci."""
+    import uuid
+    from datetime import datetime
+    
+    voice_id = str(uuid.uuid4())
+    created_at = datetime.utcnow().isoformat()
+    
+    doc = {
+        "name": name,
+        "description": description or "",
+        "voice_params": voice_params or {},
+    }
+    
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                INSERT INTO voice_library 
+                (id, owner_id, visibility, created_at, name, description, 
+                 sample_b64, sample_name, speaker_embedding, voice_params)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (voice_id, owner_id, visibility, created_at, name, 
+                  description or "", sample_b64, sample_name,
+                  _jdump(speaker_embedding) if speaker_embedding else None,
+                  _jdump(doc)))
+        c.commit()
+    
+    return {"id": voice_id, "name": name, "visibility": visibility, 
+            "description": description, "created_at": created_at}
+
+
+def get_voice(voice_id):
+    """Preia o voce după ID."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, description,
+                       sample_b64, sample_name, speaker_embedding, voice_params
+                FROM voice_library WHERE id = %s
+            """, (voice_id,))
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "owner_id": row[1],
+        "visibility": row[2],
+        "created_at": row[3],
+        "name": row[4],
+        "description": row[5],
+        "sample_b64": row[6],
+        "sample_name": row[7],
+        "speaker_embedding": row[8],
+        "voice_params": row[9] if len(row) > 9 else {},
+    }
+
+
+def get_public_voices():
+    """Preia toate vocile publice."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, description,
+                       sample_name
+                FROM voice_library 
+                WHERE visibility = 'public'
+                ORDER BY created_at DESC
+            """)
+            rows = cur.fetchall()
+    return [
+        {"id": r[0], "owner_id": r[1], "visibility": r[2], 
+         "created_at": r[3], "name": r[4], "description": r[5],
+         "sample_name": r[6]}
+        for r in rows
+    ]
+
+
+def get_user_voices(user_id):
+    """Preia vocile unui utilizator (publice + private)."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, description,
+                       sample_name
+                FROM voice_library 
+                WHERE owner_id = %s OR visibility = 'public'
+                ORDER BY created_at DESC
+            """, (user_id,))
+            rows = cur.fetchall()
+    return [
+        {"id": r[0], "owner_id": r[1], "visibility": r[2], 
+         "created_at": r[3], "name": r[4], "description": r[5],
+         "sample_name": r[6]}
+        for r in rows
+    ]
+
+
+def update_voice(voice_id, **kwargs):
+    """Actualizează o voce."""
+    allowed = ["name", "description", "visibility", "sample_b64", 
+               "sample_name", "speaker_embedding", "voice_params"]
+    updates = []
+    values = []
+    for key, val in kwargs.items():
+        if key in allowed:
+            updates.append(f"{key} = %s")
+            if key == "speaker_embedding" or key == "voice_params":
+                values.append(_jdump(val))
+            else:
+                values.append(val)
+    
+    if not updates:
+        return
+    
+    values.append(voice_id)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                f"UPDATE voice_library SET {', '.join(updates)} WHERE id = %s",
+                values
+            )
+        c.commit()
+
+
+def delete_voice(voice_id, owner_id):
+    """Șterge o voce (doar proprietarul o poate șterge)."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "DELETE FROM voice_library WHERE id = %s AND owner_id = %s",
+                (voice_id, owner_id)
+            )
+        c.commit()
+
+
+def search_voices(query):
+    """Caută voci după nume sau descriere."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, description,
+                       sample_name
+                FROM voice_library 
+                WHERE visibility = 'public' 
+                  AND (name ILIKE %s OR description ILIKE %s)
+                ORDER BY created_at DESC
+            """, (f"%{query}%", f"%{query}%"))
+            rows = cur.fetchall()
+    return [
+        {"id": r[0], "owner_id": r[1], "visibility": r[2], 
+         "created_at": r[3], "name": r[4], "description": r[5],
+         "sample_name": r[6]}
+        for r in rows
+    ]
