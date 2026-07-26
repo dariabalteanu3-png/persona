@@ -487,3 +487,99 @@ def search_voices(query):
             {"description": {"$regex": query, "$options": "i"}}
         ]
     }, {"sample_b64": 0}).sort("created_at", -1))
+
+
+# ==============================================================================
+# Ambient Sound Library - Sunete ambientale (MongoDB)
+# ==============================================================================
+
+ambients_collection = db["ambient_library"]
+
+
+def create_ambient(owner_id, name, category=None, description=None,
+                   audio_b64=None, audio_name=None, duration=0.0,
+                   tags=None, visibility="public", is_synthetic=False):
+    """Creează un sunet ambiental în biblioteca de sunete."""
+    import uuid
+    from datetime import datetime
+
+    amb_id = str(uuid.uuid4())
+    doc = {
+        "id": amb_id,
+        "owner_id": owner_id,
+        "visibility": visibility,
+        "created_at": datetime.utcnow().isoformat(),
+        "name": name,
+        "category": category,
+        "description": description or "",
+        "audio_b64": audio_b64,
+        "audio_name": audio_name,
+        "duration": duration,
+        "tags": tags or [],
+        "is_synthetic": is_synthetic,
+    }
+    ambients_collection.insert_one(doc)
+    return {"id": amb_id, "name": name, "visibility": visibility,
+            "category": category, "created_at": doc["created_at"]}
+
+
+def get_ambient(ambient_id):
+    """Preia un sunet ambiental după ID."""
+    return ambients_collection.find_one({"id": ambient_id})
+
+
+def get_public_ambients(category=None):
+    """Preia toate sunetele ambientale publice."""
+    query = {"visibility": "public"}
+    if category:
+        query["category"] = category
+    return list(ambients_collection.find(
+        query,
+        {"audio_b64": 0}  # Excludem audio-ul mare
+    ).sort("created_at", -1))
+
+
+def get_user_ambients(user_id):
+    """Preia sunetele ambientale ale unui utilizator (publice + private)."""
+    return list(ambients_collection.find({
+        "$or": [{"owner_id": user_id}, {"visibility": "public"}]
+    }, {"audio_b64": 0}).sort("created_at", -1))
+
+
+def get_ambients_by_category():
+    """Returnează toate categoriile disponibile cu sunete."""
+    pipeline = [
+        {"$match": {"visibility": "public", "category": {"$ne": None}}},
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    return [{"category": r["_id"], "count": r["count"]} for r in ambients_collection.aggregate(pipeline)]
+
+
+def update_ambient(ambient_id, **kwargs):
+    """Actualizează un sunet ambiental."""
+    allowed = ["name", "category", "description", "visibility", "audio_b64",
+               "audio_name", "duration", "tags", "is_synthetic"]
+    update = {k: v for k, v in kwargs.items() if k in allowed}
+    if update:
+        ambients_collection.update_one({"id": ambient_id}, {"$set": update})
+
+
+def delete_ambient(ambient_id, owner_id):
+    """Șterge un sunet ambiental (doar proprietarul îl poate șterge)."""
+    ambients_collection.delete_one({"id": ambient_id, "owner_id": owner_id})
+
+
+def search_ambients(query, category=None):
+    """Caută sunete ambientale după nume, descriere sau tags."""
+    q = {
+        "visibility": "public",
+        "$or": [
+            {"name": {"$regex": query, "$options": "i"}},
+            {"description": {"$regex": query, "$options": "i"}},
+            {"tags": {"$regex": query, "$options": "i"}}
+        ]
+    }
+    if category:
+        q["category"] = category
+    return list(ambients_collection.find(q, {"audio_b64": 0}).sort("created_at", -1))

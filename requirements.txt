@@ -9,7 +9,7 @@ gradio_client
 resend
 openai
 requests
-numpy
+numpy==1.26.4
 soundfile
 torch>=2.0.0
 torchaudio>=2.0.0
@@ -19,3 +19,6 @@ pydub
 
 edge-tts
 piper-tts
+TTS
+transformers==4.36.0
+pandas==2.1.4

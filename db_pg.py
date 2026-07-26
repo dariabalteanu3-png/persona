@@ -108,6 +108,25 @@ CREATE TABLE IF NOT EXISTS voice_library (
 CREATE INDEX IF NOT EXISTS idx_voice_owner ON voice_library(owner_id);
 CREATE INDEX IF NOT EXISTS idx_voice_vis   ON voice_library(visibility);
 
+-- Biblioteca de sunete ambientale
+CREATE TABLE IF NOT EXISTS ambient_library (
+    id              TEXT PRIMARY KEY,
+    owner_id        TEXT,
+    visibility      TEXT DEFAULT 'public',
+    created_at      TEXT,
+    name            TEXT NOT NULL,
+    category        TEXT,
+    description     TEXT,
+    audio_b64       TEXT,
+    audio_name      TEXT,
+    duration        REAL DEFAULT 0.0,
+    tags            TEXT[],
+    is_synthetic    BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_ambient_owner ON ambient_library(owner_id);
+CREATE INDEX IF NOT EXISTS idx_ambient_vis   ON ambient_library(visibility);
+CREATE INDEX IF NOT EXISTS idx_ambient_cat   ON ambient_library(category);
+
 """
 
 
@@ -866,6 +885,238 @@ def update_message(message_id, content=None, audio_b64=None):
                 values
             )
         c.commit()
+
+
+# ==============================================================================
+# Ambient Sound Library - Sunete ambientale
+# ==============================================================================
+
+def create_ambient(owner_id, name, category=None, description=None,
+                    audio_b64=None, audio_name=None, duration=0.0,
+                    tags=None, visibility="public", is_synthetic=False):
+    """Creează un sunet ambiental în biblioteca de sunete."""
+    import uuid
+    from datetime import datetime
+
+    amb_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                INSERT INTO ambient_library
+                (id, owner_id, visibility, created_at, name, category, description,
+                 audio_b64, audio_name, duration, tags, is_synthetic)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, name, visibility, category, created_at
+            """, (amb_id, owner_id, visibility, now, name, category, description,
+                  audio_b64, audio_name, duration, tags, is_synthetic))
+            row = cur.fetchone()
+        c.commit()
+
+    return dict(zip(["id", "name", "visibility", "category", "created_at"], row))
+
+
+def get_ambient(ambient_id):
+    """Preia un sunet ambiental după ID."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, category,
+                       description, audio_b64, audio_name, duration, tags, is_synthetic
+                FROM ambient_library WHERE id = %s
+            """, (ambient_id,))
+            row = cur.fetchone()
+            cols = ["id", "owner_id", "visibility", "created_at", "name", "category",
+                    "description", "audio_b64", "audio_name", "duration", "tags", "is_synthetic"]
+    return dict(zip(cols, row)) if row else None
+
+
+def get_public_ambients(category=None):
+    """Preia toate sunetele ambientale publice."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            if category:
+                cur.execute("""
+                    SELECT id, owner_id, visibility, created_at, name, category,
+                           description, audio_name, duration, tags, is_synthetic
+                    FROM ambient_library
+                    WHERE visibility = 'public' AND category = %s
+                    ORDER BY created_at DESC
+                """, (category,))
+            else:
+                cur.execute("""
+                    SELECT id, owner_id, visibility, created_at, name, category,
+                           description, audio_name, duration, tags, is_synthetic
+                    FROM ambient_library
+                    WHERE visibility = 'public'
+                    ORDER BY created_at DESC
+                """)
+            rows = cur.fetchall()
+            cols = ["id", "owner_id", "visibility", "created_at", "name", "category",
+                    "description", "audio_name", "duration", "tags", "is_synthetic"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def get_user_ambients(user_id):
+    """Preia sunetele ambientale ale unui utilizator (publice + private)."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT id, owner_id, visibility, created_at, name, category,
+                       description, audio_name, duration, tags, is_synthetic
+                FROM ambient_library
+                WHERE visibility = 'public' OR owner_id = %s
+                ORDER BY created_at DESC
+            """, (user_id,))
+            rows = cur.fetchall()
+            cols = ["id", "owner_id", "visibility", "created_at", "name", "category",
+                    "description", "audio_name", "duration", "tags", "is_synthetic"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def get_ambients_by_category():
+    """Returnează toate categoriile disponibile cu sunete."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""
+                SELECT category, COUNT(*) as count
+                FROM ambient_library
+                WHERE visibility = 'public' AND category IS NOT NULL
+                GROUP BY category
+                ORDER BY count DESC
+            """)
+            return [{"category": r[0], "count": r[1]} for r in cur.fetchall()]
+
+
+def update_ambient(ambient_id, **kwargs):
+    """Actualizează un sunet ambiental."""
+    allowed = ["name", "category", "description", "visibility", "audio_b64",
+               "audio_name", "duration", "tags"]
+    updates = []
+    values = []
+    for k, v in kwargs.items():
+        if k in allowed and v is not None:
+            updates.append(f"{k} = %s")
+            values.append(v)
+    if not updates:
+        return
+    values.append(ambient_id)
+
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                f"UPDATE ambient_library SET {', '.join(updates)} WHERE id = %s",
+                values
+            )
+        c.commit()
+
+
+def delete_ambient(ambient_id, owner_id):
+    """Șterge un sunet ambiental (doar proprietarul îl poate șterge)."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "DELETE FROM ambient_library WHERE id = %s AND owner_id = %s",
+                (ambient_id, owner_id)
+            )
+        c.commit()
+
+
+def search_ambients(query, category=None):
+    """Caută sunete ambientale după nume, descriere sau tags."""
+    with _conn() as c:
+        with c.cursor() as cur:
+            base = """
+                SELECT id, owner_id, visibility, created_at, name, category,
+                       description, audio_name, duration, tags, is_synthetic
+                FROM ambient_library
+                WHERE visibility = 'public'
+                  AND (name ILIKE %s OR description ILIKE %s OR %s = ANY(tags))
+            """
+            args = [f"%{query}%", f"%{query}%", query]
+            if category:
+                base += " AND category = %s"
+                args.append(category)
+            base += " ORDER BY created_at DESC"
+            cur.execute(base, args)
+            rows = cur.fetchall()
+            cols = ["id", "owner_id", "visibility", "created_at", "name", "category",
+                    "description", "audio_name", "duration", "tags", "is_synthetic"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+# ==============================================================================
+# Seed - Populare bibliotecă sunete ambientale
+# ==============================================================================
+
+def seed_ambient_library():
+    """Populează biblioteca de sunete ambientale cu presetări sintetice."""
+    ambients = [
+        # Transport și călătorii
+        {"name": "Tren în mers", "category": "transport", "description": "Sunet de tren care circulă pe șine", "tags": ["tren", "transport", "călătorie"]},
+        {"name": "Metrou", "category": "transport", "description": "Sunet de metrou care circulă", "tags": ["metrou", "transport", "urban"]},
+        {"name": "Autobuz", "category": "transport", "description": "Sunet de autobuz care circulă", "tags": ["autobuz", "transport", "urban"]},
+        {"name": "Stradă cu trafic", "category": "transport", "description": "Sunet de stradă cu mașini și trafic", "tags": ["stradă", "trafic", "mașini", "urban"]},
+        
+        # Bucătărie și cafea
+        {"name": "Cafea la espressor", "category": "cafea", "description": "Sunet de preparare a cafelei la espressor", "tags": ["cafea", "espressor", "bucătărie"]},
+        {"name": "Apă care fierbe", "category": "cafea", "description": "Sunet de apă care fierbe", "tags": ["apă", "fierbere", "bucătărie"]},
+        {"name": "Farfurii și tacâmuri", "category": "cafea", "description": "Sunet de vase și tacâmuri", "tags": ["farfurii", "tacâmuri", "bucătărie"]},
+        {"name": "Frigider", "category": "cafea", "description": "Sunet de frigider care funcționează", "tags": ["frigider", "bucătărie", "electrocasnice"]},
+        
+        # Camere și case
+        {"name": "Ușă care se deschide", "category": "cameră", "description": "Sunet de ușă care se deschide", "tags": ["ușă", "cameră", "casă"]},
+        {"name": "Parchet - pași", "category": "cameră", "description": "Sunet de pași pe parchet", "tags": ["pași", "parchet", "cameră"]},
+        {"name": "Lift", "category": "cameră", "description": "Sunet de lift care urcă și coboară", "tags": ["lift", "clădire", "cameră"]},
+        
+        # Natură și vreme
+        {"name": "Ploaie ușoară", "category": "natură", "description": "Sunet de ploaie ușoară", "tags": ["ploaie", "natură", "vreme"]},
+        {"name": "Ploaie puternică", "category": "natură", "description": "Sunet de ploaie puternică", "tags": ["ploaie", "furtună", "vreme"]},
+        {"name": "Furtună cu tunete", "category": "natură", "description": "Sunet de furtună cu tunete", "tags": ["furtună", "tunete", "vreme"]},
+        {"name": "Vânt puternic", "category": "natură", "description": "Sunet de vânt puternic", "tags": ["vânt", "natură", "vreme"]},
+        {"name": "Pădure", "category": "natură", "description": "Sunet de pădure cu păsări", "tags": ["pădure", "natură", "păsări"]},
+        {"name": "Râu care curge", "category": "natură", "description": "Sunet de apă care curge", "tags": ["râu", "apă", "natură"]},
+        {"name": "Valuri de mare", "category": "natură", "description": "Sunet de valuri la mare", "tags": ["mare", "valuri", "plajă"]},
+        {"name": "Șemineu", "category": "natură", "description": "Sunet de foc în șemineu", "tags": ["foc", "șemineu", "casă"]},
+        {"name": "Zăpadă", "category": "natură", "description": "Sunet de ninsoare", "tags": ["zăpadă", "iarnă", "natură"]},
+        
+        # Animale
+        {"name": "Câine care latră", "category": "animale", "description": "Sunet de câine care latră", "tags": ["câine", "lătrat", "animal"]},
+        {"name": "Pisică care toarce", "category": "animale", "description": "Sunet de pisică care toarce", "tags": ["pisică", "tors", "animal"]},
+        {"name": "Păsări în natură", "category": "animale", "description": "Sunet de păsări în natură", "tags": ["păsări", "natură", "cânt"]},
+        {"name": "Greieri noaptea", "category": "animale", "description": "Sunet de greieri noaptea", "tags": ["greieri", "noapte", "natură"]},
+        
+        # Oameni și activități
+        {"name": "Conversație în cafenea", "category": "oameni", "description": "Sunet de conversații într-o cafenea", "tags": ["cafenea", "conversație", "oameni"]},
+        {"name": "Copii care se joacă", "category": "oameni", "description": "Sunet de copii care se joacă", "tags": ["copii", "joacă", "oameni"]},
+        {"name": "Restaurant aglomerat", "category": "oameni", "description": "Sunet de restaurant cu mulți oameni", "tags": ["restaurant", "oameni", "aglomerat"]},
+        
+        # Tehnologie
+        {"name": "Televizor în fundal", "category": "tehnologie", "description": "Sunet de televizor care merge în fundal", "tags": ["televizor", "tehnologie", "fundal"]},
+        {"name": "Calculator", "category": "tehnologie", "description": "Sunet de calculator care funcționează", "tags": ["calculator", "tehnologie", "birou"]},
+        {"name": "Notificări telefon", "category": "tehnologie", "description": "Sunet de notificări de telefon", "tags": ["telefon", "notificări", "tehnologie"]},
+        
+        # Spații publice
+        {"name": "Supermarket", "category": "public", "description": "Sunet de supermarket cu oameni", "tags": ["supermarket", "public", "magazin"]},
+        {"name": "Gara", "category": "public", "description": "Sunet de gară cu anunțuri", "tags": ["gară", "public", "transport"]},
+        {"name": "Bibliotecă", "category": "public", "description": "Sunet de bibliotecă liniștită", "tags": ["bibliotecă", "public", "liniște"]},
+    ]
+    
+    for amb in ambients:
+        try:
+            create_ambient(
+                owner_id="system",
+                name=amb["name"],
+                category=amb["category"],
+                description=amb["description"],
+                tags=amb["tags"],
+                visibility="public",
+                is_synthetic=True
+            )
+            print(f"✅ Adăugat: {amb['name']}")
+        except Exception as e:
+            print(f"⚠️ {amb['name']}: {e}")
 
 
 # ==============================================================================
