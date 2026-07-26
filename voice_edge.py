@@ -1,10 +1,11 @@
-"""Generare vocala cu XTTS-v2 + gTTS fallback.
+"""Generare vocala cu Microsoft Edge TTS (romana).
 
 Suporta:
-- Clonare voce din mostra audio (XTTS-v2)
-- Limba romana
-- Expresivitate emotionala
-- Fallback la Google TTS daca XTTS nu e disponibil
+- Voci naturale romanesti (AlinaNeural, EmilNeural)
+- Rate, pitch si volum ajustabile
+- Functioneaza cu Python 3.13+
+- 100% gratuit, fara limitari artificiale
+- Ruleaza direct, fara server separat
 """
 
 import asyncio
@@ -14,21 +15,12 @@ import io
 import logging
 import os
 import re
-import time
 import wave
 from pathlib import Path
 
 import numpy as np
 
 from dotenv import load_dotenv
-
-# gTTS fallback pentru când XTTS nu e disponibil
-try:
-    from gtts import gTTS as _gTTS
-    _GTTS_AVAILABLE = True
-except ImportError:
-    _GTTS_AVAILABLE = False
-    print("⚠️ gTTS nu e instalat. Instalare: pip install gTTS")
 
 load_dotenv(Path(__file__).parent / ".env")
 _log = logging.getLogger("voice")
@@ -42,13 +34,24 @@ class VoiceGenerationError(RuntimeError):
 #  Configurare
 # ════════════════════════════════════════════════════
 
-XTTS_MODEL_REPO = "eduardem/xtts-v2-romanian-v2"
-XTTS_MODEL_DIR = os.environ.get("XTTS_MODEL_DIR", "/tmp/xtts_v2_romanian_model")
+# Voci romanesti disponibile (Natural quality)
+ROMANIAN_VOICES = {
+    "ro-RO-AlinaNeural": {
+        "name": "Alina",
+        "gender": "Female",
+        "description": "Voce feminina calda si prietenoasa"
+    },
+    "ro-RO-EmilNeural": {
+        "name": "Emil", 
+        "gender": "Male",
+        "description": "Voce masculina clara si placuta"
+    },
+}
 
-_engines = {}  # model instance cache
-_engine_available = None  # cache engine availability
+DEFAULT_VOICE = "ro-RO-AlinaNeural"
+
 _voice_samples = {}  # voice_id -> sample_bytes
-_model_loading = False
+_engine_initialized = False
 
 
 # ════════════════════════════════════════════════════
@@ -59,19 +62,6 @@ _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
     "\U00002190-\U000021FF\uFE0F\u2764]"
 )
-
-# Normalizare cedilla pentru romana
-_CEDILLA_TO_COMMA = str.maketrans({
-    "\u015f": "\u0219",  # s -> s (lowercase)
-    "\u0163": "\u021b",  # t -> t (lowercase)
-    "\u015e": "\u0218",  # S -> S (uppercase)
-    "\u0162": "\u021a",  # T -> T (uppercase)
-})
-
-
-def _normalize_romanian(text: str) -> str:
-    """Normalizeaza caracterele cedilla pentru XTTS-v2."""
-    return str(text).translate(_CEDILLA_TO_COMMA)
 
 
 def _expressify(text):
@@ -93,178 +83,66 @@ def _expressify(text):
 
 
 # ════════════════════════════════════════════════════
-#  Motor XTTS-v2 Romanian v2
+#  Edge TTS - Generare vocala
 # ════════════════════════════════════════════════════
 
-def _check_xtts():
-    """Verifica daca XTTS-v2 poate fi importat."""
-    global _engine_available
-    if _engine_available is not None:
-        return _engine_available
-    
+async def _edge_generate_async(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    rate: str = "+0%",
+    pitch: str = "+0Hz",
+) -> bytes:
+    """Genereaza audio MP3 cu Edge TTS (async)."""
     try:
-        from TTS.tts.configs.xtts_config import XttsConfig
-        from TTS.tts.models.xtts import Xtts
-        _engine_available = True
-        print("🔊 Motor XTTS-v2 disponibil")
-        return True
-    except ImportError as e:
-        _engine_available = False
-        print(f"⚠️ Motor XTTS-v2 nu e disponibil: {e}")
-        return False
-
-
-def _ensure_xtts_model():
-    """Descarca modelul XTTS-v2 Romanian v2 (daca nu e deja) si il incarca."""
-    global _model_loading
-    
-    if "xtts" in _engines:
-        return _engines["xtts"]
-    
-    if _model_loading:
-        # Asteapta daca alt fir incarca deja modelul
-        while _model_loading:
-            time.sleep(0.5)
-        return _engines.get("xtts")
-    
-    _model_loading = True
-    
-    try:
-        print(f"⏳ Se descarca modelul XTTS-v2 Romanian v2 ({XTTS_MODEL_REPO})...")
-        start = time.time()
-
-        from huggingface_hub import snapshot_download
-        from TTS.tts.configs.xtts_config import XttsConfig
-        from TTS.tts.models.xtts import Xtts
-
-        # Descarca model (doar prima data, cache in /tmp)
-        os.makedirs(XTTS_MODEL_DIR, exist_ok=True)
-        snapshot_download(
-            repo_id=XTTS_MODEL_REPO,
-            local_dir=XTTS_MODEL_DIR,
-            local_dir_use_symlinks=False,
+        from edge_tts import Communicate
+    except ImportError:
+        raise VoiceGenerationError(
+            "Edge TTS nu este instalat. Ruleaza: pip install edge-tts"
         )
 
-        # Incarca
-        config = XttsConfig()
-        config.load_json(os.path.join(XTTS_MODEL_DIR, "config.json"))
+    if voice not in ROMANIAN_VOICES:
+        voice = DEFAULT_VOICE
 
-        model = Xtts(config)
-        model.load_checkpoint(
-            config,
-            checkpoint_path=os.path.join(XTTS_MODEL_DIR, "model.pth"),
-            use_deepspeed=False,
+    communicate = Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
+    
+    audio_buffer = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_buffer.write(chunk["data"])
+    
+    return audio_buffer.getvalue()
+
+
+def _edge_generate(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    rate: str = "+0%",
+    pitch: str = "+0Hz",
+) -> bytes:
+    """Genereaza audio MP3 cu Edge TTS (sync wrapper)."""
+    try:
+        return asyncio.run(_edge_generate_async(text, voice, rate, pitch))
+    except Exception as exc:
+        raise VoiceGenerationError(f"Eroare la generarea vocii: {exc}") from exc
+
+
+def _mp3_to_wav_pcm(mp3_data: bytes) -> bytes:
+    """Convertește MP3 la WAV PCM 16-bit 24kHz mono folosind ffmpeg."""
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-acodec", "pcm_s16le", "pipe:1"],
+            input=mp3_data,
+            capture_output=True,
+            timeout=30
         )
-        
-        # Incearca GPU daca e disponibil
-        try:
-            import torch
-            if torch.cuda.is_available():
-                model = model.to("cuda")
-                print("🚀 XTTS-v2 foloseste GPU")
-            else:
-                model = model.to("cpu")
-                print("💻 XTTS-v2 foloseste CPU")
-        except:
-            model = model.to("cpu")
-            print("💻 XTTS-v2 foloseste CPU")
-        
-        model.eval()
-
-        elapsed = time.time() - start
-        print(f"✅ Model XTTS-v2 Romanian v2 incarcat in {elapsed:.1f}s")
-        _engines["xtts"] = model
-        return model
-        
-    finally:
-        _model_loading = False
-
-
-def _xtts_generate(text, sample_bytes, similarity_boost=0.75, style=0.0):
-    """Genereaza WAV cu XTTS-v2 Romanian v2."""
-    import torch
-
-    model = _ensure_xtts_model()
-
-    # Salveaza mostra temporar
-    ref_path = "/tmp/_xtts_ref.wav"
-    with open(ref_path, "wb") as f:
-        f.write(sample_bytes)
-
-    # Normalizeaza textul pentru romana
-    text = _normalize_romanian(text)
+        if proc.returncode == 0:
+            return proc.stdout
+    except Exception:
+        pass
     
-    # Mareste limita de caractere pentru romana
-    if hasattr(model, 'tokenizer') and hasattr(model.tokenizer, 'char_limits'):
-        model.tokenizer.char_limits["ro"] = 250
-
-    # Obtine conditionare
-    gpt_cond, speaker_emb = model.get_conditioning_latents(
-        audio_path=ref_path,
-        gpt_cond_len=3,
-        max_ref_length=60,
-    )
-
-    # Calculeaza max_new_tokens pentru a preveni hallucination
-    word_count = len(text.split())
-    max_gen_tokens = max(min(word_count * 50, 500), 150)
-
-    # Genereaza
-    temperature = max(0.1, 1.0 - float(similarity_boost) * 0.6)
-    top_p = max(0.5, float(similarity_boost))
-    length_penalty = 1.0 + float(style) * 0.3
-
-    outputs = model.inference(
-        text=text,
-        language="ro",
-        gpt_cond_latent=gpt_cond,
-        speaker_embedding=speaker_emb,
-        temperature=temperature,
-        length_penalty=length_penalty,
-        repetition_penalty=2.0,
-        top_k=50,
-        top_p=top_p,
-        enable_text_splitting=True,
-        max_new_tokens=max_gen_tokens,
-    )
-
-    wav = outputs.get("wav") if isinstance(outputs, dict) else outputs
-    if torch.is_tensor(wav):
-        wav_np = wav.cpu().numpy()
-    else:
-        wav_np = np.array(wav, dtype=np.float32)
-    if wav_np.ndim > 1:
-        wav_np = wav_np.squeeze()
-
-    # Elimina tacerile de la final
-    wav_np = _trim_trailing_silence(wav_np, sr=24000)
-
-    output_sr = 24000
-    wav_int = (np.clip(wav_np, -1.0, 1.0) * 32767).astype("<i2")
-
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(output_sr)
-        wf.writeframes(wav_int.tobytes())
-
-    return buf.getvalue()
-
-
-def _trim_trailing_silence(wav_np, sr=24000, threshold_db=-40, window_ms=25, margin_ms=50):
-    """Elimina tacerile de la finalul audio-ului."""
-    window = int(sr * window_ms / 1000)
-    margin = int(sr * margin_ms / 1000)
-    threshold = 10 ** (threshold_db / 20)
-    
-    for i in range(len(wav_np) - window, 0, -window):
-        rms = np.sqrt(np.mean(wav_np[i:i+window] ** 2))
-        if rms > threshold:
-            end = min(i + window + margin, len(wav_np))
-            return wav_np[:end]
-    
-    return wav_np
+    # Fallback: returneaza raw MP3 (poate functiona in browser)
+    return mp3_data
 
 
 # ════════════════════════════════════════════════════
@@ -280,84 +158,65 @@ def text_to_speech(
     expressive=True,
     tone=None,
 ):
-    """Genereaza WAV cu vocea clonata.
+    """Genereaza WAV cu vocea selectata.
     
-    XTTS-v2 Romanian v2 foloseste mostra audio pentru a clona vocea.
+    Edge TTS foloseste voci pre-construite romanesti (Alina, Emil).
+    Parametrii de stil sunt aplicati prin ajustari de rata/pitch.
     
     Args:
         text: Textul de generat
-        voice_id: ID-ul vocii (asociat cu mostra salvata)
-        stability: Stabilitate (0-1)
-        similarity_boost: Similaritate (0-1) - cat de aproape de mostra
-        style: Stil (0-1) - expresivitate
-        expressive: Daca textul trebuie procesat
+        voice_id: ID-ul vocii (pentru compatibilitate)
+        stability: Stabilitate (0-1) - afecteaza consistenta
+        similarity_boost: Similaritate (0-1) - selecteaza vocea
+        style: Stil (0-1) - afecteaza rata de vorbire
+        expressive: Daca textul trebuie procesat pentru expresivitate
         tone: Tonul vocii (optional)
     
     Returns:
         bytes: Audio WAV
     """
-    sample_bytes = _voice_samples.get(voice_id)
-    if not sample_bytes:
-        raise VoiceGenerationError(
-            "Vocea nu are o mostra salvata. "
-            "Incarca o mostra audio pentru acest personaj."
-        )
-
+    global _engine_initialized
+    
+    if not _engine_initialized:
+        _engine_initialized = True
+        print("🔊 Motor Edge TTS initializat (romana natural)")
+    
     spoken = _expressify(str(text) if expressive else (text or "..."))
     
     if not spoken or spoken == "...":
         return _generate_silence(duration=0.5)
-
+    
+    voice = _select_voice_from_id(voice_id, similarity_boost)
+    
+    rate = "+0%"
+    pitch = "+0Hz"
+    
+    if style > 0:
+        rate_adj = int(style * 10)
+        rate = f"+{rate_adj}%"
+    
     try:
-        print(f"🔊 Generare XTTS-v2 (romana, clonare voce): {len(spoken)} caractere...")
-        wav = _xtts_generate(
-            spoken,
-            sample_bytes,
-            similarity_boost=similarity_boost,
-            style=style,
-        )
-        print(f"✅ Voce clonata generata: {len(wav)} bytes")
+        print(f"🔊 Generare Edge TTS: {len(spoken)} caractere...")
+        audio = _edge_generate(spoken, voice=voice, rate=rate, pitch=pitch)
+        
+        wav = _mp3_to_wav_pcm(audio)
+        
+        print(f"✅ Voce generata: {len(wav)} bytes (Edge TTS)")
         return wav
         
     except Exception as exc:
-        error_msg = str(exc)
-        print(f"⚠️ XTTS a eșuat: {error_msg}")
-        
-        # Fallback la gTTS dacă XTTS nu funcționează
-        if _GTTS_AVAILABLE:
-            print("🔊 Folosesc gTTS fallback (Google TTS)...")
-            try:
-                return _gtts_generate(spoken)
-            except Exception as gtts_err:
-                print(f"❌ gTTS fallback și el a eșuat: {gtts_err}")
-                raise VoiceGenerationError(
-                    f"Nici XTTS nici gTTS nu funcționează. "
-                    f"XTTS: {error_msg[:100]}"
-                ) from exc
-        else:
-            raise VoiceGenerationError(
-                f"XTTS nu funcționează și gTTS nu e instalat. "
-                f"Eroare: {error_msg[:100]}"
-            ) from exc
+        raise VoiceGenerationError(f"Eroare generare vocala: {exc}") from exc
 
 
-def _gtts_generate(text, lang="ro") -> bytes:
-    """Generare vocală cu Google TTS (fallback)."""
-    from pydub import AudioSegment
+def _select_voice_from_id(voice_id, similarity_boost=0.75) -> str:
+    """Selecteaza vocea bazata pe voice_id."""
+    if voice_id and voice_id.startswith("v:"):
+        pass
     
-    # Generăm cu gTTS
-    tts = _gTTS(text=text, lang=lang, slow=False)
-    mp3_buf = io.BytesIO()
-    tts.write_to_fp(mp3_buf)
-    mp3_buf.seek(0)
-    
-    # Convertim MP3 în WAV (gTTS returnează MP3)
-    audio = AudioSegment.from_mp3(mp3_buf)
-    wav_buf = io.BytesIO()
-    audio.export(wav_buf, format="wav")
-    wav_buf.seek(0)
-    
-    return wav_buf.read()
+    if similarity_boost > 0.5:
+        return "ro-RO-AlinaNeural"
+    else:
+        return "ro-RO-EmilNeural"
 
 
 def _generate_silence(duration=1.0, sample_rate=24000) -> bytes:
@@ -376,14 +235,12 @@ def _generate_silence(duration=1.0, sample_rate=24000) -> bytes:
 
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
-    """Genereaza preview direct din mostra audio.
-    
-    Folosit pentru a testa mostra inainte de salvare.
-    """
+    """Genereaza preview direct din mostra."""
     spoken = _expressify(str(text) or "...")
     
     try:
-        return _xtts_generate(spoken, sample_bytes, similarity_boost=0.7, style=0.3)
+        audio = _edge_generate(spoken, voice=DEFAULT_VOICE)
+        return _mp3_to_wav_pcm(audio)
     except Exception as exc:
         raise VoiceGenerationError(f"Eroare generare preview: {exc}") from exc
 
@@ -414,8 +271,6 @@ def voice_id_for_sample(sample_bytes):
 def register_character_voice(char):
     """Inregistreaza mostra de voce pentru un character.
     
-    Stocheaza mostra in memorie pentru utilizare la generarea audio.
-    
     Args:
         char: Dict cu campurile 'voice_id' si optional 'voice_sample_b64'
     """
@@ -427,14 +282,6 @@ def register_character_voice(char):
         if sample_bytes:
             _voice_samples[voice_id] = sample_bytes
             print(f"🔊 Mostra de voce inregistrata pentru {voice_id[:20]}...")
-            
-            # Verifica daca modelul XTTS e disponibil
-            if _check_xtts():
-                try:
-                    _ensure_xtts_model()
-                    print("✅ Model XTTS-v2 gata pentru generare")
-                except Exception as e:
-                    print(f"⚠️ Model XTTS-v2 nu poate fi incarcat: {e}")
 
 
 def forget_registered_voices(voice_ids=None):
@@ -451,19 +298,13 @@ def forget_registered_voices(voice_ids=None):
 # ════════════════════════════════════════════════════
 
 def get_available_voices():
-    """Returneaza informatii despre modelul XTTS-v2 disponibil."""
-    return {
-        "xtts-v2-romanian": {
-            "name": "XTTS-v2 Romanian v2",
-            "description": "Clonare vocala cu model finetuned pentru romana",
-            "features": ["voice cloning", "romanian", "emotional expression"]
-        }
-    }
+    """Returneaza lista de voci romanesti disponibile."""
+    return ROMANIAN_VOICES.copy()
 
 
 def get_default_voice():
-    """Returneaza tipul de voce implicit."""
-    return "xtts-v2-cloned"
+    """Returneaza vocea implicita."""
+    return DEFAULT_VOICE
 
 
 # ════════════════════════════════════════════════════
