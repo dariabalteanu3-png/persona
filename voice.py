@@ -977,3 +977,88 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         "room",
     )
     return _ambient_wav(preset, duration=duration)
+
+
+def mix_voice_ambient(voice_bytes, ambient_bytes, voice_vol=1.0, ambient_vol=0.5):
+    """Combină o voce cu un sunet ambiental într-un singur fișier audio.
+    
+    Args:
+        voice_bytes: Audio-ul vocii (bytes)
+        ambient_bytes: Audio-ul ambiental (bytes)
+        voice_vol: Volumul vocii (0.0 - 1.0)
+        ambient_vol: Volumul ambiental (0.0 - 1.0)
+    
+    Returns:
+        bytes: Audio combinat (WAV)
+    """
+    try:
+        import numpy as np
+        import soundfile as sf
+        import io
+        
+        # Citește vocea
+        voice_data, voice_sr = sf.read(io.BytesIO(voice_bytes))
+        if len(voice_data.shape) > 1:
+            voice_data = voice_data.mean(axis=1)  # Stereo -> Mono
+        
+        # Citește ambientul
+        ambient_data, ambient_sr = sf.read(io.BytesIO(ambient_bytes))
+        if len(ambient_data.shape) > 1:
+            ambient_data = ambient_data.mean(axis=1)
+        
+        # Resample ambientul la rata vocii dacă e necesar
+        if ambient_sr != voice_sr:
+            ratio = voice_sr / ambient_sr
+            new_len = int(len(ambient_data) * ratio)
+            ambient_data = np.interp(
+                np.linspace(0, len(ambient_data) - 1, new_len),
+                np.arange(len(ambient_data)),
+                ambient_data
+            )
+        
+        # Extinde ambientul pentru a acoperi toată durata vocii
+        voice_len = len(voice_data)
+        ambient_len = len(ambient_data)
+        
+        if ambient_len < voice_len:
+            # Bucla ambientul
+            repeats = (voice_len // ambient_len) + 2
+            ambient_extended = np.tile(ambient_data, repeats)
+            ambient_final = ambient_extended[:voice_len]
+        else:
+            ambient_final = ambient_data[:voice_len]
+        
+        # Normalizează
+        voice_norm = voice_data / (np.max(np.abs(voice_data)) + 1e-9)
+        ambient_norm = ambient_final / (np.max(np.abs(ambient_final)) + 1e-9)
+        
+        # Mix
+        mixed = voice_norm * voice_vol + ambient_norm * ambient_vol
+        # Limitează la [-1, 1]
+        mixed = np.clip(mixed, -1.0, 1.0)
+        
+        # Salvează
+        output = io.BytesIO()
+        sf.write(output, mixed.astype(np.float32), voice_sr, format='WAV')
+        return output.getvalue()
+        
+    except ImportError:
+        # Fallback: returnează doar vocea dacă nu avem numpy
+        return voice_bytes
+    except Exception as e:
+        print(f"⚠️ Eroare mix: {e}")
+        return voice_bytes
+
+
+def generate_ambient(name_or_category, duration=12.0):
+    """Generează un sunet ambiental bazat pe nume sau categorie.
+    
+    Args:
+        name_or_category: Numele sau categoria sunetului
+        duration: Durata în secunde
+    
+    Returns:
+        bytes: Audio-ul generat
+    """
+    text = str(name_or_category or "").lower()
+    return sound_effect(text, duration=duration)
