@@ -398,3 +398,92 @@ def clear_messages(conversation_id):
 
 def set_reaction(message_id, emoji):
     messages.update_one({"id": message_id}, {"$set": {"reaction": emoji}})
+
+
+def update_message(message_id, content=None, audio_b64=None):
+    """Actualizează conținutul sau audio-ul unui mesaj."""
+    update = {}
+    if content is not None:
+        update["content"] = content
+    if audio_b64 is not None:
+        update["audio_b64"] = audio_b64
+    if update:
+        messages.update_one({"id": message_id}, {"$set": update})
+
+
+# ==============================================================================
+# Voice Library - Clonare vocală (MongoDB)
+# ==============================================================================
+
+voices_collection = db["voice_library"]
+
+
+def create_voice(owner_id, name, sample_b64=None, sample_name=None,
+                 description=None, visibility="public", speaker_embedding=None,
+                 voice_params=None):
+    """Creează o voce în biblioteca de voci."""
+    import uuid
+    from datetime import datetime
+
+    voice_id = str(uuid.uuid4())
+    doc = {
+        "id": voice_id,
+        "owner_id": owner_id,
+        "visibility": visibility,
+        "created_at": datetime.utcnow().isoformat(),
+        "name": name,
+        "description": description or "",
+        "sample_b64": sample_b64,
+        "sample_name": sample_name,
+        "speaker_embedding": speaker_embedding,
+        "voice_params": voice_params or {},
+    }
+    voices_collection.insert_one(doc)
+    return {"id": voice_id, "name": name, "visibility": visibility,
+            "description": description, "created_at": doc["created_at"]}
+
+
+def get_voice(voice_id):
+    """Preia o voce după ID."""
+    return voices_collection.find_one({"id": voice_id})
+
+
+def get_public_voices():
+    """Preia toate vocile publice."""
+    return list(voices_collection.find(
+        {"visibility": "public"},
+        {"sample_b64": 0}  # Excludem mostrele mari
+    ).sort("created_at", -1))
+
+
+def get_user_voices(user_id):
+    """Preia vocile unui utilizator (publice + private)."""
+    return list(voices_collection.find(
+        {"$or": [{"owner_id": user_id}, {"visibility": "public"}]},
+        {"sample_b64": 0}
+    ).sort("created_at", -1))
+
+
+def update_voice(voice_id, **kwargs):
+    """Actualizează o voce."""
+    allowed = ["name", "description", "visibility", "sample_b64",
+               "sample_name", "speaker_embedding", "voice_params"]
+    update = {k: v for k, v in kwargs.items() if k in allowed}
+    if update:
+        voices_collection.update_one({"id": voice_id}, {"$set": update})
+
+
+def delete_voice(voice_id, owner_id):
+    """Șterge o voce (doar proprietarul o poate șterge)."""
+    voices_collection.delete_one({"id": voice_id, "owner_id": owner_id})
+
+
+def search_voices(query):
+    """Caută voci după nume sau descriere."""
+    return list(voices_collection.find({
+        "visibility": "public",
+        "$or": [
+            {"name": {"$regex": query, "$options": "i"}},
+            {"description": {"$regex": query, "$options": "i"}}
+        ]
+    }, {"sample_b64": 0}).sort("created_at", -1))
