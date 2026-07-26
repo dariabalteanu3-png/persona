@@ -1,10 +1,9 @@
-"""Generare vocala cu XTTS-v2 + gTTS fallback.
+"""Generare vocala cu Microsoft Edge TTS (gratuit, română).
 
 Suporta:
-- Clonare voce din mostra audio (XTTS-v2)
-- Limba romana
-- Expresivitate emotionala
-- Fallback la Google TTS daca XTTS nu e disponibil
+- Microsoft Edge TTS (gratuit, voci neuronale românești)
+- gTTS fallback (Google TTS)
+- XTTS-v2 pentru clonare voce (dacă e disponibil local)
 """
 
 import asyncio
@@ -22,13 +21,21 @@ import numpy as np
 
 from dotenv import load_dotenv
 
-# gTTS fallback pentru când XTTS nu e disponibil
+# Edge TTS - Microsoft (PRIMAR, gratuit, română)
+try:
+    import edge_tts
+    _EDGE_TTS_AVAILABLE = True
+except ImportError:
+    _EDGE_TTS_AVAILABLE = False
+    print("⚠️ edge-tts nu e instalat. Instalare: pip install edge-tts")
+
+# gTTS fallback
 try:
     from gtts import gTTS as _gTTS
     _GTTS_AVAILABLE = True
 except ImportError:
     _GTTS_AVAILABLE = False
-    print("⚠️ gTTS nu e instalat. Instalare: pip install gTTS")
+    print("⚠️ gTTS nu e instalat.")
 
 load_dotenv(Path(__file__).parent / ".env")
 _log = logging.getLogger("voice")
@@ -322,24 +329,26 @@ def text_to_speech(
     except Exception as exc:
         error_msg = str(exc)
         print(f"⚠️ XTTS a eșuat: {error_msg}")
-        
-        # Fallback la gTTS dacă XTTS nu funcționează
+
+        # Fallback 1: Edge TTS (gratuit, Microsoft, română)
+        if _EDGE_TTS_AVAILABLE:
+            print("🔊 Folosesc Edge TTS (Microsoft, gratuit)...")
+            try:
+                return _edge_tts_generate(spoken)
+            except Exception as edge_err:
+                print(f"⚠️ Edge TTS a eșuat: {edge_err}")
+
+        # Fallback 2: gTTS (Google TTS)
         if _GTTS_AVAILABLE:
             print("🔊 Folosesc gTTS fallback (Google TTS)...")
             try:
                 return _gtts_generate(spoken)
             except Exception as gtts_err:
                 print(f"❌ gTTS fallback și el a eșuat: {gtts_err}")
-                raise VoiceGenerationError(
-                    f"Nici XTTS nici gTTS nu funcționează. "
-                    f"XTTS: {error_msg[:100]}"
-                ) from exc
-        else:
-            raise VoiceGenerationError(
-                f"XTTS nu funcționează și gTTS nu e instalat. "
-                f"Eroare: {error_msg[:100]}"
-            ) from exc
 
+        raise VoiceGenerationError(
+            f"Nici XTTS nici TTS-urile gratuite nu funcționează."
+        ) from exc
 
 def _gtts_generate(text, lang="ro") -> bytes:
     """Generare vocală cu Google TTS (fallback)."""
@@ -359,6 +368,36 @@ def _gtts_generate(text, lang="ro") -> bytes:
     
     return wav_buf.read()
 
+
+
+async def _edge_tts_async(text, voice="ro-RO-AlinaNeural") -> bytes:
+    """Generare vocală cu Microsoft Edge TTS (asincron)."""
+    import tempfile
+    
+    mp3_path = tempfile.mktemp(suffix=".mp3")
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(mp3_path)
+    
+    # Convertim MP3 în WAV
+    from pydub import AudioSegment
+    audio = AudioSegment.from_mp3(mp3_path)
+    wav_buf = io.BytesIO()
+    audio.export(wav_buf, format="wav")
+    wav_buf.seek(0)
+    
+    # Ștergem fișierul temporar
+    import os
+    try:
+        os.remove(mp3_path)
+    except:
+        pass
+    
+    return wav_buf.read()
+
+
+def _edge_tts_generate(text, voice="ro-RO-AlinaNeural") -> bytes:
+    """Generare vocală cu Microsoft Edge TTS (sync wrapper)."""
+    return asyncio.run(_edge_tts_async(text, voice))
 
 def _generate_silence(duration=1.0, sample_rate=24000) -> bytes:
     """Genereaza tacere WAV."""
