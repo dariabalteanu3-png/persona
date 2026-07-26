@@ -266,6 +266,40 @@ PRESETS = [
 ]
 
 
+def _generate_and_save_voice(text, voice_id, msg_id, char, save_to_db=True):
+    """Generează audio pentru un mesaj și îl salvează.
+    
+    Args:
+        text: Textul de generat
+        voice_id: ID-ul vocii
+        msg_id: ID-ul mesajului
+        char: Personajul
+        save_to_db: Dacă True, salvează și în DB
+    
+    Returns:
+        bytes: Audio-ul generat sau None
+    """
+    try:
+        audio = voice.text_to_speech(text, voice_id, **_tts_kwargs(char))
+        # Salvare în session_state
+        st.session_state[f"audio_{msg_id}"] = audio
+        
+        # Salvare în DB dacă e activat
+        if save_to_db:
+            try:
+                import base64
+                audio_b64 = base64.b64encode(audio).decode()
+                db.update_message(msg_id, audio_b64=audio_b64)
+                print(f"💾 Audio salvat în DB pentru mesajul {msg_id[:16]}...")
+            except Exception as db_err:
+                print(f"⚠️ Nu am putut salva audio în DB: {db_err}")
+        
+        return audio
+    except Exception as e:
+        print(f"⚠️ Generare voce eșuată: {e}")
+        return None
+
+
 def create_from_preset(p):
     data = {
         "name": p["name"], "avatar": p["avatar"],
@@ -1581,9 +1615,7 @@ def send_proactive(char, kind):
     msg = db.add_message(conv, "assistant", line)
     if char.get("voice_id"):
         try:
-            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
-                line, char["voice_id"], **_tts_kwargs(char)
-            )
+            _generate_and_save_voice(line, char["voice_id"], msg["id"], char)
             st.session_state["autoplay_mid"] = msg["id"]
         except Exception:  # noqa
             pass
@@ -1653,9 +1685,7 @@ def _emit_proactive(char, conv_id, kind, tone=None, custom_instr=None):
     )
     if want_voice:
         try:
-            st.session_state[f"audio_{msg['id']}"] = voice.text_to_speech(
-                line, char["voice_id"], **_tts_kwargs(char)
-            )
+            _generate_and_save_voice(line, char["voice_id"], msg["id"], char)
             st.session_state["autoplay_mid"] = msg["id"]
         except Exception:  # noqa
             pass

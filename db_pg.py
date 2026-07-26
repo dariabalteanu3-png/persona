@@ -842,6 +842,32 @@ def set_reaction(message_id, emoji):
         c.commit()
 
 
+def update_message(message_id, content=None, audio_b64=None):
+    """Actualizează conținutul sau audio-ul unui mesaj."""
+    updates = []
+    values = []
+    
+    if content is not None:
+        updates.append("doc = jsonb_set(doc, '{content}', %s)")
+        values.append(content)
+    
+    if audio_b64 is not None:
+        updates.append("doc = doc || %s::jsonb")
+        values.append(_jdump({"audio_b64": audio_b64}))
+    
+    if not updates:
+        return
+    
+    values.append(message_id)
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                f"UPDATE messages SET {', '.join(updates)} WHERE id = %s",
+                values
+            )
+        c.commit()
+
+
 # ==============================================================================
 # Voice Library - Clonare vocală
 # ==============================================================================
