@@ -21,13 +21,44 @@ import numpy as np
 
 from dotenv import load_dotenv
 
-# Edge TTS - Microsoft (PRIMAR, gratuit, română)
+# Edge TTS - Microsoft (gratuit, română)
 try:
     import edge_tts
     _EDGE_TTS_AVAILABLE = True
 except ImportError:
     _EDGE_TTS_AVAILABLE = False
-    print("⚠️ edge-tts nu e instalat. Instalare: pip install edge-tts")
+    print("⚠️ edge-tts nu e instalat.")
+
+# Piper TTS - local, offline, română (descărcat automat)
+_PIPER_DIR = os.environ.get("PIPER_DIR", "/tmp/piper")
+_PIPER_MODEL_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ro/ro_RO/mihai/medium/ro_RO-mihai-medium.onnx"
+_PIPER_CONFIG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ro/ro_RO/mihai/medium/ro_RO-mihai-medium.onnx.json"
+_PIPER_PATH = os.path.join(_PIPER_DIR, "romanian_medium.onnx")
+_PIPER_CONFIG = os.path.join(_PIPER_DIR, "romanian_medium.onnx.json")
+
+def _ensure_piper_model():
+    """Descărcă modelul Piper la nevoie."""
+    if _os.path.exists(_PIPER_PATH) and os.path.exists(_PIPER_CONFIG):
+        return True
+    
+    print(f"📥 Descarc model Piper românesc (60 MB)...")
+    os.makedirs(_PIPER_DIR, exist_ok=True)
+    
+    try:
+        import urllib.request
+        # Descarcăm modelul
+        urllib.request.urlretrieve(_PIPER_MODEL_URL, _PIPER_PATH)
+        print(f"✅ Model descărcat: {_PIPER_PATH}")
+        # Descarcăm config
+        urllib.request.urlretrieve(_PIPER_CONFIG_URL, _PIPER_CONFIG)
+        print(f"✅ Config descărcat: {_PIPER_CONFIG}")
+        return True
+    except Exception as e:
+        print(f"⚠️ Nu am putut descărca modelul Piper: {e}")
+        return False
+
+# Inițializăm Piper
+_PIPER_AVAILABLE = os.path.exists(_PIPER_PATH) and os.path.exists(_PIPER_CONFIG)
 
 # gTTS fallback
 try:
@@ -330,7 +361,15 @@ def text_to_speech(
         error_msg = str(exc)
         print(f"⚠️ XTTS a eșuat: {error_msg}")
 
-        # Fallback 1: Edge TTS (gratuit, Microsoft, română)
+        # Fallback 1: Piper TTS (local, offline, română)
+        if _PIPER_AVAILABLE:
+            print("🔊 Folosesc Piper TTS (local, offline)...")
+            try:
+                return _piper_generate(spoken)
+            except Exception as piper_err:
+                print(f"⚠️ Piper a eșuat: {piper_err}")
+
+        # Fallback 2: Edge TTS (gratuit, Microsoft, română)
         if _EDGE_TTS_AVAILABLE:
             print("🔊 Folosesc Edge TTS (Microsoft, gratuit)...")
             try:
@@ -338,7 +377,7 @@ def text_to_speech(
             except Exception as edge_err:
                 print(f"⚠️ Edge TTS a eșuat: {edge_err}")
 
-        # Fallback 2: gTTS (Google TTS)
+        # Fallback 3: gTTS (Google TTS)
         if _GTTS_AVAILABLE:
             print("🔊 Folosesc gTTS fallback (Google TTS)...")
             try:
@@ -386,7 +425,6 @@ async def _edge_tts_async(text, voice="ro-RO-AlinaNeural") -> bytes:
     wav_buf.seek(0)
     
     # Ștergem fișierul temporar
-    import os
     try:
         os.remove(mp3_path)
     except:
@@ -398,6 +436,48 @@ async def _edge_tts_async(text, voice="ro-RO-AlinaNeural") -> bytes:
 def _edge_tts_generate(text, voice="ro-RO-AlinaNeural") -> bytes:
     """Generare vocală cu Microsoft Edge TTS (sync wrapper)."""
     return asyncio.run(_edge_tts_async(text, voice))
+
+
+def _piper_generate(text) -> bytes:
+    """Generare vocală cu Piper TTS (local, offline, română)."""
+    import subprocess
+    import tempfile
+    
+    piper_bin = os.environ.get("PIPER_BIN", "/home/openhands/.local/bin/piper")
+    
+    # Creăm un fișier temporar pentru output
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        output_path = f.name
+    
+    try:
+        # Normalizăm textul pentru Piper
+        text_normalized = text.translate(_CEDILLA_TO_COMMA)
+        
+        # Generăm cu piper
+        result = subprocess.run(
+            [piper_bin, "--model", _PIPER_PATH, "--config", _PIPER_CONFIG, 
+             "--output_file", output_path],
+            input=text_normalized,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"Piper error: {result.stderr}")
+        
+        # Citim output-ul
+        with open(output_path, "rb") as f:
+            wav_bytes = f.read()
+        
+        return wav_bytes
+        
+    finally:
+        try:
+            _os_module.remove(output_path)
+        except:
+            pass
+
 
 def _generate_silence(duration=1.0, sample_rate=24000) -> bytes:
     """Genereaza tacere WAV."""

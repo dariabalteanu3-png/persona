@@ -18,3 +18,4 @@ gTTS
 pydub
 
 edge-tts
+piper-tts
