@@ -1,9 +1,10 @@
 """Generare vocala cu Microsoft Edge TTS (gratuit, română).
 
 Suporta:
-- Microsoft Edge TTS (gratuit, voci neuronale românești)
-- gTTS fallback (Google TTS)
+- Microsoft Edge TTS (gratuit, voci neuronale românești) - RECOMANDAT pentru cloud
+- Piper TTS (local, offline, română)
 - XTTS-v2 pentru clonare voce (dacă e disponibil local)
+- gTTS fallback (Google TTS)
 """
 
 import asyncio
@@ -20,6 +21,20 @@ from pathlib import Path
 import numpy as np
 
 from dotenv import load_dotenv
+
+# ==== CONFIGURAȚIE CLOUD vs LOCAL ====
+# Setează FORCE_CLOUD=1 sau USE_EDGE_TTS=1 pentru deployment pe Streamlit Cloud
+# (Edge-TTS funcționează pe cloud, XTTS-v2 NU)
+_FORCE_CLOUD = os.environ.get("FORCE_CLOUD", "0") == "1"
+_USE_EDGE_TTS = os.environ.get("USE_EDGE_TTS", "0") == "1"
+_USE_CLOUD_TTS = _FORCE_CLOUD or _USE_EDGE_TTS
+
+# Voci Edge-TTS disponibile pentru română
+EDGE_TTS_VOICES = {
+    "AlinaNeural": "ro-RO-AlinaNeural",  # Feminin
+    "EmilNeural": "ro-RO-EmilNeural",    # Masculin
+}
+_DEFAULT_EDGE_VOICE = os.environ.get("DEFAULT_EDGE_VOICE", "AlinaNeural")
 
 # Edge TTS - Microsoft (gratuit, română)
 try:
@@ -319,9 +334,11 @@ def text_to_speech(
     tone=None,
 ):
     """Genereaza WAV cu vocea clonata.
-    
-    XTTS-v2 Romanian v2 foloseste mostra audio pentru a clona vocea.
-    
+
+    Ordinea preferata:
+    - FORCE_CLOUD=1 / USE_EDGE_TTS=1 -> Edge-TTS direct (cloud)
+    - Altfel -> XTTS-v2 cu clonare (local/server propriu)
+
     Args:
         text: Textul de generat
         voice_id: ID-ul vocii (asociat cu mostra salvata)
@@ -329,65 +346,82 @@ def text_to_speech(
         similarity_boost: Similaritate (0-1) - cat de aproape de mostra
         style: Stil (0-1) - expresivitate
         expressive: Daca textul trebuie procesat
-        tone: Tonul vocii (optional)
-    
+        tone: Tonul vocii (optional) - "AlinaNeural" sau "EmilNeural" pentru Edge-TTS
+
     Returns:
         bytes: Audio WAV
     """
+    spoken = _expressify(str(text) if expressive else (text or "..."))
+
+    if not spoken or spoken == "...":
+        return _generate_silence(duration=0.5)
+
+    # MOD CLOUD: Edge-TTS direct (functioneaza pe Streamlit Cloud)
+    if _USE_CLOUD_TTS and _EDGE_TTS_AVAILABLE:
+        print(f"[CLOUD] Edge-TTS: {len(spoken)} caractere...")
+        try:
+            edge_voice = EDGE_TTS_VOICES.get(tone or _DEFAULT_EDGE_VOICE, EDGE_TTS_VOICES[_DEFAULT_EDGE_VOICE])
+            return _edge_tts_generate(spoken, voice=edge_voice)
+        except Exception as edge_err:
+            print(f"Edge-TTS a esuat: {edge_err}")
+
+    # MOD LOCAL: XTTS-v2 cu clonare voce
     sample_bytes = _voice_samples.get(voice_id)
     if not sample_bytes:
+        # Fallback la Edge-TTS daca nu avem mostra
+        if _EDGE_TTS_AVAILABLE:
+            print("Nicio mostra - folosesc Edge-TTS...")
+            edge_voice = EDGE_TTS_VOICES.get(tone or _DEFAULT_EDGE_VOICE, EDGE_TTS_VOICES[_DEFAULT_EDGE_VOICE])
+            return _edge_tts_generate(spoken, voice=edge_voice)
         raise VoiceGenerationError(
             "Vocea nu are o mostra salvata. "
             "Incarca o mostra audio pentru acest personaj."
         )
 
-    spoken = _expressify(str(text) if expressive else (text or "..."))
-    
-    if not spoken or spoken == "...":
-        return _generate_silence(duration=0.5)
-
     try:
-        print(f"🔊 Generare XTTS-v2 (romana, clonare voce): {len(spoken)} caractere...")
+        print(f"Generare XTTS-v2 (romana, clonare voce): {len(spoken)} caractere...")
         wav = _xtts_generate(
             spoken,
             sample_bytes,
             similarity_boost=similarity_boost,
             style=style,
         )
-        print(f"✅ Voce clonata generata: {len(wav)} bytes")
+        print(f"Voce clonata generata: {len(wav)} bytes")
         return wav
-        
+
     except Exception as exc:
         error_msg = str(exc)
-        print(f"⚠️ XTTS a eșuat: {error_msg}")
+        print(f"XTTS a esuat: {error_msg}")
 
-        # Fallback 1: Piper TTS (local, offline, română)
+        # Fallback 1: Piper TTS (local, offline, romana)
         if _PIPER_AVAILABLE:
-            print("🔊 Folosesc Piper TTS (local, offline)...")
+            print("Folosesc Piper TTS (local, offline)...")
             try:
                 return _piper_generate(spoken)
             except Exception as piper_err:
-                print(f"⚠️ Piper a eșuat: {piper_err}")
+                print(f"Piper a esuat: {piper_err}")
 
-        # Fallback 2: Edge TTS (gratuit, Microsoft, română)
+        # Fallback 2: Edge TTS (gratuit, Microsoft, romana)
         if _EDGE_TTS_AVAILABLE:
-            print("🔊 Folosesc Edge TTS (Microsoft, gratuit)...")
+            print("Folosesc Edge TTS (Microsoft, gratuit)...")
             try:
-                return _edge_tts_generate(spoken)
+                edge_voice = EDGE_TTS_VOICES.get(tone or _DEFAULT_EDGE_VOICE, EDGE_TTS_VOICES[_DEFAULT_EDGE_VOICE])
+                return _edge_tts_generate(spoken, voice=edge_voice)
             except Exception as edge_err:
-                print(f"⚠️ Edge TTS a eșuat: {edge_err}")
+                print(f"Edge TTS a esuat: {edge_err}")
 
         # Fallback 3: gTTS (Google TTS)
         if _GTTS_AVAILABLE:
-            print("🔊 Folosesc gTTS fallback (Google TTS)...")
+            print("Folosesc gTTS fallback (Google TTS)...")
             try:
                 return _gtts_generate(spoken)
             except Exception as gtts_err:
-                print(f"❌ gTTS fallback și el a eșuat: {gtts_err}")
+                print(f"gTTS fallback si el a esuat: {gtts_err}")
 
         raise VoiceGenerationError(
-            f"Nici XTTS nici TTS-urile gratuite nu funcționează."
+            f"Nici XTTS nici TTS-urile gratuite nu functioneaza."
         ) from exc
+
 
 def _gtts_generate(text, lang="ro") -> bytes:
     """Generare vocală cu Google TTS (fallback)."""
