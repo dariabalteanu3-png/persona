@@ -9,14 +9,13 @@ pinned: false
 
 # Persona — AI Companion App
 
-Aplicație de companie AI cu **clonare vocală** din mostre audio personale.
+Aplicație de companie AI cu **clonare vocală** folosind XTTS-v2 (Coqui TTS).
 
 **Caracteristici principale:**
 - 🎤 **Clonare vocală cu XTTS-v2** — creează voci unice din mostre audio
-- 🌍 **Suport complet pentru limba română** — caracterele românești (ă, â, î, ș, ț)
-- 🎵 **150+ sunete ambientale** — ploaie, mare, oraș, fermă, sport, sărbători, etc.
-- 🔊 **Mixaj voce + ambient** — vocile personajelor se aud natural în contexte diferite
-- ☁️ **Deploy flexibil** — server propriu (GPU) sau Streamlit Cloud (Edge-TTS fallback)
+- 🌍 **Suport complet pentru limba română** — XTTS-v2 Romanian v2
+- 🎵 **150+ sunete ambientale** — ploaie, mare, oraș, fermă, sport, sărbători
+- 🔊 **Mixaj voce + ambient** — vocile personajelor se aud natural
 - 💾 **Date persistente** — PostgreSQL pentru salvare personaje și conversații
 - 100% gratuit și open-source
 
@@ -37,7 +36,7 @@ Aplicație de companie AI cu **clonare vocală** din mostre audio personale.
 
 ---
 
-## 🖥️ Deploy pe Server Propriu (XTTS-v2 + GPU)
+## 🖥️ Deploy (XTTS-v2 + GPU)
 
 **Necesar:** GPU NVIDIA cu minim 6GB VRAM
 
@@ -48,38 +47,12 @@ pip install -r requirements.txt
 # Setează variabilele de mediu
 export DATABASE_URL="postgresql://..."  # opțional
 export HF_TOKEN="hf_..."  # pentru descărcare model
-export USE_EDGE_TTS="0"  # FORȚEAZĂ XTTS-v2
 
 # Pornește aplicația
 streamlit run app.py --server.port 8501
 ```
 
 XTTS-v2 Romanian v2 va fi descărcat automat de pe HuggingFace.
-
----
-
-## ☁️ Deploy pe Streamlit Cloud
-
-**Funcționează direct, dar fără clonare vocală** (XTTS necesită GPU).
-
-### 1. Fork acest repository
-
-### 2. Creează `.streamlit/secrets.toml`:
-
-```toml
-# Database pentru persistență (opțional dar recomandat)
-DATABASE_URL = "postgresql://user:pass@host:5432/dbname"
-
-# Edge-TTS fallback (gratuit, română, fără clonare)
-USE_EDGE_TTS = "1"
-DEFAULT_EDGE_VOICE = "AlinaNeural"  # sau "EmilNeural"
-```
-
-### 3. Deploy
-1. Mergi la [share.streamlit.io](https://share.streamlit.io)
-2. Conectează repository-ul GitHub
-3. Alege branch-ul `main`
-4. Deploy!
 
 ---
 
@@ -131,5 +104,5 @@ Poți crea voci nelimitate din mostre audio:
 
 ### Streamlit Cloud:
 - Python 3.9+
-- Fără GPU (folosește Edge-TTS)
+- Necesita GPU pentru XTTS-v2
 - PostgreSQL (opțional dar recomandat)

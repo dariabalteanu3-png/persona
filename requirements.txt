@@ -17,7 +17,6 @@ huggingface-hub>=0.19.0
 gTTS
 pydub
 
-edge-tts
 piper-tts
 TTS
 transformers==4.36.0

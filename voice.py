@@ -1,10 +1,9 @@
-"""Generare vocala cu Microsoft Edge TTS (gratuit, română).
+"""Generare vocala cu XTTS-v2 Romanian v2 (Coqui TTS).
 
-Suporta:
-- Microsoft Edge TTS (gratuit, voci neuronale românești) - RECOMANDAT pentru cloud
+Motorul principal: XTTS-v2 pentru clonare voce din mostre audio.
+Fallback-uri:
 - Piper TTS (local, offline, română)
-- XTTS-v2 pentru clonare voce (dacă e disponibil local)
-- gTTS fallback (Google TTS)
+- gTTS (Google TTS)
 """
 
 import asyncio
@@ -22,28 +21,7 @@ import numpy as np
 
 from dotenv import load_dotenv
 
-# ==== CONFIGURAȚIE CLOUD vs LOCAL ====
-# Setează FORCE_CLOUD=1 sau USE_EDGE_TTS=1 pentru deployment pe Streamlit Cloud
-# (Edge-TTS funcționează pe cloud, XTTS-v2 NU)
-_FORCE_CLOUD = os.environ.get("FORCE_CLOUD", "0") == "1"
-_USE_EDGE_TTS = os.environ.get("USE_EDGE_TTS", "0") == "1"
-_USE_CLOUD_TTS = _FORCE_CLOUD or _USE_EDGE_TTS
-
-# Voci Edge-TTS disponibile pentru română
-EDGE_TTS_VOICES = {
-    "AlinaNeural": "ro-RO-AlinaNeural",  # Feminin
-    "EmilNeural": "ro-RO-EmilNeural",    # Masculin
-}
-_DEFAULT_EDGE_VOICE = os.environ.get("DEFAULT_EDGE_VOICE", "AlinaNeural")
-
-# Edge TTS - Microsoft (gratuit, română)
-try:
-    import edge_tts
-    _EDGE_TTS_AVAILABLE = True
-except ImportError:
-    _EDGE_TTS_AVAILABLE = False
-    print("⚠️ edge-tts nu e instalat.")
-
+# XTTS-v2 necesita GPU pentru functionare
 # Piper TTS - local, offline, română (descărcat automat)
 _PIPER_DIR = os.environ.get("PIPER_DIR", "/tmp/piper")
 _PIPER_MODEL_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ro/ro_RO/mihai/medium/ro_RO-mihai-medium.onnx"
@@ -337,7 +315,7 @@ def text_to_speech(
     
     Ordinea preferata:
     1. XTTS-v2 cu clonare voce din mostra audio (PRINCIPAL)
-    2. Edge-TTS (fallback, daca XTTS nu functioneaza)
+    2. Piper TTS (fallback, daca XTTS nu functioneaza)
     3. gTTS (ultimul fallback)
     
     Args:
@@ -375,16 +353,6 @@ def text_to_speech(
         except Exception as exc:
             print(f"XTTS-v2 a esuat: {exc}")
 
-    # 2. Edge-TTS (fallback, functioneaza pe cloud fara GPU)
-    if _EDGE_TTS_AVAILABLE:
-        try:
-            edge_voice = EDGE_TTS_VOICES.get(tone or _DEFAULT_EDGE_VOICE, EDGE_TTS_VOICES[_DEFAULT_EDGE_VOICE])
-            print(f"Edge-TTS fallback: {len(spoken)} caractere, voice={edge_voice}")
-            return _edge_tts_generate(spoken, voice=edge_voice)
-        except Exception as edge_err:
-            print(f"Edge-TTS a esuat: {edge_err}")
-
-    # 3. gTTS (ultimul fallback)
     if _GTTS_AVAILABLE:
         try:
             print(f"gTTS fallback: {len(spoken)} caractere")
@@ -394,7 +362,7 @@ def text_to_speech(
 
     # Niciun TTS nu a functionat
     raise VoiceGenerationError(
-        f"Nici XTTS-v2, nici Edge-TTS, nici gTTS nu functioneaza."
+        f"Nici XTTS-v2, nici gTTS nu functioneaza."
     )
 
 
@@ -418,44 +386,6 @@ def _gtts_generate(text, lang="ro") -> bytes:
     return wav_buf.read()
 
 
-
-async def _edge_tts_async(text, voice="ro-RO-AlinaNeural") -> bytes:
-    """Generare vocala cu Microsoft Edge TTS (asincron)."""
-    import tempfile
-    import subprocess
-
-    mp3_path = tempfile.mktemp(suffix=".mp3")
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(mp3_path)
-
-    try:
-        # Incercam ffmpeg pentru conversie (disponibil pe Streamlit Cloud)
-        result = subprocess.run(
-            ['ffmpeg', '-i', mp3_path, '-ar', '22050', '-ac', '1', '-y', '/tmp/edge_out.wav'],
-            capture_output=True, timeout=30
-        )
-        if result.returncode == 0:
-            with open('/tmp/edge_out.wav', 'rb') as f:
-                wav_data = f.read()
-            os.remove('/tmp/edge_out.wav')
-            return wav_data
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        pass
-
-    # Fallback: returnam raw MP3 (Streamlit poate reda MP3 direct)
-    with open(mp3_path, 'rb') as f:
-        mp3_data = f.read()
-    return mp3_data
-
-
-def _edge_tts_generate(text, voice="ro-RO-AlinaNeural") -> bytes:
-    """Generare vocală cu Microsoft Edge TTS (sync wrapper)."""
-    return asyncio.run(_edge_tts_async(text, voice))
-
-
-def _piper_generate(text) -> bytes:
-    """Generare vocală cu Piper TTS (local, offline, română)."""
-    import subprocess
     import tempfile
     
     piper_bin = os.environ.get("PIPER_BIN", "/home/openhands/.local/bin/piper")
