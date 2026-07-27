@@ -8,3 +8,25 @@ build/
 .venv/
 venv/
 *.egg
+
+# Modele XTTS-v2 (descarcate automat)
+xtts_v2_romanian_model/
+models/
+checkpoints/
+
+# Cache HuggingFace
+.cache/
+.huggingface/
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db

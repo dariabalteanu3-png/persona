@@ -1074,6 +1074,205 @@ AMBIENT_LIBRARY = {
     "☀️ Vară": "summer",
     "🍁 Toamnă": "autumn",
     "❄️ Iarnă": "winter",
+
+    # 🌟 Spațiu cosmic
+    "🚀 Navă spațială": "helicopter",
+    "🌌 Fundal cosmic": "wind_strong",
+    "👽 Navă extraterestră": "helicopter",
+    "🛸 Zgomot UFO": "helicopter",
+
+    # 🎮 Jocuri și gaming
+    "🎮 Sală de jocuri": "arcade",
+    "🕹️ Jocuri retro": "arcade",
+    "🎲 Zaruri": "dice",
+    "🃏 Cărți de joc": "typing",
+
+    # 💼 Servicii
+    "🔧 Mecanic auto": "tractor",
+    "🔩 Fabrică": "factory",
+    "⚙️ Uzina": "factory",
+    "🔨 Construcții": "construction",
+    "🚧 Șantier": "construction",
+
+    # 🌺 Grădină și florărie
+    "🌹 Grădină cu flori": "birds_morning",
+    "🐝 Albine la flori": "bees",
+    "🦋 Fluturi": "birds",
+    "🌻 Câmp de floarea soarelui": "wind",
+    "🌷 Livadă": "forest",
+
+    # 🎵 Muzică și arte
+    "🎸 Concert rock": "party",
+    "🎻 Orchestră": "party",
+    "🥁 Studio de înregistrări": "typing",
+    "🎤 Karaoke": "party",
+    "🎺 Fanfară": "party",
+    "🎷 Jazz club": "cafe",
+
+    # ⛪ Biserici și ceremonii
+    "⛪ Biserică": "library",
+    "🔔 Clopote de biserică": "clock",
+    "💒 Nuntă": "party",
+    "🕯️ Parastas": "library",
+
+    # 🎓 Educație
+    "📖 Sală de curs": "school",
+    "🔬 Laborator": "typing",
+    "💻 Programare": "typing",
+    "🎓 Promoție": "crowd",
+    "📝 Examen": "library",
+
+    # 🏖️ Litoral
+    "🏝️ Insulă tropicală": "ocean",
+    "🛥️ Barcă cu motor": "boat",
+    "⛵ Velier": "wind",
+    "🐬 Delfini": "ocean",
+    "🦈 Valuri cu rechini": "ocean_storm",
+    "🏊 Înot": "water_faucet",
+    "🤽 Waterpolo": "pool",
+
+    # ⛷️ Sporturi de iarnă
+    "⛷️ Schi": "snow_walk",
+    "🏂 Snowboard": "snow_walk",
+    "🛷 Sanie": "snow_walk",
+    "⛸️ Patinaj": "ice",
+    "🏔️ Drumeție în munți": "forest_walk",
+
+    # ⚽ Sporturi
+    "⚽ Meci de fotbal": "crowd",
+    "🏀 Meci de baschet": "crowd",
+    "🎾 Tenis": "crowd",
+    "🏐 Volei": "crowd",
+    "🥊 Box": "crowd",
+    "🏊 Piscină": "pool",
+    "🏋️ Sală de sport": "gym",
+    "🚴 Ciclism": "wind",
+    "🏃 Atletism": "footsteps",
+
+    # 🎭 Teatru și cinema
+    "🎭 Teatru": "crowd",
+    "🎬 Film": "tv",
+    "🍿 Cinematic": "tv",
+    "🎪 Circ": "crowd",
+    "🎨 Vernisaj": "crowd",
+
+    # 🌊 Nave și apă
+    "🚢 Vapor": "boat",
+    "🚤 Barca de pescuit": "river",
+    "⚓ Port": "harbor",
+    "🛳️ Croazieră": "ocean",
+    "🌊 Nave de război": "boat",
+
+    # 🚂 Căi ferate avansate
+    "🚂🚃 Tren de marfă": "train",
+    "🚂💨 Tren de mare viteză": "train",
+    "🚉 Stație de metrou": "metro",
+    "🚊 Tramvai electric": "metro",
+    "🛤️ Șine": "train",
+
+    # 🎯 Tir și airsoft
+    "🎯 Tir": "shooting",
+    "🔫 Airsoft": "shooting",
+    "🏹 Arc și săgeată": "shooting",
+
+    # 🔬 Fizică și laborator
+    "⚗️ Laborator chimic": "lab",
+    "🔬 Experimente": "lab",
+    "💥 Explozii": "explosion",
+    "☢️ Radioactivitate": "wind",
+
+    # 🧘 Spiritualitate
+    "🛕 Templu": "library",
+    "🕌 Moschee": "library",
+    "🕎 Hanuka": "fire",
+    "📿 Meditație": "room",
+    "🧘 Yoga": "wind",
+
+    # 🎄 Sărbători
+    "🎄 Crăciun": "party",
+    "🎅 Moș Crăciun": "party",
+    "🔔 Clopote de Crăciun": "clock",
+    "🎆 Anul Nou": "party",
+    "🎃 Halloween": "night",
+    "🦃 Ziua Recunoștinței": "party",
+    "❤️ Valentine": "heartbeat",
+
+    # 🏭 Industrii
+    "🏭 Oțelărie": "factory",
+    "⚒️ Forjă": "factory",
+    "🔥 Topitorie": "fire",
+    "🪨 Minerit": "construction",
+    "💎 Carieră de piatră": "construction",
+
+    # 🌐 Tehnologie
+    "💾 Server room": "office",
+    "🖥️ Centru de date": "office",
+    "📡 Antenă radio": "radio",
+    "📻 Radio de camping": "radio",
+    "📟 Calculator vechi": "typing",
+    "📠 Fax": "typing",
+
+    # 🚗 Circulație
+    "🚦 Semnalizare": "city_heavy",
+    "🚗🚙 Ambuteiaj": "city_heavy",
+    "🚕🚖 Taxi în mulțime": "city",
+    "🛻 Camion": "bus",
+    "🚒 Pompieri": "sirens",
+    "🚑 Ambulanță": "sirens",
+    "🚓 Poliție": "sirens",
+
+    # 🍺 Berărie și bar
+    "🍺 Berărie": "cafe",
+    "🍻 Bar": "cafe",
+    "🎱 Billiard": "cafe",
+    "🎯 Darts": "party",
+    "🍷 Degustare de vin": "cafe",
+
+    # 🌿 Natură specială
+    "🌈 Curcubeu": "birds_morning",
+    "⛲ Gheară": "fountain",
+    "🗻 Munte": "wind_strong",
+    "🌋 Vulcan": "storm",
+    "🌊 Tsunami": "ocean_storm",
+    "🌀 Tornado": "wind_strong",
+    "🌪️ Uragan": "wind_strong",
+    "🌊 Apus pe mare": "ocean",
+    "🌅 Răsărit": "birds_morning",
+    "🌄 Crepuscul": "crickets_night",
+
+    # 👶 Bebeluși și copii
+    "👶 Bebeluș care plânge": "baby",
+    "🍼 Hrănire bebeluș": "baby",
+    "🎈 Copii la joacă": "crowd",
+    "🧸 Camera copilului": "room",
+    "🎠 Carusel": "crowd",
+
+    # 🏥 Medical
+    "🏥 Spital": "hospital",
+    "🦷 Medic dentist": "drilling",
+    "💉 Injecție": "heartbeat",
+    "📊 Monitor cardiac": "heartbeat",
+    "🩺 Stetoscop": "heartbeat",
+
+    # 📱 Tehnologie modernă
+    "📱 Notificări telefon": "phone",
+    "💬 Chat mesaje": "typing",
+    "📧 Email": "typing",
+    "🔔 Alarmă": "clock",
+    "⏰ Bec veghe": "clock",
+
+    # 🐾 Mai multe animale
+    "🐕🐕 Mai mulți câini": "dogs",
+    "🐈🐈 Mai multe pisici": "cats",
+    "🦆 Rățuște": "birds_lake",
+    "🦅 Vulturi": "birds",
+    "🐸 Broaște": "frogs",
+    "🦇 Liliac": "night",
+    "🐝 Stupi de albine": "bees",
+    "🐑 Oi pe deal": "farm",
+    "🐷 Porci": "farm",
+    "🦆 Gâște": "birds",
+    "🦚 Păun": "birds",
 }
 
 
