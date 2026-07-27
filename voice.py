@@ -444,27 +444,32 @@ def _gtts_generate(text, lang="ro") -> bytes:
 
 
 async def _edge_tts_async(text, voice="ro-RO-AlinaNeural") -> bytes:
-    """Generare vocală cu Microsoft Edge TTS (asincron)."""
+    """Generare vocala cu Microsoft Edge TTS (asincron)."""
     import tempfile
-    
+    import subprocess
+
     mp3_path = tempfile.mktemp(suffix=".mp3")
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(mp3_path)
-    
-    # Convertim MP3 în WAV
-    from pydub import AudioSegment
-    audio = AudioSegment.from_mp3(mp3_path)
-    wav_buf = io.BytesIO()
-    audio.export(wav_buf, format="wav")
-    wav_buf.seek(0)
-    
-    # Ștergem fișierul temporar
+
     try:
-        os.remove(mp3_path)
-    except:
+        # Incercam ffmpeg pentru conversie (disponibil pe Streamlit Cloud)
+        result = subprocess.run(
+            ['ffmpeg', '-i', mp3_path, '-ar', '22050', '-ac', '1', '-y', '/tmp/edge_out.wav'],
+            capture_output=True, timeout=30
+        )
+        if result.returncode == 0:
+            with open('/tmp/edge_out.wav', 'rb') as f:
+                wav_data = f.read()
+            os.remove('/tmp/edge_out.wav')
+            return wav_data
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         pass
-    
-    return wav_buf.read()
+
+    # Fallback: returnam raw MP3 (Streamlit poate reda MP3 direct)
+    with open(mp3_path, 'rb') as f:
+        mp3_data = f.read()
+    return mp3_data
 
 
 def _edge_tts_generate(text, voice="ro-RO-AlinaNeural") -> bytes:

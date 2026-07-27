@@ -2862,7 +2862,7 @@ def render_create():
         if edit_char and edit_char.get("voice_sample_b64"):
             st.info("Se va folosi mostra audio deja salvată pentru acest personaj.")
             try:
-                st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format="audio/wav")
+                st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format=None)
             except Exception:  # noqa
                 st.warning("Mostra salvată nu poate fi previzualizată.")
         else:
@@ -3307,19 +3307,19 @@ def render_chat(char):
                 _media_kind = m.get("media_kind", "")
                 if _media_kind == "ambient":
                     st.caption(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=None)
                 elif _media_kind == "ambient_pure":
                     st.caption(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=None)
                 elif _media_kind == "audio_file":
                     st.caption(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=None)
                 elif _media_kind == "song":
                     # Păstrează comportamentul existent pentru melodii
                     pass
                 else:
                     st.caption("🎤 Mesaj vocal")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=None)
             if m.get("media_kind") == "song" and m.get("song_b64"):
                 st.caption(f"🎵 {m.get('song_name', 'melodie')}")
                 st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
@@ -3407,7 +3407,7 @@ def render_chat(char):
                             voice_vol=st.session_state.get(f"sleepvvol_{mid}", 1.0),
                         )
                         st.session_state["autoplay_mid"] = None
-                    st.audio(st.session_state[f"audio_{mid}"], format="audio/wav")
+                    st.audio(st.session_state[f"audio_{mid}"], format=None)
                     st.download_button(
                         "⬇️ Descarcă WAV",
                         data=st.session_state[f"audio_{mid}"],
@@ -3419,7 +3419,7 @@ def render_chat(char):
                 cue = st.session_state.get(f"sfxcue_{m['id']}", "ambianță")
                 st.caption(f"🎧 {cue}")
                 ap = st.session_state.get("ambient_play_mid") == m["id"]
-                st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/wav", autoplay=ap)
+                st.audio(st.session_state[f"sfx_{m['id']}"], format=None, autoplay=ap)
                 if ap:
                     st.session_state["ambient_play_mid"] = None
 
@@ -3539,7 +3539,7 @@ def render_chat(char):
                         st.warning("Nu am putut genera mostra acum.")
             _tp = st.session_state.get(f"toneprev_{char['id']}")
             if _tp:
-                st.audio(_tp, format="audio/wav")
+                st.audio(_tp, format=None)
                 if st.session_state.pop(f"toneprev_play_{char['id']}", False):
                     _play_voice_ambient([_tp], None, "toneprev_" + char["id"][:6])
 
@@ -3854,7 +3854,7 @@ def render_chat(char):
                         except Exception:  # noqa
                             _data = None
                 if _data:
-                    st.audio(_data, format="audio/wav")
+                    st.audio(_data, format=None)
             
             # Trimite sunetul în conversație
             if st.button("📤 Trimite sunetul în conversație", 
@@ -4116,7 +4116,7 @@ def render_chat(char):
         with st.chat_message("user", avatar="🧑"):
             if user_audio:
                 st.caption("🎤 Mesaj vocal")
-                st.audio(base64.b64decode(user_audio), format="audio/wav")
+                st.audio(base64.b64decode(user_audio), format=None)
             st.markdown(prompt)
         haptic(15)
         play_sound("send", char.get("notif_theme"))
@@ -4177,7 +4177,7 @@ def render_chat(char):
                         f'}})();</script>',
                         height=0,
                     )
-                    st.audio(_scene_amb, format="audio/wav")
+                    st.audio(_scene_amb, format=None)
 
             # ── MESAJELE TEXT (una câte una, cu pauze naturale) ────────────────
             for _i, _p in enumerate(parts):
@@ -4273,7 +4273,7 @@ def render_call(char):
             unsafe_allow_html=True,
         )
         if st.session_state.get("ringtone_audio"):
-                st.audio(st.session_state["ringtone_audio"], format="audio/wav", autoplay=True)
+                st.audio(st.session_state["ringtone_audio"], format=None, autoplay=True)
         cc = st.columns([1, 2, 1])
         with cc[1]:
             a, b = st.columns(2)
@@ -4347,7 +4347,7 @@ def render_call(char):
             # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
             _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid,
                                 voice_vol=st.session_state.get("call_volume", 100) / 100.0)
-            st.audio(_ab, format="audio/wav")  # control de reascultare (fără autoplay dublu)
+            st.audio(_ab, format=None)  # control de reascultare (fără autoplay dublu)
 
     st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
                "îți va cere permisiunea pentru microfon — apasă „Permite”.")
@@ -5164,7 +5164,7 @@ def render_profil():
             if st.session_state.get("_settings_audio"):
                 if st.session_state.pop("_play_settings_audio", False):
                     _play_voice_ambient([st.session_state["_settings_audio"]], None, "settings_read")
-                st.audio(st.session_state["_settings_audio"], format="audio/wav")
+                st.audio(st.session_state["_settings_audio"], format=None)
             st.markdown("---")
             st.markdown("#### 🗑️ Vocile mele")
             _voice_chars = [
