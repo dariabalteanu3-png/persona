@@ -953,24 +953,127 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
     """Returneaza un sunet ambient sintetizat local."""
     text = str(prompt or "").lower()
     presets = (
-        ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindina")),
-        ("blizzard", ("crivat", "viscol", "blizzard", "howling wind", "strong wind", "vant puternic")),
-        ("rain", ("ploaie", "rain", "drizzle", "shower", "picaturi")),
-        ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coasta")),
-        ("fire", ("foc", "campfire", "fire", "semineu", "flacara", "lumanare", "jar")),
-        ("wind", ("vant", "wind", "breeze", "adiere", "suflare")),
-        ("forest_walk", ("pasi padure", "walking forest", "footsteps leaves", "leaves underfoot", "crunch leaves", "rustling underfoot", "mers padure", "fosnet pasi")),
-        ("crickets", ("greier", "cricket", "noapte linistita", "quiet night", "seara camp")),
-        ("river", ("rau", "river", "parau", "brook", "stream", "cascada", "waterfall")),
-        ("train", ("tren", "train", "railroad", "railway", "sine", "vagon")),
-        ("forest", ("padure", "forest", "frunze", "copac", "woods", "jungle", "livada")),
-        ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainarie")),
-        ("city", ("oras", "city", "trafic", "traffic", "strada", "street", "urban", "bulevard")),
-        ("countryside", ("tara", "sat", "countryside", "ferma", "cimp", "rural", "birds chirp", "livada")),
-        ("station", ("gara", "station", "peron", "aeroport", "airport", "terminal", "announcement", "anunt", "metrou", "autogara")),
-        ("heels_parquet", ("tocuri", "heels", "parchet", "parquet", "podea", "floor click", "toc pantof", "pantof cu toc", "lemn podea")),
-        ("snow_walk", ("pasi zapada", "walking snow", "snow crunch", "footsteps snow", "snow underfoot", "zapada pasi")),
-        ("snow", ("ninso", "zapad", "snow", "iarna linist", "fulgi")),
+        # Natură și vreme
+        ("storm", ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindina", "fulgere", "trăznete")),
+        ("blizzard", ("crivat", "viscol", "blizzard", "howling wind", "strong wind", "vant puternic", "vânt puternic", "rafale")),
+        ("rain_heavy", ("ploaie torențial", "ploaie abundent", "furtună ploaie", "showers heavy")),
+        ("rain", ("ploaie", "rain", "drizzle", "shower", "picaturi", "picături", "ploaie ușoar", "ploaie moderată")),
+        ("rain_window", ("ploaie geam", "ploaie pe geam", "picaturi geam", "rain on window", "ploaie pe acoperiș")),
+        ("thunder_distant", ("tunete îndepărtat", "tunet departe", "thunder distant")),
+        ("thunder_close", ("tunete apropiat", "tunet aproape", "tunete apropiate", "thunder close")),
+        ("snow", ("ninso", "zapad", "snow", "iarna linist", "fulgi", "ninsoare", "zăpadă")),
+        ("snow_walk", ("pasi zapada", "walking snow", "snow crunch", "footsteps snow", "snow underfoot", "zapada pasi", "pași zăpadă", "mers prin zăpadă")),
+        ("wind", ("vant", "wind", "breeze", "adiere", "suflare", "vânt", "adieri")),
+        ("wind_strong", ("vant puternic", "vânt puternic", "wind strong", "furtună vânt")),
+        
+        # Apă și natură
+        ("ocean", ("mare", "val", "ocean", "wave", "beach", "litoral", "coasta", "valuri", "plajă", "delfini", "dolphin")),
+        ("ocean_storm", ("mare agitat", "furtună mare", "ocean storm", "valuri mari", "valuri puternice")),
+        ("river", ("rau", "river", "parau", "brook", "stream", "cascada", "waterfall", "râu", "pârâu", "cascadă")),
+        ("fountain", ("fântân", "fountain", "artezian", "izvor", "spring", "apă curgând", "jet apă")),
+        ("lake", ("lac", "lake", "lebede", "swan", "stuf", "trestie", "pont", " pontoane")),
+        ("rainforest", ("pădure tropical", "jungle", "rainforest", "tropice")),
+        
+        # Oraș și transport
+        ("city", ("oras", "city", "trafic", "traffic", "strada", "street", "urban", "bulevard", "oraș", "intersecție", "aglomerat")),
+        ("city_heavy", ("trafic intens", "ambuteiaj", "mult", "many cars", "heavy traffic", "ore vârf", "claxoane")),
+        ("train", ("tren", "train", "railroad", "railway", "sine", "vagon", "tren în mers", "tren în tunel")),
+        ("station", ("gara", "station", "peron", "aeroport", "airport", "terminal", "announcement", "anunt", "metrou", "autogara", "gară", "stație")),
+        ("station_train_coming", ("tren sosire", "tren care vine", "tren intrare", "tren plecare", "train arriving")),
+        ("metro", ("metrou", "metro", "subway", "tramvai", "tram")),
+        ("bus", ("autobuz", "bus", "troleibuz", "trolleybus", "taxi")),
+        ("cars", ("mașin", "masin", "cars", "automobil", "motor", "vehicul")),
+        ("sirens", ("siren", "politi", "ambulanta", "pompieri", "sirenă", "mașină poliție")),
+        ("airport", ("avion", "airport", "decolare", "aterizare", "poartă", "îmbarcare")),
+        
+        # Animale
+        ("crickets", ("greier", "cricket", "noapte linistita", "quiet night", "seara camp", "noapte", "insecte")),
+        ("birds_morning", ("păsări dimineață", "birds morning", "cânt păsări", "păsări cântă", "birds chirping")),
+        ("birds", ("păsări", "birds", "pasari", "ciocănit", "pădure păsări")),
+        ("birds_lake", ("păsări lac", "rațe", "lebede", "broaște", "lake birds", "pescăruși")),
+        ("farm", ("fermă", "farm", "găini", "cocoș", "vacă", "oi", "capre", "animal", "grajd", "curte")),
+        ("dogs", ("câine", "caine", "dog", "câini", "dogs", "lătrat", "latrat")),
+        ("cats", ("pisică", "pisica", "cat", "pisici", "cats", "tors", "miorcăit")),
+        ("squirrels", ("veveri", "squirrel", "veveriță", "frunze", "nuci")),
+        
+        # Interioare
+        ("cafe", ("cafenea", "cafe", "coffee shop", "restaurant", "bistro", "bar", "ceainarie", "clopoțel", "vânzător")),
+        ("restaurant", ("restaurant", "restaurant aglomerat", "restaurant quiet")),
+        ("bakery", ("brutărie", "bakery", "cuptor", "pâine", "covrig", "croasant", "foieta")),
+        ("store", ("magazin", "store", "supermarket", "cumpărături", "cărucior", "produse")),
+        ("library", ("bibliotecă", "library", "liniște", "lectură", "书馆")),
+        ("office", ("birou", "office", "tastatură", "imprimantă", "telefon")),
+        ("hospital", ("spital", "hospital", "cabinet medical", "clinică")),
+        ("school", ("școală", "school", "universitate", "curs", "studenți")),
+        
+        # Activități
+        ("kitchen", ("bucătărie", "kitchen", "mixer", "blender", "tigaie", "fierbător", "espressor", "café")),
+        ("cooking", ("gătit", "gatit", "cooking", "prăjit", "fiert", "cuptor", " Tigaie", "capac", "scântei")),
+        ("typing", ("tastatură", "typing", "keyboard", "calculator", "computer", "click", "mouse")),
+        ("vacuum", ("aspirator", "vacuum", "curățenie", "mop", "găleată")),
+        ("washing", ("mașină spălat", "washing machine", "usucator", "spălat rufe")),
+        ("tv", ("televizor", "tv", "television", "telecomandă", "știri", "emisiune")),
+        ("radio", ("radio", "radio on", "muzică radio")),
+        
+        # Food sounds
+        ("chips", ("chips", "ronțăit", "chipsuri", "alune", "porumb", "popcorn", "covrig", "biscuiți")),
+        ("eating", ("mestec", "mancat", "eating", "înghițit", "gheață", "băut")),
+        ("drinking", ("băut", "drinking", "cafea", "apă", "suc", "halba", "pahar")),
+        ("coffee_machine", ("espreso", "espresso", "café", "aparat cafea", "cafea prepar")),
+        
+        # Birou și casă
+        ("room", ("cameră", "room", "casă", "house", "home", "interior", "liniștit")),
+        ("heartbeat", ("bătăi inimă", "heartbeat", "inimă", "emoții")),
+        ("clock", ("ceas", "clock", "ticăit", "tac", "timp")),
+        
+        # Scări și mișcare
+        ("stairs", ("scar", "stairs", "scări", "urcare", "coborâre", "lift", "ascensor")),
+        ("footsteps", ("pași", "footsteps", "pas", "mers", "alerg", "alergare")),
+        ("footsteps_wood", ("pași parchet", "footsteps wood", "parchet", "lemn", "lemn podea")),
+        ("footsteps_tile", ("pași gresie", "gresie", "tile floor", "beton")),
+        ("footsteps_outside", ("pași afară", "pietris", "asfalt", "iérbă", "outside")),
+        ("heels", ("tocuri", "heels", "pantof cu toc", "toc pantof", "tocuri pe parchet", "tocuri pe gresie")),
+        ("heely", ("adidași", "adidasi", "sneakers", "sport", "tenisi")),
+        
+        # Countryside
+        ("countryside", ("tara", "sat", "countryside", "ferma", "cimp", "rural", "birds chirp", "livada", "țară", "mediu rural")),
+        ("countryside_morning", ("dimineață țară", "morning countryside", "cocoș", "găini", "soare", "sat dimineață")),
+        ("countryside_night", ("noapte sat", "countryside night", "greieri", "linie", "tăcere")),
+        ("tractor", ("tractor", "tractor câmp", "tractor drum", "agricol", "combine")),
+        ("cart", ("căruță", "caruta", "căruț", "roți lemn", "cal căruță", "trăsură", "clopoței")),
+        ("chickens", ("pui", "găini", "chickens", "pio", "rațe", "boboci")),
+        ("frogs", ("broaște", "frogs", "bălți", "stuf")),
+        
+        # Shopping
+        ("shopping_mall", ("mall", "centru comercial", "scări rulante", "lift", "aglomerat")),
+        ("checkout", ("casă marcat", "checkout", "scanare", "bip", "plată", "card", "numerar", "bancnot")),
+        ("shopping_bags", ("sacose", "pungi", "shopping bags", "cumpărături", "mar", "去")),
+        
+        # Machiaj și baie
+        ("makeup", ("machiaj", "makeup", "pensul", "fard", "ruj", "pudră", "oglindă", "cremă")),
+        ("bathroom", ("baie", "bathroom", "robinet", "duș", "cadă", "prosoape", "sertar", "chiuvetă")),
+        ("water_faucet", ("apă curge", "robinet", "faucet", "duș", "apă rece", "apă caldă")),
+        
+        # Sezoane
+        ("spring", ("primăvară", "spring", "păsări", "natură", "flori")),
+        ("summer", ("vară", "summer", "greieri", "căldură", "zgomote vară")),
+        ("autumn", ("toamnă", "autumn", "frunze", "vânt", "ploaie", "采集")),
+        ("winter", ("iarnă", "winter", "zăpadă", "ger", "vânt rece", "crivăț")),
+        
+        # Diverse
+        ("forest", ("padure", "forest", "frunze", "copac", "woods", "jungle", "livada", "pădure")),
+        ("forest_walk", ("pasi padure", "walking forest", "footsteps leaves", "leaves underfoot", "crunch leaves", "rustling underfoot", "mers padure", "fosnet pasi", "frunze", "crengi")),
+        ("party", ("petrecere", "party", "muzică", "aplaud", "haha", "petrec", "festival")),
+        ("crowd", ("mulțime", "crowd", "oameni", "aglomerat", "galerie", "stadio")),
+        ("airplane", ("avion", "airplane", "decolare", "zbor", "motor", "cabină")),
+        ("helicopter", ("elicopter", "helicopter", "rotor", "zbor")),
+        
+        # Noapte
+        ("night", ("noapte", "night", "liniște", "tăcere", "stele")),
+        ("night_city", ("noapte oras", "night city", "neon", "stradă noapte", "trafic noapte")),
+        ("crickets_night", ("greieri noapte", "crickets night", "insecte noapte", "broaște")),
+        ("wolf", ("lup", "wolf", "noapte", "pădure noapte", "urlat")),
+        ("owl", ("bufniță", "owl", "noapte", "pădure noapte", "huhuz")),
     )
     preset = next(
         (name for name, words in presets if any(word in text for word in words)),

@@ -144,6 +144,25 @@ except Exception as _e:
     print(f"[db] Schema init error: {_e}", file=sys.stderr)
 
 
+# Seed biblioteca de sunete ambientale (doar dacă e goală)
+try:
+    _with_conn = _conn()
+    with _with_conn as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM ambient_library")
+            count = cur.fetchone()[0]
+        if count == 0:
+            print("[db] Seeding ambient library...")
+            try:
+                seed_ambient_library()
+                print("[db] Ambient library seeded successfully!")
+            except Exception as seed_err:
+                print(f"[db] Seed warning: {seed_err}")
+except Exception as _e2:
+    import sys
+    print(f"[db] Ambient seed error: {_e2}", file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Helpers JSONB
 # ---------------------------------------------------------------------------

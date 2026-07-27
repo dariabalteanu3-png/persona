@@ -933,25 +933,147 @@ def avatar_html(char, size=56, radius=14):
 # Bibliotecă locală de sunete de fundal. Valorile sunt preseturi pentru generatorul
 # WAV din voice.py; nu sunt prompturi și nu trimit nimic către un serviciu extern.
 AMBIENT_LIBRARY = {
+    # 🌧️ Natură și vreme
     "🌧️ Ploaie liniștită": "rain",
+    "🌧️🌧️ Ploaie moderată": "rain",
     "⛈️ Furtună cu tunete": "storm",
-    "🌊 Valuri la mare": "ocean",
-    "🌲 Pădure": "forest",
-    "🌲👣 Mers prin pădure": "forest_walk",
-    "🔥 Foc de tabără": "fire",
-    "☕ Cafenea": "cafe",
-    "🌬️ Vânt liniștit": "wind",
-    "🌀 Crivăț / Viscol": "blizzard",
-    "🦗 Noapte cu greieri": "crickets",
-    "🏙️ Oraș": "city",
+    "⛈️💨 Furtună puternică": "blizzard",
+    "🌧️🔔 Ploaie pe geam": "rain_window",
     "❄️ Ninsoare liniștită": "snow",
     "❄️👣 Pași prin zăpadă": "snow_walk",
-    "🕊️ Cameră liniștită": "room",
-    "🌅 Dimineață la țară": "countryside",
-    "🌊 Râu de munte": "river",
+    "🌬️ Vânt liniștit": "wind",
+    "🌬️💨 Vânt puternic": "wind_strong",
+    "🌬️🌀 Crivăț / Viscol": "blizzard",
+    "🌤️ Dimineață cu păsări": "birds_morning",
+    "🌙 Noapte cu greieri": "crickets",
+    "🌙🔔 Noapte liniștită": "crickets_night",
+    "🌌 Noapte în natură": "night",
+    "🐺 Pădure noaptea": "night",
+    
+    # 🌊 Apă
+    "🌊 Valuri la mare": "ocean",
+    "🌊💨 Mare agitată": "ocean_storm",
+    "🏖️ Plajă": "ocean",
+    "🏞️ Râu de munte": "river",
+    "⛲ Fântână arteziană": "fountain",
+    "🏞️ Izvor / Cascadă": "river",
+    "🦢🌊 Lac cu lebede": "lake",
+    "🌾 Stuf și trestie": "lake",
+    
+    # 🌲 Pădure
+    "🌲 Pădure": "forest",
+    "🌲👣 Mers prin pădure": "forest_walk",
+    "🌲🐿️ Pădure cu veverițe": "forest",
+    "🌴 Pădure tropicală": "rainforest",
+    "🍂 Toamnă în pădure": "autumn",
+    
+    # 🐄 Fermă și sat
+    "🌅 Dimineață la țară": "countryside_morning",
+    "🌾 Sat liniștit": "countryside",
+    "🌙 Noapte la țară": "countryside_night",
+    "🐔 Curte cu găini": "farm",
+    "🐄 Fermă cu vaci": "farm",
+    "🐎 Cai și căruțe": "cart",
+    "🚜 Tractor pe câmp": "tractor",
+    "🌿 Pajiște cu broaște": "frogs",
+    "🐦 Lac cu rațe": "birds_lake",
+    
+    # 🏙️ Oraș
+    "🏙️ Oraș liniștit": "city",
+    "🚗🚕 Trafic intens": "city_heavy",
+    "🚦 Intersecție aglomerată": "city_heavy",
+    "🚨 Sirene în trafic": "sirens",
+    "🌃 Noapte în oraș": "night_city",
+    "✈️ Aeroport": "airport",
+    
+    # 🚂 Transport
     "🚂 Tren": "train",
+    "🚂🔔 Tren în gară": "station_train_coming",
     "🚉 Gară": "station",
-    "👠 Tocuri pe parchet": "heels_parquet",
+    "🚇 Metrou": "metro",
+    "🚎 Tramvai": "metro",
+    "🚌 Autobuz": "bus",
+    "🚕 Taxi": "cars",
+    "🚗 Mașini care trec": "cars",
+    
+    # ☕ Cafele și restaurante
+    "☕ Cafenea": "cafe",
+    "🍞 Brutărie": "bakery",
+    "🍽️ Restaurant": "restaurant",
+    "🛒 Supermarket": "store",
+    
+    # 🛍️ Shopping
+    "🏬 Centru comercial": "shopping_mall",
+    "🛒 Cumpărături": "store",
+    "💳 Casă de marcat": "checkout",
+    "🛍️ Pungi de cumpărături": "shopping_bags",
+    
+    # 🏠 Casă
+    "🕊️ Cameră liniștită": "room",
+    "🍳 Bucătărie": "kitchen",
+    "☕ Preparare cafea": "coffee_machine",
+    "📺 Televizor": "tv",
+    "📻 Radio": "radio",
+    "⌨️ Tastatură și calculator": "typing",
+    "🧹 Aspirator": "vacuum",
+    "👔 Mașină de spălat": "washing",
+    "🚿 Baie": "bathroom",
+    "🚰 Robinet cu apă": "water_faucet",
+    "💄 Machiaj": "makeup",
+    
+    # 👠 Pași și mișcare
+    "👠 Tocuri pe parchet": "heels",
+    "👠 Tocuri pe gresie": "heels",
+    "👟 Adidași": "heely",
+    "👣 Pași pe parchet": "footsteps_wood",
+    "👣 Pași pe gresie": "footsteps_tile",
+    "👣 Pași afară": "footsteps_outside",
+    "👣 Alergare": "footsteps",
+    "🪜 Scări": "stairs",
+    "🛗 Lift": "stairs",
+    
+    # 🍿 Mâncare
+    "🍿 Ronțăit chipsuri": "chips",
+    "🥜 Alune": "chips",
+    "🍿🍿 Ronțăit": "eating",
+    "☕ Băut cafea": "drinking",
+    "🥤 Băut": "drinking",
+    "🍳 Gătit": "cooking",
+    "🍞🍞 Brutărie": "bakery",
+    
+    # 🏛️ Instituții
+    "📚 Bibliotecă": "library",
+    "🏢 Birou": "office",
+    "🏥 Spital": "hospital",
+    "🏫 Școală": "school",
+    "🏛️ Primărie": "office",
+    "🏦 Bancă": "office",
+    "💊 Farmacie": "store",
+    
+    # 🎉 Evenimente
+    "🎉 Petrecere": "party",
+    "👥 Mulțime": "crowd",
+    "🏟️ Stadion": "crowd",
+    
+    # 🔊 Diverse
+    "🔥 Foc de tabără": "fire",
+    "🕯️ Șemineu": "fire",
+    "❤️ Bătăi de inimă": "heartbeat",
+    "⏰ Ceas": "clock",
+    "🚁 Elicopter": "helicopter",
+    
+    # 🐾 Animale
+    "🐕 Lătrat de câini": "dogs",
+    "🐈 Tors de pisici": "cats",
+    "🐿️ Veverițe": "squirrels",
+    "🦗 Greieri": "crickets",
+    "🐦 Păsări": "birds",
+    
+    # Sezoane
+    "🌸 Primăvară": "spring",
+    "☀️ Vară": "summer",
+    "🍁 Toamnă": "autumn",
+    "❄️ Iarnă": "winter",
 }
 
 
@@ -3181,8 +3303,23 @@ def render_chat(char):
     for m in history:
         with st.chat_message(m["role"], avatar=char.get("avatar", "🎭") if m["role"] == "assistant" else "🧑"):
             if m["role"] == "user" and m.get("audio_b64"):
-                st.caption("🎤 Mesaj vocal")
-                st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                # Determină tipul audio
+                _media_kind = m.get("media_kind", "")
+                if _media_kind == "ambient":
+                    st.caption(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
+                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                elif _media_kind == "ambient_pure":
+                    st.caption(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
+                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                elif _media_kind == "audio_file":
+                    st.caption(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
+                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                elif _media_kind == "song":
+                    # Păstrează comportamentul existent pentru melodii
+                    pass
+                else:
+                    st.caption("🎤 Mesaj vocal")
+                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
             if m.get("media_kind") == "song" and m.get("song_b64"):
                 st.caption(f"🎵 {m.get('song_name', 'melodie')}")
                 st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
@@ -3190,6 +3327,23 @@ def render_chat(char):
                 st.image(base64.b64decode(m["image_b64"]), width=280)
             if m.get("media_kind") == "video" and m.get("video_b64"):
                 st.video(base64.b64decode(m["video_b64"]))
+            
+            # Autoplay pentru sunetele ambientale (mesaj nou)
+            if m["role"] == "user" and m.get("media_kind") in ("ambient", "ambient_pure"):
+                _amb_id = m.get("id", "")
+                _amb_autoplay_key = f"amb_autoplay_{_amb_id}"
+                if st.session_state.get(_amb_autoplay_key):
+                    _amb_vol = st.session_state.get("ambient_volume", 100) / 100.0
+                    _play_voice_ambient(
+                        [_amb_autoplay_key],
+                        None,
+                        _amb_id,
+                        voice_vol=1.0,
+                        amb_gain=_amb_vol if m.get("media_kind") == "ambient_pure" else _amb_vol * 0.3
+                    )
+                    # Șterge cheia după redare
+                    del st.session_state[_amb_autoplay_key]
+            
             st.markdown(m["content"])
             if m["role"] == "assistant" and (
                     m["content"].startswith("💌 O scrisoare pentru tine:")
@@ -3630,6 +3784,159 @@ def render_chat(char):
                        "ascultă-le oricând, una după alta.")
             _render_playlist(char, key_prefix="chat")
 
+    # ---- send an ambient sound to conversation ----
+    with st.expander("🔊 Trimite un sunet ambiental în conversație"):
+        st.caption(f"Alege un sunet ambiental și trimite-l lui {char['name']}. "
+                   "Sunetul va apărea în conversație și personajul îl va auzi.")
+        
+        # Organizare pe categorii
+        _amb_categories = {
+            "🌧️ Natură și vreme": ["🌧️ Ploaie liniștită", "🌧️🌧️ Ploaie moderată", "⛈️ Furtună cu tunete", 
+                                   "⛈️💨 Furtună puternică", "🌧️🔔 Ploaie pe geam", "❄️ Ninsoare liniștită",
+                                   "❄️👣 Pași prin zăpadă", "🌬️ Vânt liniștit", "🌬️💨 Vânt puternic",
+                                   "🌬️🌀 Crivăț / Viscol", "🌤️ Dimineață cu păsări", "🌙 Noapte cu greieri",
+                                   "🌙🔔 Noapte liniștită", "🌌 Noapte în natură", "🐺 Pădure noaptea"],
+            "🌊 Apă și mare": ["🌊 Valuri la mare", "🌊💨 Mare agitată", "🏖️ Plajă", "🏞️ Râu de munte",
+                               "⛲ Fântână arteziană", "🏞️ Izvor / Cascadă", "🦢🌊 Lac cu lebede", "🌾 Stuf și trestie"],
+            "🌲 Pădure și natură": ["🌲 Pădure", "🌲👣 Mers prin pădure", "🌲🐿️ Pădure cu veverițe",
+                                    "🌴 Pădure tropicală", "🍂 Toamnă în pădure"],
+            "🐄 Fermă și sat": ["🌅 Dimineață la țară", "🌾 Sat liniștit", "🌙 Noapte la țară",
+                               "🐔 Curte cu găini", "🐄 Fermă cu vaci", "🐎 Cai și căruțe",
+                               "🚜 Tractor pe câmp", "🌿 Pajiște cu broaște", "🐦 Lac cu rațe"],
+            "🏙️ Oraș": ["🏙️ Oraș liniștit", "🚗🚕 Trafic intens", "🚦 Intersecție aglomerată",
+                        "🚨 Sirene în trafic", "🌃 Noapte în oraș", "✈️ Aeroport"],
+            "🚂 Transport": ["🚂 Tren", "🚂🔔 Tren în gară", "🚉 Gară", "🚇 Metrou",
+                            "🚎 Tramvai", "🚌 Autobuz", "🚕 Taxi", "🚗 Mașini care trec"],
+            "☕ Cafele și restaurante": ["☕ Cafenea", "🍞 Brutărie", "🍽️ Restaurant", "🛒 Supermarket"],
+            "🏠 Casă": ["🕊️ Cameră liniștită", "🍳 Bucătărie", "☕ Preparare cafea", "📺 Televizor",
+                       "📻 Radio", "⌨️ Tastatură și calculator", "🧹 Aspirator", "👔 Mașină de spălat",
+                       "🚿 Baie", "🚰 Robinet cu apă", "💄 Machiaj"],
+            "👠 Pași și mișcare": ["👠 Tocuri pe parchet", "👠 Tocuri pe gresie", "👟 Adidași",
+                                  "👣 Pași pe parchet", "👣 Pași pe gresie", "👣 Pași afară",
+                                  "👣 Alergare", "🪜 Scări", "🛗 Lift"],
+            "🍿 Mâncare și băutură": ["🍿 Ronțăit chipsuri", "🥜 Alune", "🍿🍿 Ronțăit",
+                                     "☕ Băut cafea", "🥤 Băut", "🍳 Gătit", "🍞🍞 Brutărie"],
+            "🏛️ Instituții": ["📚 Bibliotecă", "🏢 Birou", "🏥 Spital", "🏫 Școală",
+                              "🏛️ Primărie", "🏦 Bancă", "💊 Farmacie"],
+            "🎉 Evenimente": ["🎉 Petrecere", "👥 Mulțime", "🏟️ Stadion"],
+            "🐾 Animale": ["🐕 Lătrat de câini", "🐈 Tors de pisici", "🐿️ Veverițe",
+                           "🦗 Greieri", "🐦 Păsări"],
+            "🔊 Diverse": ["🔥 Foc de tabără", "🕯️ Șemineu", "❤️ Bătăi de inimă", "⏰ Ceas", "🚁 Elicopter"],
+        }
+        
+        # Selector de categorie
+        _cat_labels = ["🎵 Toate sunetele"] + list(_amb_categories.keys())
+        _selected_cat = st.selectbox("Categorie", _cat_labels, key=f"amb_cat_{active_conv}")
+        
+        # Filtrează lista de sunete
+        if _selected_cat == "🎵 Toate sunetele":
+            _filtered_sounds = list(AMBIENT_LIBRARY.keys())
+        else:
+            _filtered_sounds = _amb_categories.get(_selected_cat, [])
+        
+        # Verifică că toate sunetele există în AMBIENT_LIBRARY
+        _filtered_sounds = [s for s in _filtered_sounds if s in AMBIENT_LIBRARY]
+        
+        if _filtered_sounds:
+            _amb_choice = st.selectbox("Alege un sunet", _filtered_sounds,
+                                       key=f"amb_sel_{active_conv}")
+            
+            # Previzualizare sunet
+            if st.button("▶️ Ascultă", key=f"amb_preview_{active_conv}",
+                        use_container_width=True):
+                _cache = st.session_state.setdefault("_amb_preview_cache", {})
+                _data = _cache.get(_amb_choice)
+                if _data is None:
+                    with st.spinner("Pregătesc sunetul..."):
+                        try:
+                            _data = voice.sound_effect(AMBIENT_LIBRARY[_amb_choice], duration=8.0)
+                            _cache[_amb_choice] = _data
+                        except Exception:  # noqa
+                            _data = None
+                if _data:
+                    st.audio(_data, format="audio/wav")
+            
+            # Trimite sunetul în conversație
+            if st.button("📤 Trimite sunetul în conversație", 
+                        key=f"amb_send_{active_conv}",
+                        use_container_width=True):
+                with st.spinner("Creez sunetul..."):
+                    try:
+                        _amb_data = voice.sound_effect(AMBIENT_LIBRARY[_amb_choice], duration=10.0)
+                        if _amb_data:
+                            _amb_b64 = base64.b64encode(_amb_data).decode()
+                            # Adaugă mesajul cu sunetul
+                            _sound_name = _amb_choice.replace(chr(0xFE0F), '').replace(chr(0x20E3), '')
+                            db.add_message(active_conv, "user",
+                                          f"🔊 *Am trimis sunet: {_sound_name}*",
+                                          extra={"media_kind": "ambient", "ambient_name": _sound_name,
+                                                "audio_b64": _amb_b64})
+                            st.success(f"✅ Sunet trimis în conversație!")
+                            st.session_state["notif_sound"] = True
+                            st.rerun()
+                        else:
+                            st.error("Nu am putut crea sunetul. Încearcă din nou.")
+                    except Exception as _e:
+                        st.error(f"Eroare: {_e}")
+        else:
+            st.info("Nu există sunete în această categorie.")
+        
+        # Opțiune: trimite ca sunet de fundal fără voce (mesaj doar cu ambient)
+        st.markdown("---")
+        st.caption("💡 Trimite doar sunetul, fără voce (pentru mesaje ambientale pure)")
+        
+        # Selector rapid pentru sunete pure
+        _pure_sounds = ["🌧️ Ploaie liniștită", "🌊 Valuri la mare", "🌲 Pădure", 
+                        "☕ Cafenea", "🦗 Greieri", "🍿 Ronțăit chipsuri"]
+        _pure_choice = st.selectbox("Sunet pur (fără voce)", _pure_sounds,
+                                    key=f"amb_pure_{active_conv}")
+        
+        if st.button("📤 Trimite doar sunet (fără voce)",
+                    key=f"amb_pure_send_{active_conv}",
+                    use_container_width=True):
+            with st.spinner("Creez sunetul pur..."):
+                try:
+                    _pure_data = voice.sound_effect(AMBIENT_LIBRARY[_pure_choice], duration=6.0)
+                    if _pure_data:
+                        _pure_b64 = base64.b64encode(_pure_data).decode()
+                        _pure_name = _pure_choice.replace(chr(0xFE0F), '').replace(chr(0x20E3), '')
+                        db.add_message(active_conv, "user",
+                                      f"🔇 *Sunet ambiental: {_pure_name}*",
+                                      extra={"media_kind": "ambient_pure", "ambient_name": _pure_name,
+                                            "audio_b64": _pure_b64})
+                        st.success(f"✅ Sunet pur trimis!")
+                        st.session_state["notif_sound"] = True
+                        st.rerun()
+                except Exception as _e:
+                    st.error(f"Eroare: {_e}")
+
+    # ---- upload a custom ambient sound from file ----
+    with st.expander("🎶 Încarcă un sunet propriu"):
+        st.caption("Încarcă un fișier audio (wav, mp3, ogg) și trimite-l în conversație.")
+        _custom_audio = st.file_uploader("Fișier audio",
+                                         type=["wav", "mp3", "ogg", "m4a"],
+                                         key=f"custom_audio_{active_conv}")
+        if _custom_audio:
+            _audio_data = _custom_audio.getvalue()
+            if _audio_data and len(_audio_data) <= 5_000_000:  # Max 5MB
+                if st.button("📤 Trimite fișierul audio",
+                            key=f"send_custom_audio_{active_conv}",
+                            use_container_width=True):
+                    try:
+                        _audio_b64 = base64.b64encode(_audio_data).decode()
+                        _fname = _custom_audio.name
+                        db.add_message(active_conv, "user",
+                                      f"🎵 *Am trimis audio: {_fname}*",
+                                      extra={"media_kind": "audio_file", "audio_name": _fname,
+                                            "audio_b64": _audio_b64})
+                        st.success(f"✅ Audio \"{_fname}\" trimis în conversație!")
+                        st.session_state["notif_sound"] = True
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"Eroare: {_e}")
+            elif _audio_data and len(_audio_data) > 5_000_000:
+                st.warning("Fișierul este prea mare (max 5MB).")
+
     # ---- send a photo or video (gallery) ----
     with st.expander("📷 Trimite o poză sau un videoclip"):
         st.caption(f"Trimite o poză și {char['name']} se uită și îți spune părerea. "
@@ -3793,6 +4100,19 @@ def render_chat(char):
         cur = titles.get(active_conv, "")
         if cur.startswith("Conversație"):
             db.rename_conversation(active_conv, prompt.strip()[:32])
+        
+        # Autoplay pentru sunetele ambientale trimise de utilizator
+        _last_msgs = db.get_conversation(active_conv)
+        if _last_msgs:
+            _last = _last_msgs[-1]
+            _last_kind = _last.get("media_kind", "")
+            if _last_kind in ("ambient", "ambient_pure") and _last.get("audio_b64"):
+                if st.session_state.get("auto_play"):
+                    try:
+                        _amb_audio = base64.b64decode(_last["audio_b64"])
+                        st.session_state[f"amb_autoplay_{_last['id']}"] = _amb_audio
+                    except Exception:  # noqa
+                        pass
         with st.chat_message("user", avatar="🧑"):
             if user_audio:
                 st.caption("🎤 Mesaj vocal")
