@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pornește aplicația Streamlit cu Python 3.11 (XTTS-v2)
+# Pornește aplicația Streamlit cu Python 3.11 (F5-TTS voice cloning)
 
 # Activează virtual environment cu Python 3.11
 if [ -d ".venv" ]; then

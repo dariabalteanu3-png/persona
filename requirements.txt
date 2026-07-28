@@ -11,13 +11,10 @@ openai
 requests
 numpy==1.26.4
 soundfile
-torch>=2.0.0
-torchaudio>=2.0.0
-huggingface-hub>=0.19.0
 gTTS
 pydub
-
-piper-tts
-TTS
-transformers==4.36.0
+# F5-TTS for voice cloning (PyTorch-based)
+f5-tts
+torch
+torchaudio
 pandas==2.1.4
