@@ -1,5 +1,7 @@
 streamlit==1.59.2
 psycopg2-binary
+pymongo
+dnspython
 mongomock
 python-dotenv
 bcrypt
@@ -9,37 +11,5 @@ gradio_client
 resend
 openai
 requests
-numpy==1.26.4
-soundfile
-gTTS
-pydub
-pandas==2.1.4
-
-# F5-TTS for voice cloning (PyTorch-based)
-f5-tts==1.1.22
-torch
-torchaudio
-
-# F5-TTS runtime dependencies
-safetensors
-huggingface-hub
-hydra-core
-cached_path
-torchdiffeq
-x_transformers
-einops
-vocos
-librosa
-transformers
-accelerate
-wandb
-torchcodec
-pypinyin
-tomli
-ema_pytorch
-datasets
-matplotlib
-omegaconf
-
-# Additional system-level dependencies (for sound processing)
-# ffmpeg is required for gTTS (pydub)
+numpy
+google-genai
