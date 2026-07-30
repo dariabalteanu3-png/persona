@@ -1285,7 +1285,22 @@ def maybe_ambient(char, msg_id, text):
     st.session_state[f"sfxdone_{msg_id}"] = True
     try:
         cue = ""
-        if hasattr(llm, "ambient_cue"):
+        chosen_name = ""
+        if hasattr(llm, "pick_ambient_sound"):
+            try:
+                _ctx = char.get("_time_ctx") or _time_context()
+                chosen_name = llm.pick_ambient_sound(
+                    char, text,
+                    list(AMBIENT_LIBRARY.keys()),
+                    part_of_day=_ctx.get("part_of_day", ""),
+                    season=_ctx.get("season", ""),
+                )
+            except Exception:  # noqa
+                chosen_name = ""
+        if chosen_name and chosen_name in AMBIENT_LIBRARY:
+            cue = AMBIENT_LIBRARY[chosen_name]
+            st.session_state[f"sfxname_{msg_id}"] = chosen_name
+        elif hasattr(llm, "ambient_cue"):
             try:
                 _ctx = char.get("_time_ctx") or _time_context()
                 cue = llm.ambient_cue(char, text,

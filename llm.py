@@ -722,6 +722,43 @@ def proactive_message(character, history, kind="text", tone=None):
     return get_reply(character, history, instr)
 
 
+def pick_ambient_sound(character, text, sound_names, part_of_day="", season=""):
+    """Let the character choose a sound directly from the library by name.
+    Returns the chosen sound name (a key from AMBIENT_LIBRARY) or '' if none fits."""
+    if not sound_names:
+        return ""
+    scenario = (character.get("scenario") or "").strip()
+    ctx_lines = ""
+    if part_of_day or season:
+        ctx_lines = (
+            f"\nMomentul zilei: {part_of_day or '?'}. "
+            f"Anotimpul: {season or '?'}.\n"
+        )
+    names_block = "\n".join(f"- {n}" for n in sound_names)
+    prompt = (
+        "Ești personajul din conversație. Pe baza replicii tale (ce faci, unde ești, "
+        "ce se întâmplă în scenă), alege UN SINGUR sunet ambiental din biblioteca de mai jos "
+        "care să se audă pe fundal. Alege sunetul care se potrivește CEL MAI BINE cu scena ta. "
+        f"{ctx_lines}"
+        f"Context/scenariu: {scenario or '(necunoscut)'}\n"
+        f"Replica ta: {text}\n\n"
+        f"Biblioteca de sunete disponibile:\n{names_block}\n\n"
+        "Răspunde cu EXACT numele sunetului ales (copiază-l exact, cu emoji cu tot), "
+        "dacă e clar ce sunet se potrivește. Dacă niciun sunet nu se potrivește, răspunde exact: NONE"
+    )
+    try:
+        r = _run_coro(_reply("Ești un personaj care alege sunetul ambiental potrivit scenei sale.", prompt, "ambpick")).strip()
+    except Exception:  # noqa
+        return ""
+    if not r or "NONE" in r.upper():
+        return ""
+    r = r.strip().strip('"').strip("`").strip()
+    for name in sound_names:
+        if name == r or name in r:
+            return name
+    return ""
+
+
 def sound_cue(text):
     """Return a short English sound-effect description for the reply, or '' if none."""
     prompt = (
