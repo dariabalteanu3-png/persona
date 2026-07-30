@@ -415,7 +415,7 @@ def update_message(message_id, content=None, audio_b64=None):
 # Voice Library - Clonare vocală (MongoDB)
 # ==============================================================================
 
-voices_collection = db["voice_library"]
+voices_collection = _db["voice_library"]
 
 
 def create_voice(owner_id, name, sample_b64=None, sample_name=None,
@@ -493,7 +493,7 @@ def search_voices(query):
 # Ambient Sound Library - Sunete ambientale (MongoDB)
 # ==============================================================================
 
-ambients_collection = db["ambient_library"]
+ambients_collection = _db["ambient_library"]
 
 
 def create_ambient(owner_id, name, category=None, description=None,
