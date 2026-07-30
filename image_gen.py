@@ -59,6 +59,25 @@ def _pollinations_image(prompt):
     return base64.b64encode(r.content).decode()
 
 
+def generate_avatar(name, personality, scenario):
+    """Generate a character avatar portrait. Returns base64 or None."""
+    prompt = (
+        f"A portrait of a character named \"{name}\" "
+        f"(personality: {personality or 'warm and friendly'}; "
+        f"setting: {scenario or 'a warm atmospheric vibe'}). "
+        "Expressive, detailed digital-art portrait, centered composition, "
+        "warm lighting, no text, no watermark."
+    )
+    if USE_GEMINI:
+        return _gemini_image(prompt)
+    if USE_GROQ:
+        return _pollinations_image(prompt)
+    images = asyncio.run(_gen(prompt))
+    if images:
+        return images[0]["data"]
+    return None
+
+
 def generate_playlist_cover(name, personality, scenario):
     """Generate a small stylized playlist/album cover in the character's style. base64 or None."""
     prompt = (
