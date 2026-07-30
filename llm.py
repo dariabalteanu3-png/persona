@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 from provider import (
     USE_GEMINI,
     USE_GROQ,
+    HAS_GEMINI,
+    HAS_GROQ,
     GEMINI_TEXT_MODEL,
     GROQ_TEXT_MODEL,
     gemini_client,
@@ -74,45 +76,8 @@ def _groq_messages(system, text):
     ]
 
 
-def _pollinations_text(system, text):
-    """Keyless free fallback (Pollinations) so chat keeps working if Groq fails.
-    Încearcă mai multe modele/endpointuri, ca să reziste când unul e temporar căzut (502)."""
-    import requests
-    msgs = _groq_messages(system, text)
-    # Timeout scurt per cerere (25s) ca să nu aștepte utilizatorul la nesfârșit;
-    # doar 3 modele, nu 6 — eșecul e detectat rapid și se încearcă alternativa.
-    models = ["openai", "openai-large", "mistral"]
-    last = None
-    for attempt in range(3):
-        model = models[attempt % len(models)]
-        try:
-            r = requests.post("https://text.pollinations.ai/openai",
-                              json={"model": model, "messages": msgs, "private": True}, timeout=25)
-            if r.status_code == 200:
-                c = ""
-                try:
-                    c = (r.json()["choices"][0]["message"]["content"] or "").strip()
-                except Exception:  # noqa
-                    body = (r.text or "").strip()
-                    if body and not body.lstrip().startswith("<"):
-                        c = body
-                if c:
-                    return c
-            last = f"openai/{model} HTTP {r.status_code}"
-        except Exception as e:  # noqa
-            last = type(e).__name__
-        time.sleep(0.5)
-    # ultimă încercare: endpoint-ul simplu (text brut)
-    try:
-        r = requests.post("https://text.pollinations.ai/",
-                          json={"model": "openai", "messages": msgs}, timeout=25)
-        body = (r.text or "").strip()
-        if r.status_code == 200 and body and not body.lstrip().startswith("<"):
-            return body
-        last = f"base HTTP {r.status_code}"
-    except Exception as e:  # noqa
-        last = type(e).__name__
-    raise RuntimeError(f"pollinations failed: {last}")
+# Pollinations text API was deprecated (returns 402 Payment Required).
+# Removed; replaced by cross-provider fallback (Groq <-> Gemini).
 
 
 def _is_rate_limit(e):
@@ -159,14 +124,39 @@ def _emergent_text(system, text):
 
 
 def _reliable_fallback(system, text):
-    """Când providerul principal (Groq) eșuează: întâi rezerva FIABILĂ (Emergent, dacă e configurată),
-    apoi rezerva gratuită keyless (Pollinations). Așa chatul nu mai dă „probleme tehnice"."""
+    """Când providerul principal eșuează: încearcă celălalt provider configurat,
+    apoi rezerva Emergent (dacă e configurată). Așa chatul nu mai dă „probleme tehnice"."""
+    # Dacă Groq e principal și a picat -> încearcă Gemini (dacă e configurat)
+    if HAS_GEMINI and not USE_GEMINI:
+        try:
+            return _gemini_text(system, text)
+        except Exception:  # noqa
+            _log.exception("gemini fallback failed")
+    # Dacă Gemini e principal și a picat -> încearcă Groq (dacă e configurat)
+    if HAS_GROQ and not USE_GROQ:
+        try:
+            return _groq_text_simple(system, text)
+        except Exception:  # noqa
+            _log.exception("groq fallback failed")
+    # Ultima rezervă: Emergent
     if _emergent_key():
         try:
             return _emergent_text(system, text)
         except Exception:  # noqa
             _log.exception("emergent fallback failed")
-    return _pollinations_text(system, text)
+    raise RuntimeError("toți providerii LLM au eșuat")
+
+
+def _groq_text_simple(system, text):
+    """Direct Groq call without fallback (used when Groq is the fallback provider)."""
+    resp = groq_client().chat.completions.create(
+        model=GROQ_TEXT_MODEL,
+        messages=_groq_messages(system, text),
+    )
+    content = (resp.choices[0].message.content or "").strip()
+    if not content:
+        raise RuntimeError("empty groq response")
+    return content
 
 
 def _groq_text(system, text):
@@ -329,18 +319,18 @@ async def _reply(system, text, sid, smart=False):
         try:
             return _emergent_text(system, text)
         except Exception:  # noqa
-            _log.exception("emergent (smart) primary failed -> Groq")
+            _log.exception("emergent (smart) primary failed -> fallback")
     if USE_GROQ:
         return _groq_text(system, text)
     if USE_GEMINI:
-        return _gemini_text(system, text)
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    chat = LlmChat(
-        api_key=KEY,
-        session_id=sid,
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-6")
-    return await chat.send_message(UserMessage(text=text))
+        try:
+            return _gemini_text(system, text)
+        except Exception:  # noqa
+            _log.exception("gemini primary failed -> fallback")
+            return _reliable_fallback(system, text)
+    if _emergent_key():
+        return _emergent_text(system, text)
+    raise RuntimeError("niciun provider LLM configurat — adaugă GROQ_API_KEY sau GEMINI_API_KEY în secrets")
 
 
 def _run_reply(system, text, sid, tries=2, smart=False):

@@ -7,7 +7,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from provider import USE_GEMINI, USE_GROQ, GEMINI_IMAGE_MODEL, gemini_client
+from provider import USE_GEMINI, USE_GROQ, HAS_GEMINI, GEMINI_IMAGE_MODEL, gemini_client
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -68,10 +68,8 @@ def generate_avatar(name, personality, scenario):
         "Expressive, detailed digital-art portrait, centered composition, "
         "warm lighting, no text, no watermark."
     )
-    if USE_GEMINI:
+    if HAS_GEMINI:
         return _gemini_image(prompt)
-    if USE_GROQ:
-        return _pollinations_image(prompt)
     images = asyncio.run(_gen(prompt))
     if images:
         return images[0]["data"]
@@ -88,10 +86,8 @@ def generate_playlist_cover(name, personality, scenario):
         "the character's vibe, painterly digital-art style, centered composition. "
         "No text, no words, no letters, no watermark, no border."
     )
-    if USE_GEMINI:
+    if HAS_GEMINI:
         return _gemini_image(prompt)
-    if USE_GROQ:
-        return _pollinations_image(prompt)
     images = asyncio.run(_gen(prompt))
     if images:
         return images[0]["data"]
