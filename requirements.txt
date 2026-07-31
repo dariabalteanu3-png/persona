@@ -1,0 +1,15 @@
+streamlit==1.59.2
+psycopg2-binary
+pymongo
+dnspython
+mongomock
+python-dotenv
+bcrypt
+Pillow
+ddgs
+gradio_client
+resend
+openai
+requests
+numpy
+google-genai

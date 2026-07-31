@@ -1,23 +1,32 @@
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 .env
+__pycache__/
+*.pyc
+/tmp/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Modele XTTS-v2 (descarcate automat)
+xtts_v2_romanian_model/
+models/
+checkpoints/
+
+# Cache HuggingFace
+.cache/
+.huggingface/
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
