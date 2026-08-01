@@ -808,11 +808,7 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Forțează direcția textului stânga→dreapta și încearcă să sincronizeze
-    autofill-ul browserului cu Streamlit. Folosim st.components.v1.html pentru
-    că st.markdown cu unsafe_allow_html strip-ează tag-urile <script>."""
-    import streamlit.components.v1 as components
-    # CSS-ul merge prin st.markdown (nu are script)
+    """Forțează direcția textului stânga→dreapta pentru toate câmpurile."""
     st.markdown("""
         <style>
         input, textarea {
@@ -822,36 +818,6 @@ def _fix_autofill_js():
         }
         </style>
     """, unsafe_allow_html=True)
-    # JavaScript-ul merge doar prin components.html (iframe separat)
-    components.html("""
-        <script>
-        (function() {
-            function triggerInput(el) {
-                if (!el) return;
-                try {
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                    el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
-                } catch(e) {}
-            }
-            function checkAutofill() {
-                var inputs = window.parent.document.querySelectorAll(
-                    'input[type="password"], input[type="text"]');
-                inputs.forEach(function(el) {
-                    if (el.value && el.value.length > 0) {
-                        triggerInput(el);
-                    }
-                });
-            }
-            var attempts = 0;
-            var interval = setInterval(function() {
-                checkAutofill();
-                attempts++;
-                if (attempts > 15) clearInterval(interval);
-            }, 200);
-        })();
-        </script>
-    """, height=0, width=0)
 
 
 def _render_login_register():
