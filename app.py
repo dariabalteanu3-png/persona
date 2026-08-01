@@ -808,60 +808,50 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Setează atributele pentru câmpurile de login/parolă folosind CSS custom.
-    Această versiune este compatibilă cu toate versiunile de Streamlit."""
-    # CSS pentru direcție text stânga→dreapta și autocomplete
+    """Forțează direcția textului stânga→dreapta și încearcă să sincronizeze
+    autofill-ul browserului cu Streamlit. Folosim st.components.v1.html pentru
+    că st.markdown cu unsafe_allow_html strip-ează tag-urile <script>."""
+    import streamlit.components.v1 as components
+    # CSS-ul merge prin st.markdown (nu are script)
     st.markdown("""
         <style>
-        /* Forțează direcția textului de la stânga la dreapta pentru toate inputurile */
         input, textarea {
             direction: ltr !important;
             text-align: left !important;
             unicode-bidi: plaintext !important;
         }
         </style>
+    """, unsafe_allow_html=True)
+    # JavaScript-ul merge doar prin components.html (iframe separat)
+    components.html("""
         <script>
-        // Detectează autofill-ul browserului și forțează Streamlit să preia valoarea.
-        // Streamlit nu detectează întotdeauna când password manager-ul umple un câmp,
-        // ceea ce face ca variabila Python să rămână goală ("") și validarea să eșueze.
         (function() {
             function triggerInput(el) {
                 if (!el) return;
-                // Simulează evenimente pe care Streamlit le ascultă
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-                el.dispatchEvent(new Event('change', {bubbles: true}));
-                // Para Streamlit >= 1.27 ascultă keyup
-                el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+                try {
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                    el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+                } catch(e) {}
             }
             function checkAutofill() {
-                document.querySelectorAll('input[type="password"], input[type="text"]').forEach(function(el) {
-                    // Dacă câmpul are o valoare dar Streamlit nu a procesat-o încă
+                var inputs = window.parent.document.querySelectorAll(
+                    'input[type="password"], input[type="text"]');
+                inputs.forEach(function(el) {
                     if (el.value && el.value.length > 0) {
-                        // Verifică dacă e autofill (background diferit în Chrome)
-                        var bg = window.getComputedStyle(el).backgroundColor;
                         triggerInput(el);
                     }
                 });
             }
-            // Verifică la intervale scurte timp de 3 secunde (covers delayed autofill)
             var attempts = 0;
             var interval = setInterval(function() {
                 checkAutofill();
                 attempts++;
                 if (attempts > 15) clearInterval(interval);
             }, 200);
-            // Verifică și la focus/paste
-            document.addEventListener('focusin', function(e) {
-                if (e.target && e.target.tagName === 'INPUT') {
-                    setTimeout(function() { triggerInput(e.target); }, 50);
-                }
-            }, true);
-            document.addEventListener('paste', function(e) {
-                setTimeout(function() { triggerInput(e.target); }, 50);
-            }, true);
         })();
         </script>
-    """, unsafe_allow_html=True)
+    """, height=0, width=0)
 
 
 def _render_login_register():
