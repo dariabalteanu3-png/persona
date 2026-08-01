@@ -820,6 +820,47 @@ def _fix_autofill_js():
             unicode-bidi: plaintext !important;
         }
         </style>
+        <script>
+        // Detectează autofill-ul browserului și forțează Streamlit să preia valoarea.
+        // Streamlit nu detectează întotdeauna când password manager-ul umple un câmp,
+        // ceea ce face ca variabila Python să rămână goală ("") și validarea să eșueze.
+        (function() {
+            function triggerInput(el) {
+                if (!el) return;
+                // Simulează evenimente pe care Streamlit le ascultă
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                // Para Streamlit >= 1.27 ascultă keyup
+                el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+            }
+            function checkAutofill() {
+                document.querySelectorAll('input[type="password"], input[type="text"]').forEach(function(el) {
+                    // Dacă câmpul are o valoare dar Streamlit nu a procesat-o încă
+                    if (el.value && el.value.length > 0) {
+                        // Verifică dacă e autofill (background diferit în Chrome)
+                        var bg = window.getComputedStyle(el).backgroundColor;
+                        triggerInput(el);
+                    }
+                });
+            }
+            // Verifică la intervale scurte timp de 3 secunde (covers delayed autofill)
+            var attempts = 0;
+            var interval = setInterval(function() {
+                checkAutofill();
+                attempts++;
+                if (attempts > 15) clearInterval(interval);
+            }, 200);
+            // Verifică și la focus/paste
+            document.addEventListener('focusin', function(e) {
+                if (e.target && e.target.tagName === 'INPUT') {
+                    setTimeout(function() { triggerInput(e.target); }, 50);
+                }
+            }, true);
+            document.addEventListener('paste', function(e) {
+                setTimeout(function() { triggerInput(e.target); }, 50);
+            }, true);
+        })();
+        </script>
     """, unsafe_allow_html=True)
 
 
@@ -887,12 +928,15 @@ def _render_login_register():
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
-                try:
-                    uname = auth.register(rge, rgp, question=rq, answer=ra)
-                    _login_user(auth.public_by_email(uname))
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
+                if not rgp:
+                    st.error("Câmpul parolă este gol. Dacă browserul a completat automat parola, șterge-o și tasteaz-o din nou manual.")
+                else:
+                    try:
+                        uname = auth.register(rge, rgp, question=rq, answer=ra)
+                        _login_user(auth.public_by_email(uname))
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
         st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
         _fix_autofill_js()
 
