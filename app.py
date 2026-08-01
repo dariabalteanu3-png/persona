@@ -4914,6 +4914,7 @@ def render_chat(char):
         prompt = st.session_state.pop("pending_prompt")
 
     if prompt:
+     try:
         # persistă IMEDIAT mesajul utilizatorului (înainte de apelul LLM) ca să NU se piardă
         # la o deconectare / eroare temporară; astfel istoricul crește sigur.
         db.add_message(active_conv, "user", prompt, audio_b64=user_audio)
@@ -4970,9 +4971,6 @@ def render_chat(char):
             reply = " ".join(parts)
 
             # ── AMBIANȚĂ CA PRIM MESAJ ─────────────────────────────────────────
-            # Generăm rapid ambianța din cuvintele-cheie din răspuns (fără LLM),
-            # o afișăm ca un mesaj separat care rulează în buclă ÎNAINTE de text,
-            # și o stocăm la nivel de conversație ca să persiste.
             _scene_amb = None
             if st.session_state.get("ambient_fx"):
                 try:
@@ -4988,15 +4986,18 @@ def render_chat(char):
                 _sb64 = base64.b64encode(_scene_amb).decode()
                 with st.chat_message("assistant", avatar="🎵"):
                     st.caption("🎵 Ambianță scenă")
-                    st.html(
-                        f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
-                        f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
-                        f'<script>(function(){{'
-                        f'var a=document.getElementById("{_suid}");'
-                        f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
-                        f'}})();</script>',
-                        height=0,
-                    )
+                    try:
+                        st.html(
+                            f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
+                            f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
+                            f'<script>(function(){{'
+                            f'var a=document.getElementById("{_suid}");'
+                            f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
+                            f'}})();</script>',
+                            height=1,
+                        )
+                    except Exception:
+                        pass
                     st.audio(_scene_amb, format=None)
 
             # ── MESAJELE TEXT (una câte una, cu pauze naturale) ────────────────
@@ -5015,10 +5016,8 @@ def render_chat(char):
             haptic(25)
             msgs = [db.add_message(active_conv, "assistant", p) for p in parts]
             st.session_state["notif_sound"] = True
-            # Stocăm ambianța pe primul mesaj (pentru redarea manuală „Ascultă")
             if _scene_amb:
                 st.session_state[f"sfx_{msgs[0]['id']}"] = _scene_amb
-            # voce pentru fiecare mesaj — ambianța rulează deja în buclă din mesajul 🎵
             did_voice = False
             _force_voice = st.session_state.pop("force_voice_reply", False)
             if (st.session_state.get("auto_play") or user_audio or _force_voice) and char.get("voice_id"):
@@ -5030,20 +5029,23 @@ def render_chat(char):
                             )
                         except Exception:  # noqa
                             pass
-                # Vocea se redă FĂRĂ ambient suplimentar (ambianța deja rulează în buclă)
                 st.session_state["autoplay_burst"] = {
                     "ids": [_m["id"] for _m in msgs],
                     "uid": "burst_" + msgs[-1]["id"][:8],
                 }
                 did_voice = True
-            # dacă nu redăm voce, ambientul a pornit deja din mesajul 🎵
             if not did_voice and st.session_state.get(f"sfx_{msgs[0]['id']}"):
                 st.session_state["ambient_play_mid"] = msgs[0]["id"]
-            # refresh long-term memory in the background (non-blocking)
             full = db.get_messages(active_conv)
             if len(full) % 6 == 0:
                 queue_memory_update(char, full)
             st.rerun()
+     except Exception as _chat_err:
+        import traceback as _tb
+        _log.exception("chat send crashed")
+        st.error(f"Nu am putut trimite mesajul: {_chat_err}")
+        with st.expander("Detalii eroare"):
+            st.code(_tb.format_exc())
 
 
 
