@@ -620,7 +620,7 @@ _PREF_KEYS = [
     "web_search", "chat_brain", "theme_light", "notif_volume", "sound_theme",
     "manual_tz", "notify_on", "absence_on", "absence_min", "birthday", "holidays_on",
     "react_voice_on", "call_volume", "fx_volume", "ui_volume", "sound_mode",
-    "recent_emojis",
+    "recent_emojis", "hf_token",
 ]
 
 
@@ -641,6 +641,11 @@ def _restore_prefs():
         v = prefs.get(k)
         if v is not None:
             st.session_state[k] = v
+    _hf = st.session_state.get("hf_token")
+    if _hf:
+        os.environ["HF_TOKEN"] = _hf
+        voice._HF_TOKEN = _hf
+        voice._client = None
 
 
 def _save_prefs(uid):
@@ -808,9 +813,12 @@ def _render_reset():
 
 
 def _fix_autofill_js():
-    """Forțează direcția textului stânga→dreapta pentru toate câmpurile."""
+    """Setează atributele pentru câmpurile de login/parolă folosind CSS custom.
+    Această versiune este compatibilă cu toate versiunile de Streamlit."""
+    # CSS pentru direcție text stânga→dreapta și autocomplete
     st.markdown("""
         <style>
+        /* Forțează direcția textului de la stânga la dreapta pentru toate inputurile */
         input, textarea {
             direction: ltr !important;
             text-align: left !important;
@@ -884,15 +892,12 @@ def _render_login_register():
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
-                if not rgp:
-                    st.error("Câmpul parolă este gol. Dacă browserul a completat automat parola, șterge-o și tasteaz-o din nou manual.")
-                else:
-                    try:
-                        uname = auth.register(rge, rgp, question=rq, answer=ra)
-                        _login_user(auth.public_by_email(uname))
-                        st.rerun()
-                    except ValueError as e:
-                        st.error(str(e))
+                try:
+                    uname = auth.register(rge, rgp, question=rq, answer=ra)
+                    _login_user(auth.public_by_email(uname))
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
         st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
         _fix_autofill_js()
 
@@ -933,6 +938,7 @@ def avatar_html(char, size=56, radius=14):
 # Bibliotecă locală de sunete de fundal. Valorile sunt preseturi pentru generatorul
 # WAV din voice.py; nu sunt prompturi și nu trimit nimic către un serviciu extern.
 AMBIENT_LIBRARY = {
+    # 🌧️ Natură și vreme
     "🌧️ Ploaie liniștită": "rain",
     "🌧️🌧️ Ploaie moderată": "rain",
     "⛈️ Furtună cu tunete": "storm",
@@ -948,6 +954,8 @@ AMBIENT_LIBRARY = {
     "🌙🔔 Noapte liniștită": "crickets_night",
     "🌌 Noapte în natură": "night",
     "🐺 Pădure noaptea": "night",
+    
+    # 🌊 Apă
     "🌊 Valuri la mare": "ocean",
     "🌊💨 Mare agitată": "ocean_storm",
     "🏖️ Plajă": "ocean",
@@ -956,11 +964,15 @@ AMBIENT_LIBRARY = {
     "🏞️ Izvor / Cascadă": "river",
     "🦢🌊 Lac cu lebede": "lake",
     "🌾 Stuf și trestie": "lake",
+    
+    # 🌲 Pădure
     "🌲 Pădure": "forest",
     "🌲👣 Mers prin pădure": "forest_walk",
     "🌲🐿️ Pădure cu veverițe": "forest",
     "🌴 Pădure tropicală": "rainforest",
     "🍂 Toamnă în pădure": "autumn",
+    
+    # 🐄 Fermă și sat
     "🌅 Dimineață la țară": "countryside_morning",
     "🌾 Sat liniștit": "countryside",
     "🌙 Noapte la țară": "countryside_night",
@@ -970,12 +982,16 @@ AMBIENT_LIBRARY = {
     "🚜 Tractor pe câmp": "tractor",
     "🌿 Pajiște cu broaște": "frogs",
     "🐦 Lac cu rațe": "birds_lake",
+    
+    # 🏙️ Oraș
     "🏙️ Oraș liniștit": "city",
     "🚗🚕 Trafic intens": "city_heavy",
     "🚦 Intersecție aglomerată": "city_heavy",
     "🚨 Sirene în trafic": "sirens",
     "🌃 Noapte în oraș": "night_city",
     "✈️ Aeroport": "airport",
+    
+    # 🚂 Transport
     "🚂 Tren": "train",
     "🚂🔔 Tren în gară": "station_train_coming",
     "🚉 Gară": "station",
@@ -984,14 +1000,20 @@ AMBIENT_LIBRARY = {
     "🚌 Autobuz": "bus",
     "🚕 Taxi": "cars",
     "🚗 Mașini care trec": "cars",
+    
+    # ☕ Cafele și restaurante
     "☕ Cafenea": "cafe",
     "🍞 Brutărie": "bakery",
     "🍽️ Restaurant": "restaurant",
     "🛒 Supermarket": "store",
+    
+    # 🛍️ Shopping
     "🏬 Centru comercial": "shopping_mall",
     "🛒 Cumpărături": "store",
     "💳 Casă de marcat": "checkout",
     "🛍️ Pungi de cumpărături": "shopping_bags",
+    
+    # 🏠 Casă
     "🕊️ Cameră liniștită": "room",
     "🍳 Bucătărie": "kitchen",
     "☕ Preparare cafea": "coffee_machine",
@@ -1003,6 +1025,8 @@ AMBIENT_LIBRARY = {
     "🚿 Baie": "bathroom",
     "🚰 Robinet cu apă": "water_faucet",
     "💄 Machiaj": "makeup",
+    
+    # 👠 Pași și mișcare
     "👠 Tocuri pe parchet": "heels",
     "👠 Tocuri pe gresie": "heels",
     "👟 Adidași": "heely",
@@ -1012,6 +1036,8 @@ AMBIENT_LIBRARY = {
     "👣 Alergare": "footsteps",
     "🪜 Scări": "stairs",
     "🛗 Lift": "stairs",
+    
+    # 🍿 Mâncare
     "🍿 Ronțăit chipsuri": "chips",
     "🥜 Alune": "chips",
     "🍿🍿 Ronțăit": "eating",
@@ -1019,6 +1045,8 @@ AMBIENT_LIBRARY = {
     "🥤 Băut": "drinking",
     "🍳 Gătit": "cooking",
     "🍞🍞 Brutărie": "bakery",
+    
+    # 🏛️ Instituții
     "📚 Bibliotecă": "library",
     "🏢 Birou": "office",
     "🏥 Spital": "hospital",
@@ -1026,56 +1054,80 @@ AMBIENT_LIBRARY = {
     "🏛️ Primărie": "office",
     "🏦 Bancă": "office",
     "💊 Farmacie": "store",
+    
+    # 🎉 Evenimente
     "🎉 Petrecere": "party",
     "👥 Mulțime": "crowd",
     "🏟️ Stadion": "crowd",
+    
+    # 🔊 Diverse
     "🔥 Foc de tabără": "fire",
     "🕯️ Șemineu": "fire",
     "❤️ Bătăi de inimă": "heartbeat",
     "⏰ Ceas": "clock",
     "🚁 Elicopter": "helicopter",
+    
+    # 🐾 Animale
     "🐕 Lătrat de câini": "dogs",
     "🐈 Tors de pisici": "cats",
     "🐿️ Veverițe": "squirrels",
     "🦗 Greieri": "crickets",
     "🐦 Păsări": "birds",
+    
+    # Sezoane
     "🌸 Primăvară": "spring",
     "☀️ Vară": "summer",
     "🍁 Toamnă": "autumn",
     "❄️ Iarnă": "winter",
+
+    # 🌟 Spațiu cosmic
     "🚀 Navă spațială": "helicopter",
     "🌌 Fundal cosmic": "wind_strong",
     "👽 Navă extraterestră": "helicopter",
     "🛸 Zgomot UFO": "helicopter",
+
+    # 🎮 Jocuri și gaming
     "🎮 Sală de jocuri": "arcade",
     "🕹️ Jocuri retro": "arcade",
     "🎲 Zaruri": "dice",
     "🃏 Cărți de joc": "typing",
+
+    # 💼 Servicii
     "🔧 Mecanic auto": "tractor",
     "🔩 Fabrică": "factory",
     "⚙️ Uzina": "factory",
     "🔨 Construcții": "construction",
     "🚧 Șantier": "construction",
+
+    # 🌺 Grădină și florărie
     "🌹 Grădină cu flori": "birds_morning",
     "🐝 Albine la flori": "bees",
     "🦋 Fluturi": "birds",
     "🌻 Câmp de floarea soarelui": "wind",
     "🌷 Livadă": "forest",
+
+    # 🎵 Muzică și arte
     "🎸 Concert rock": "party",
     "🎻 Orchestră": "party",
     "🥁 Studio de înregistrări": "typing",
     "🎤 Karaoke": "party",
     "🎺 Fanfară": "party",
     "🎷 Jazz club": "cafe",
+
+    # ⛪ Biserici și ceremonii
     "⛪ Biserică": "library",
     "🔔 Clopote de biserică": "clock",
     "💒 Nuntă": "party",
     "🕯️ Parastas": "library",
+
+    # 🎓 Educație
     "📖 Sală de curs": "school",
     "🔬 Laborator": "typing",
     "💻 Programare": "typing",
     "🎓 Promoție": "crowd",
     "📝 Examen": "library",
+
+    # 🏖️ Litoral
     "🏝️ Insulă tropicală": "ocean",
     "🛥️ Barcă cu motor": "boat",
     "⛵ Velier": "wind",
@@ -1083,11 +1135,15 @@ AMBIENT_LIBRARY = {
     "🦈 Valuri cu rechini": "ocean_storm",
     "🏊 Înot": "water_faucet",
     "🤽 Waterpolo": "pool",
+
+    # ⛷️ Sporturi de iarnă
     "⛷️ Schi": "snow_walk",
     "🏂 Snowboard": "snow_walk",
     "🛷 Sanie": "snow_walk",
     "⛸️ Patinaj": "ice",
     "🏔️ Drumeție în munți": "forest_walk",
+
+    # ⚽ Sporturi
     "⚽ Meci de fotbal": "crowd",
     "🏀 Meci de baschet": "crowd",
     "🎾 Tenis": "crowd",
@@ -1097,33 +1153,47 @@ AMBIENT_LIBRARY = {
     "🏋️ Sală de sport": "gym",
     "🚴 Ciclism": "wind",
     "🏃 Atletism": "footsteps",
+
+    # 🎭 Teatru și cinema
     "🎭 Teatru": "crowd",
     "🎬 Film": "tv",
     "🍿 Cinematic": "tv",
     "🎪 Circ": "crowd",
     "🎨 Vernisaj": "crowd",
+
+    # 🌊 Nave și apă
     "🚢 Vapor": "boat",
     "🚤 Barca de pescuit": "river",
     "⚓ Port": "harbor",
     "🛳️ Croazieră": "ocean",
     "🌊 Nave de război": "boat",
+
+    # 🚂 Căi ferate avansate
     "🚂🚃 Tren de marfă": "train",
     "🚂💨 Tren de mare viteză": "train",
     "🚉 Stație de metrou": "metro",
     "🚊 Tramvai electric": "metro",
     "🛤️ Șine": "train",
+
+    # 🎯 Tir și airsoft
     "🎯 Tir": "shooting",
     "🔫 Airsoft": "shooting",
     "🏹 Arc și săgeată": "shooting",
+
+    # 🔬 Fizică și laborator
     "⚗️ Laborator chimic": "lab",
     "🔬 Experimente": "lab",
     "💥 Explozii": "explosion",
     "☢️ Radioactivitate": "wind",
+
+    # 🧘 Spiritualitate
     "🛕 Templu": "library",
     "🕌 Moschee": "library",
     "🕎 Hanuka": "fire",
     "📿 Meditație": "room",
     "🧘 Yoga": "wind",
+
+    # 🎄 Sărbători
     "🎄 Crăciun": "party",
     "🎅 Moș Crăciun": "party",
     "🔔 Clopote de Crăciun": "clock",
@@ -1131,17 +1201,23 @@ AMBIENT_LIBRARY = {
     "🎃 Halloween": "night",
     "🦃 Ziua Recunoștinței": "party",
     "❤️ Valentine": "heartbeat",
+
+    # 🏭 Industrii
     "🏭 Oțelărie": "factory",
     "⚒️ Forjă": "factory",
     "🔥 Topitorie": "fire",
     "🪨 Minerit": "construction",
     "💎 Carieră de piatră": "construction",
+
+    # 🌐 Tehnologie
     "💾 Server room": "office",
     "🖥️ Centru de date": "office",
     "📡 Antenă radio": "radio",
     "📻 Radio de camping": "radio",
     "📟 Calculator vechi": "typing",
     "📠 Fax": "typing",
+
+    # 🚗 Circulație
     "🚦 Semnalizare": "city_heavy",
     "🚗🚙 Ambuteiaj": "city_heavy",
     "🚕🚖 Taxi în mulțime": "city",
@@ -1149,11 +1225,15 @@ AMBIENT_LIBRARY = {
     "🚒 Pompieri": "sirens",
     "🚑 Ambulanță": "sirens",
     "🚓 Poliție": "sirens",
+
+    # 🍺 Berărie și bar
     "🍺 Berărie": "cafe",
     "🍻 Bar": "cafe",
     "🎱 Billiard": "cafe",
     "🎯 Darts": "party",
     "🍷 Degustare de vin": "cafe",
+
+    # 🌿 Natură specială
     "🌈 Curcubeu": "birds_morning",
     "⛲ Gheară": "fountain",
     "🗻 Munte": "wind_strong",
@@ -1164,20 +1244,29 @@ AMBIENT_LIBRARY = {
     "🌊 Apus pe mare": "ocean",
     "🌅 Răsărit": "birds_morning",
     "🌄 Crepuscul": "crickets_night",
+
+    # 👶 Bebeluși și copii
     "👶 Bebeluș care plânge": "baby",
     "🍼 Hrănire bebeluș": "baby",
     "🎈 Copii la joacă": "crowd",
     "🧸 Camera copilului": "room",
     "🎠 Carusel": "crowd",
+
+    # 🏥 Medical
+    "🏥 Spital": "hospital",
     "🦷 Medic dentist": "drilling",
     "💉 Injecție": "heartbeat",
     "📊 Monitor cardiac": "heartbeat",
     "🩺 Stetoscop": "heartbeat",
+
+    # 📱 Tehnologie modernă
     "📱 Notificări telefon": "phone",
     "💬 Chat mesaje": "typing",
     "📧 Email": "typing",
     "🔔 Alarmă": "clock",
     "⏰ Bec veghe": "clock",
+
+    # 🐾 Mai multe animale
     "🐕🐕 Mai mulți câini": "dogs",
     "🐈🐈 Mai multe pisici": "cats",
     "🦆 Rățuște": "birds_lake",
@@ -1189,696 +1278,6 @@ AMBIENT_LIBRARY = {
     "🐷 Porci": "farm",
     "🦆 Gâște": "birds",
     "🦚 Păun": "birds",
-    "🌧️💧 Burniță": "rain",
-    "🌧️🌊 Ploaie torențială": "rain",
-    "⛈️⚡ Tunete puternice": "storm",
-    "🌨️ Lapoviță": "snow",
-    "🌨️💧 Burniță rece": "rain",
-    "❄️🌬️ Viscol cu zăpadă": "blizzard",
-    "❄️❄️ Ninsoare densă": "snow",
-    "❄️🦶 Pași în zăpadă adâncă": "snow_walk",
-    "🌬️🍃 Adiere de vară": "wind",
-    "🌬️🍂 Vânt de toamnă": "wind_strong",
-    "🌬️🏠 Vânt pe casă": "wind_strong",
-    "🌬️🌲 Vânt prin copaci": "wind",
-    "🌫️ Ceață dimineața": "wind",
-    "🌫️💧 Rouă": "rain",
-    "🌈🎨 Curcubeu după ploaie": "birds_morning",
-    "☀️🐦 Dimineață însorită": "birds_morning",
-    "🌅🐝 Răsărit de vară": "birds_morning",
-    "🌄🦉 Amurg": "crickets_night",
-    "🌌⭐ Noapte senină": "night",
-    "🌌🌙 Noapte cu lună plină": "night",
-    "🌌🌠 Stele căzătoare": "night",
-    "🐺🦉 Pădure la miezul nopții": "night",
-    "🦉 Bufniță noaptea": "night",
-    "🦊 Vulpe în noapte": "night",
-    "🦇🦇 Peșteră cu lilieci": "night",
-    "🐛 Greieri la margine de pădure": "crickets_night",
-    "🐸 Broaște la apus": "frogs",
-    "🐸💧 Broaște în baltă": "frogs",
-    "🦗 Greieri în iarbă": "crickets",
-    "🦗🌙 Cor de greieri": "crickets_night",
-    "🐦🌅 Cor de păsări": "birds_morning",
-    "🐦💨 Păsări migratoare": "birds",
-    "🦅 Vultur zburând": "birds",
-    "🦅⛰️ Vulturi pe stânci": "birds",
-    "🦉 Bufniță cântând": "night",
-    "🕊️ Porumbei": "birds",
-    "🕊️💧 Porumbei în piață": "birds",
-    "🐦‍⬛ Corbi": "birds",
-    "🦜 Papagali": "birds",
-    "🦜🌴 Papagali tropicali": "birds",
-    "🌊🌊 Mare foarte agitată": "ocean_storm",
-    "🌊⚡ Furtună pe mare": "ocean_storm",
-    "🌊💨 Valuri uriașe": "ocean_storm",
-    "🌊🪨 Valuri pe stânci": "ocean_storm",
-    "🌊🏖️ Valuri mici la țărm": "ocean",
-    "🌊🛶 Canoe pe lac": "lake",
-    "🌊🌅 Apus pe lac": "lake",
-    "🏞️💧 Râu lin": "river",
-    "🏞️⛰️ Râu de munte rapid": "river",
-    "⛲✨ Fântână arteziană mare": "fountain",
-    "⛲🌸 Fântână în parc": "fountain",
-    "💧💧 Picături de apă": "water_faucet",
-    "💧🪨 Picături în peșteră": "water_faucet",
-    "🌊🚿 Cascadă mare": "river",
-    "🌊🌲 Cascadă în pădure": "river",
-    "🏞️🦢 Lac liniștit cu lebede": "lake",
-    "🏞️🦆 Lac cu rațe": "birds_lake",
-    "🏞️🐟 Râu cu pești": "river",
-    "🌊🏊 Unda în piscină": "pool",
-    "🚿💧 Duș": "water_faucet",
-    "🚿🧼 Baie cu duș": "bathroom",
-    "🛁🧖 Cada de baie": "bathroom",
-    "🚰💧 Apă curgătoare": "water_faucet",
-    "🚰🪣 Găleată cu apă": "water_faucet",
-    "🌲🌿 Pădure deasă": "forest",
-    "🌲🍄 Pădure cu ciuperci": "forest",
-    "🌲🦌 Pădure cu cerbi": "forest",
-    "🌲🦉 Pădure la apus": "forest",
-    "🌲🌫️ Pădure cețoasă": "forest",
-    "🌲👣 Potecă prin pădure": "forest_walk",
-    "🌲🍃 Plimbare prin pădure": "forest_walk",
-    "🌲🍂 Frunze uscate căzând": "autumn",
-    "🍂🍁 Pădure de toamnă": "autumn",
-    "🍂🦔 Toamnă cu animale": "autumn",
-    "🌸🌿 Pădure de primăvară": "spring",
-    "🌴🦜 Pădure tropicală amazoniană": "rainforest",
-    "🌴🐒 Junglă cu maimuțe": "rainforest",
-    "🌴🐍 Junglă umedă": "rainforest",
-    "🌳🌲 Copăcei în bătaia vântului": "forest",
-    "🌳🐦 Livadă cu păsări": "birds_morning",
-    "🌳🍎 Livadă de meri": "forest",
-    "🌳🌸 Livadă înflorită": "spring",
-    "🌳🦋 Grădină cu flori": "birds_morning",
-    "🌹🐝 Grădină cu albine": "bees",
-    "🌻🌾 Câmp de floarea soarelui": "wind",
-    "🌷🦋 Câmp cu lalele": "spring",
-    "🌾🦗 Câmp cu greieri": "crickets",
-    "🌾🍃 Câmp de grâu": "wind",
-    "🌾🦅 Câmp deschis": "wind",
-    "🌅🐓 Cântatul cocoșului": "farm",
-    "🐔🥚 Curte cu găini și ouă": "farm",
-    "🐄🥛 Vaci la muls": "farm",
-    "🐄🌾 Vaci pe pășune": "farm",
-    "🐎🛞 Cai în galop": "footsteps",
-    "🐎🌾 Cai pe câmp": "farm",
-    "🐑🥬 Oi păscând": "farm",
-    "🐑⛰️ Oi pe munte": "farm",
-    "🐷🐷 Porci la trough": "farm",
-    "🐐⛰️ Capre pe stânci": "farm",
-    "🦆💧 Gâște la lac": "birds_lake",
-    "🦃 Curcan": "farm",
-    "🦢🦢 Lebede pe lac": "lake",
-    "🚜🌾 Tractor arând": "tractor",
-    "🚜🌾 Tractor la recoltat": "tractor",
-    "🚜🌾 Combină la secerat": "tractor",
-    "🌾🌾 Câmp cosit": "wind",
-    "🌾🚜 Fermă la prânz": "farm",
-    "🌅🐔 Sat dimineața": "countryside_morning",
-    "🌙🐕 Sat noaptea": "countryside_night",
-    "🌙🐄 Fermă noaptea": "countryside_night",
-    "🌾🐦 Țară cu păsări": "countryside_morning",
-    "🌾🦗 Țară cu greieri": "countryside_night",
-    "🌿🦊 Sat cu animale sălbatice": "countryside_night",
-    "🏡🌻 Grădină la țară": "birds_morning",
-    "🏡🌾 Curte cu flori": "birds_morning",
-    "🏡🐕 Curte cu câini": "dogs",
-    "🏡🐈 Curte cu pisici": "cats",
-    "🏙️🌅 Oraș dimineața": "city",
-    "🏙️🌃 Oraș noaptea târziu": "night_city",
-    "🏙️🚦 Trafic de dimineață": "city_heavy",
-    "🚗🚗 Ambuteiaj mare": "city_heavy",
-    "🚗💨 Claxon în trafic": "city_heavy",
-    "🚦🚕 Intersecție cu taxiuri": "city_heavy",
-    "🚦🚌 Stație autobuz în oraș": "city",
-    "🚗🛣️ Autostradă": "cars",
-    "🚗🏁 Mașini pe autostradă": "cars",
-    "🚗💨 Mașini rapide": "cars",
-    "🚗🅿️ Parcare": "cars",
-    "🚗🔧 Parcare subterană": "city",
-    "🚦🚒 Pompieri în acțiune": "sirens",
-    "🚦🚑 Ambulanță trecând": "sirens",
-    "🚦🚓 Poliție în patrulă": "sirens",
-    "🚦🚨 Alarme de mașini": "sirens",
-    "🌃🚶 Oraș târziu noaptea": "night_city",
-    "🌃✨ Oraș cu lumini": "night_city",
-    "🌃🎵 Oraș cu muzică": "night_city",
-    "🌃🚕 Oraș cu taxiuri": "city",
-    "🏙️🚲 Oraș cu bicicliști": "city",
-    "🏙️🛴 Oraș cu trotinete": "city",
-    "🏙️🛹 Oraș cu skate": "city",
-    "🏙️🚶 Stradă pietonală": "footsteps",
-    "🏙️👥 Stradă aglomerată": "crowd",
-    "🏙️🪧 Stradă cu reclame": "city",
-    "🏙️🌉 Pod peste râu": "city",
-    "🏙️🚇 Stație metrou la suprafață": "metro",
-    "🏙️🚦 Trecere de pietoni": "city_heavy",
-    "🏙️🚗 Spălătorie auto": "vacuum",
-    "🚂💨 Tren rapid": "train",
-    "🚂🚃 Tren de călători": "train",
-    "🚂📦 Tren de marfă lung": "train",
-    "🚂🔔 Tren apropiindu-se": "station_train_coming",
-    "🚂📢 Anunț în gară": "station_train_coming",
-    "🚉👥 Gară aglomerată": "station",
-    "🚉🧳 Gară cu bagaje": "station",
-    "🚉☕ Gară cu cafenea": "station",
-    "🚇🔊 Metrou subteran": "metro",
-    "🚇🚪 Uși de metrou": "metro",
-    "🚎🔔 Tramvai clopoțel": "metro",
-    "🚎🛤️ Tramvai pe șine": "metro",
-    "🚌🚏 Autobuz urban": "bus",
-    "🚌🎒 Autobuz școlar": "bus",
-    "🚌💨 Autobuz diesel": "bus",
-    "🚕🚖 Taxi oprit": "cars",
-    "🚕💨 Taxi în oraș": "cars",
-    "🚗💨 Mașină pornind": "cars",
-    "🚗🔧 Mașină la reparat": "construction",
-    "🚗⛽ Benzinărie": "cars",
-    "🚗🅿️ Mașini parcate": "city",
-    "🛻📦 Camion de livrare": "bus",
-    "🛻💨 Camion pe șosea": "bus",
-    "🚚📦 Camion de marfă": "bus",
-    "🚜🌾 Tractor pe șosea": "tractor",
-    "🚲💨 Bicicletă pe drum": "wind",
-    "🚲🛣️ Ciclism pe șosea": "wind",
-    "🛴 Trotinetă electrică": "wind",
-    "🛹 Skate pe asfalt": "footsteps",
-    "🛹🛹 Skatepark": "footsteps",
-    "🚁💨 Elicopter trecând": "helicopter",
-    "🚁🏥 Elicopter medical": "helicopter",
-    "🚁📰 Elicopter știri": "helicopter",
-    "🚁🚒 Elicopter pompier": "helicopter",
-    "✈️💨 Avion decolând": "airport",
-    "✈️🛬 Avion aterizând": "airport",
-    "✈️🛫 Aeroport aglomerat": "airport",
-    "✈️🛩️ Avion mic": "airport",
-    "✈️🌍 Zbor lung": "airport",
-    "✈️📢 Anunț la aeroport": "airport",
-    "✈️🛒 Aeroport bagaje": "airport",
-    "✈️☕ Aeroport cafenea": "airport",
-    "☕🌅 Cafenea dimineața": "cafe",
-    "☕🥐 Cafenea pariziană": "cafe",
-    "☕📚 Cafenea cu cărți": "cafe",
-    "☕🎵 Cafenea cu muzică": "cafe",
-    "☕💻 Cafenea cu laptopuri": "cafe",
-    "☕💬 Cafenea cu conversații": "cafe",
-    "☕🥪 Cafenea mic dejun": "cafe",
-    "☕🍰 Cafenea cu prăjituri": "bakery",
-    "🍞🥖 Brutărie fierbinte": "bakery",
-    "🍞🥨 Brutărie covrigi": "bakery",
-    "🍞🥐 Brutărie croissante": "bakery",
-    "🍞👨‍🍳 Brutărie cu brutar": "bakery",
-    "🍽️🍷 Restaurant elegant": "restaurant",
-    "🍽️👥 Restaurant plin": "restaurant",
-    "🍽️🍝 Restaurant italian": "restaurant",
-    "🍽️🍣 Restaurant japonez": "restaurant",
-    "🍽️🌮 Restaurant mexican": "restaurant",
-    "🍽️🍖 Restaurant grătar": "cooking",
-    "🍽️🥘 Bucătărie de restaurant": "cooking",
-    "🍽️🧑‍🍳 Chef gătind": "cooking",
-    "🍽️🍷 Degustare vin": "cafe",
-    "🍽️🧀 Degustare brânzeturi": "cafe",
-    "🍽️🍸 Bar de cocktail": "cafe",
-    "🍽️🍺 Berărie germană": "cafe",
-    "🍽️🍻 Berărie cu oameni": "cafe",
-    "🍽️🍷 Cramă": "cafe",
-    "🍽️🎯 Bar cu biliard": "cafe",
-    "🍽️🎯 Bar cu darts": "party",
-    "🍽️🎵 Bar cu muzică live": "party",
-    "🍽️🎤 Karaoke bar": "party",
-    "🍽️💃 Club de noapte": "party",
-    "🍽️🎧 Club cu DJ": "party",
-    "🍽️🎉 Discotecă": "party",
-    "🍽️💃 Club de dans": "party",
-    "🏬✨ Mall luxos": "shopping_mall",
-    "🏬🍔 Mall food court": "crowd",
-    "🏬🎬 Mall cinema": "tv",
-    "🏬🎮 Mall arcade": "arcade",
-    "🏬🎵 Mall cu muzică": "shopping_mall",
-    "🛒🛒 Supermarket aglomerat": "store",
-    "🛒📢 Supermarket oferte": "store",
-    "🛒🥬 Piață de legume": "store",
-    "🛒🐟 Piață de pește": "store",
-    "🛒🍞 Piață de cartier": "store",
-    "🛒🧀 Delicatese": "store",
-    "🛒🍷 Magazin vinuri": "store",
-    "🛒💊 Farmacie de gardă": "store",
-    "🛒💄 Magazin cosmetice": "store",
-    "🛒📚 Librărie": "library",
-    "🛒👕 Magazin haine": "shopping_mall",
-    "🛒👟 Magazin încălțăminte": "shopping_mall",
-    "🛒💍 Bijuterie": "store",
-    "🛒🔧 Ferramentar": "store",
-    "🛒🧸 Magazin jucării": "store",
-    "🛒🎁 Magazin cadouri": "store",
-    "🛒 Florărie": "birds_morning",
-    "💳🔔 Casă de marcat beep": "checkout",
-    "💳🧾 Bon fiscal": "checkout",
-    "🛍️🛒 Coș de cumpărături": "shopping_bags",
-    "🛍️📄 Pungi de hârtie": "shopping_bags",
-    "🛍️♻️ Pungi reciclabile": "shopping_bags",
-    "🕊️🛋️ Sufragerie liniștită": "room",
-    "🕊️📚 Birou acasă": "office",
-    "🕊️🛏️ Dormitor liniștit": "room",
-    "🍳🥓 Bucătărie dimineața": "kitchen",
-    "🍳☕ Bucătărie cu cafea": "coffee_machine",
-    "🍳🧁 Coacere prăjitură": "bakery",
-    "🍳🥞 Preparare clătite": "cooking",
-    "🍳🧑‍🍳 Gătit prânz": "cooking",
-    "🍳🥘 Gătit cină": "cooking",
-    "🍳🔪 Tăiat legume": "cooking",
-    "🍳💧 Apă fierbând": "water_faucet",
-    "🍳🫕 Fierbere": "water_faucet",
-    "🍳🧈 Prăjire unt": "cooking",
-    "📺🎬 Film seara": "tv",
-    "📺📺 Televizor în fundal": "tv",
-    "📺🎮 Consolă de jocuri": "tv",
-    "📺📺 Știri la TV": "tv",
-    "📻🎵 Radio dimineața": "radio",
-    "📻📻 Radio în mașină": "radio",
-    "📻📻 Radio de camping": "radio",
-    "⌨️💻 Muncă la laptop": "typing",
-    "⌨️📝 Scriere rapidă": "typing",
-    "⌨️🎮 Gaming la PC": "typing",
-    "⌨️🔔 Notificări laptop": "typing",
-    "🧹🔊 Aspirator mergând": "vacuum",
-    "🧹🧹 Curățenie generală": "vacuum",
-    "👔🔊 Mașină de spălat rufe": "washing",
-    "👔💧 Spălare rufe": "washing",
-    "👔🔄 Usucător automat": "washing",
-    "🚿🧼 Duș de dimineață": "bathroom",
-    "🚿🎵 Duș cântând": "bathroom",
-    "🚰💧 Spălat vase": "water_faucet",
-    "🚰🧽 Spălat pe mâini": "water_faucet",
-    "💄🎨 Machiaj dimineața": "makeup",
-    "💄💅 Manichiură": "makeup",
-    "💄✨ Cremă pe față": "makeup",
-    "🪥🦷 Periuță de dinți": "bathroom",
-    "🧴🚿 Balsam păr": "bathroom",
-    "🪒 Bărbierit": "bathroom",
-    "💇‍♀️ Spălat păr": "bathroom",
-    "🧹🧹 Măturat": "footsteps",
-    "🧹🧽 Mop pe gresie": "footsteps_tile",
-    "🧹🪣 Spălat pe jos": "water_faucet",
-    "🪟🧹 Șters geamuri": "makeup",
-    "🛏️🛌 Așternut pat": "makeup",
-    "🛏️📝 Făcut patul": "makeup",
-    "🧺👔 Întins rufe": "makeup",
-    "🧹🪟 Șters praf": "makeup",
-    "🚪🔊 Ușă deschizându-se": "footsteps_wood",
-    "🚪🔔 Ușă cu sonerie": "phone",
-    "🚪🚪 Ușă închizându-se": "footsteps_wood",
-    "🔑🔔 Cheie în broască": "footsteps_wood",
-    "🛗🔊 Lift mergând": "stairs",
-    "🛗🔔 Lift sosind la etaj": "stairs",
-    "🛗🚪 Uși lift deschise": "stairs",
-    "🪜🔊 Scări de lemn": "stairs",
-    "🪜👣 Scări de beton": "stairs",
-    "🪜📦 Scări cu cutii": "stairs",
-    "👠🏢 Tocuri pe birou": "heels",
-    "👠🛒 Tocuri în mall": "heels",
-    "👠🚶 Tocuri pe stradă": "heels",
-    "👟🏃 Alergare în parc": "footsteps",
-    "👟🛣️ Alergare pe asfalt": "footsteps_outside",
-    "👟🏃‍♀️ Jogging dimineața": "footsteps_outside",
-    "👟🚶 Mers pe iarbă": "footsteps",
-    "👢🚶 Cizme pe zăpadă": "snow_walk",
-    "👢💧 Cizme în baltă": "footsteps_outside",
-    "🥿🏢 Pantofi de birou": "footsteps_wood",
-    "🥿🛋️ Papuci de casă": "footsteps_wood",
-    "🩴🏖️ Slapi pe plajă": "footsteps_outside",
-    "🩴💧 Slapi uzi": "water_faucet",
-    "🥾⛰️ Boturi de munte": "footsteps_outside",
-    "🥾🌲 Drumeție cu rucsac": "footsteps_outside",
-    "🥾🪨 Urcat pe stânci": "footsteps_outside",
-    "🚶‍♀️🚶‍♂️ Mers în doi": "footsteps",
-    "🏃‍♀️🏃‍♂️ Alergare în grup": "footsteps",
-    "🚶‍♀️🎵 Plimbare cu muzică": "footsteps",
-    "🚶‍♀️🐕 Plimbare cu câinele": "footsteps_outside",
-    "🚶‍♀️🦮 Plimbare cu doi câini": "footsteps_outside",
-    "🚶‍♀️🌳 Plimbare prin parc": "footsteps_outside",
-    "🚶‍♀️🌉 Plimbare pe pod": "footsteps_outside",
-    "🚶‍♀️🏛️ Plimbare prin oraș vechi": "footsteps_outside",
-    "🚶‍♀️🛍️ Mers spre mall": "footsteps_outside",
-    "🚶‍♀️☕ Mers spre cafenea": "footsteps_outside",
-    "🍿🎬 Popcorn la cinema": "chips",
-    "🍿📺 Popcorn acasă": "chips",
-    "🥜🍺 Alune la berărie": "chips",
-    "🍪🥛 Biscuiți cu lapte": "chips",
-    "🍎🦷 Măr mestecat": "eating",
-    "🥕🦷 Morcov mestecat": "eating",
-    "🥖🧀 Pâine cu brânză": "eating",
-    "🍫🦷 Ciocolată mestecată": "chips",
-    "🍬🦷 Bomboane mestecate": "chips",
-    "🥨🦷 Covrig mestecat": "chips",
-    "🥪🦷 Sandwich mestecat": "eating",
-    "🍕🦷 Pizza mestecată": "eating",
-    "🍔🦷 Burger mestecat": "eating",
-    "🥗🦴 Salată mestecată": "eating",
-    "☕🥐 Cafea cu croissant": "drinking",
-    "🍵🧁 Ceai cu prăjitură": "drinking",
-    "🥤🦷 Suc băut cu pai": "drinking",
-    "🍷🍷 Vin băut": "drinking",
-    "🍺🍻 Bere băută": "drinking",
-    "🥃🧊 Whiskey cu gheață": "drinking",
-    "🍸🍋 Cocktail băut": "drinking",
-    "🧃🧒 Suc de fructe": "drinking",
-    "🥛🍪 Lapte cu biscuiți": "drinking",
-    "🧋🧋 Bubble tea": "drinking",
-    "☕🥛 Cafea cu lapte": "coffee_machine",
-    "☕🟤 Espresso preparat": "coffee_machine",
-    "☕🫖 Ceainar": "coffee_machine",
-    "🫖💧 Ceai preparat": "water_faucet",
-    "🍳🧈 Prăjire ouă": "cooking",
-    "🍳🥓 Prăjire bacon": "cooking",
-    "🥘🔥 Fierbere supă": "cooking",
-    "🍲🔥 Ciorbă fierbând": "cooking",
-    "🥩🔥 Friptură la grătar": "cooking",
-    "🍗🔥 Pui la cuptor": "cooking",
-    "🐟🔥 Pește prăjit": "cooking",
-    "🥟💨 Gătit la abur": "water_faucet",
-    "🍞🔥 Pâine la cuptor": "bakery",
-    "🍰🔥 Prăjitură la cuptor": "bakery",
-    "🧁🫙 Prăjituri răcorind": "bakery",
-    "🍕🔥 Pizza la cuptor": "cooking",
-    "🥖🔥 Covrigi fierbinți": "bakery",
-    "🧇🔥 Clătite la tigaie": "cooking",
-    "🥞🔥 Pancake": "cooking",
-    "🍳🔥 Omletă": "cooking",
-    "🥗🔪 Salată tăiată": "cooking",
-    "🥕🔪 Legume tăiate": "cooking",
-    "🧅🔪 Ceapă tăiată": "cooking",
-    "🧄🔪 Usturoi tocat": "cooking",
-    "🍅🔪 Roșii tăiate": "cooking",
-    "🥬🔪 Salată verde": "cooking",
-    "🧀🔪 Brânză rasă": "cooking",
-    "🥩🔪 Carne feliată": "cooking",
-    "🐟🔪 Pește curățat": "cooking",
-    "🍞🔪 Pâine feliată": "cooking",
-    "🍰🔪 Prăjitură feliată": "cooking",
-    "🍉🔪 Pepene tăiat": "cooking",
-    "🍎🔪 Măr tăiat": "cooking",
-    "🧊🥃 Gheață în pahar": "ice",
-    "🧊🧊 Cuburi de gheață": "ice",
-    "🧊🍹 Gheață zdrobită": "ice",
-    "🧊🥤 Băutură rece": "drinking",
-    "📚📖 Bibliotecă publică": "library",
-    "📚🤫 Bibliotecă universitară": "library",
-    "📚🏛️ Bibliotecă națională": "library",
-    "📚💻 Bibliotecă cu calculatoare": "library",
-    "🏢💼 Birou open space": "office",
-    "🏢📞 Birou cu telefoane": "office",
-    "🏢☕ Birou cu cafea": "office",
-    "🏢🖥️ Birou IT": "typing",
-    "🏢👥 Ședință de birou": "office",
-    "🏥🚑 Camera de urgență": "hospital",
-    "🏥💊 Salon de spital": "hospital",
-    "🏥🩺 Consultație medicală": "hospital",
-    "🏥📊 Monitor semne vitale": "heartbeat",
-    "🏥🫁 Respirație monitorizată": "heartbeat",
-    "🏫🎒 Școală primară": "school",
-    "🏫📚 Școală la pauză": "crowd",
-    "🏫🔬 Laborator școlar": "lab",
-    "🏫🎨 Atelier de artă": "school",
-    "🏫🎵 Sala de muzică": "school",
-    "🏫🏀 Sală de sport școlară": "gym",
-    "🏛️📜 Primărie": "office",
-    "🏛️👥 Ședință de consiliu": "office",
-    "🏦💰 Bancă de la ghișeu": "office",
-    "🏦💳 Bancomat": "typing",
-    "🏦🔒 Seif bancar": "office",
-    "💊📋 Farmacie": "store",
-    "💊🧪 Laborator farmacie": "lab",
-    "⚖️🏛️ Tribunal": "library",
-    "🚓🚔 Secție de poliție": "office",
-    "🚒🧯 Casă de pompieri": "sirens",
-    "🚓🚔 Sediu poliție": "office",
-    "🏛️✉️ Poștă": "office",
-    "🏛️📄 Arhivă": "library",
-    "🏛️🎨 Muzeu": "library",
-    "🏛️🖼️ Galerie de artă": "library",
-    "🏛️🏺 Expoziție": "crowd",
-    "🏛️🦴 Muzeu de istorie": "library",
-    "🏛️🔬 Muzeu de știință": "library",
-    "🎉🎊 Petrecere de aniversare": "party",
-    "🎉🎂 Petrecere de ziua de naștere": "party",
-    "🎉🎈 Petrecere pentru copii": "crowd",
-    "🎉🥂 Petrecere de Revelion": "party",
-    "🎉💍 Petrecere de logodnă": "party",
-    "🎉🏠 Petrecere acasă": "party",
-    "🎉🌃 Petrecere de club": "party",
-    "🎉🏖️ Petrecere pe plajă": "party",
-    "🎉🪩 Petrecere disco": "party",
-    "🎉🎤 Petrecere karaoke": "party",
-    "👥🗣️ Mulțime la discurs": "crowd",
-    "👥📢 Mulțime la concert": "crowd",
-    "👥🚶 Mulțime mergând": "footsteps",
-    "👥🛒 Mulțime la mall": "crowd",
-    "👥🎫 Mulțime la intrare": "crowd",
-    "👥🎪 Mulțime la circ": "crowd",
-    "👥🎭 Mulțime la teatru": "crowd",
-    "👥🎬 Mulțime la cinema": "crowd",
-    "👥🏟️ Mulțime la stadion": "crowd",
-    "👥🛐 Mulțime la biserică": "crowd",
-    "👥🏛️ Mulțime la muzeu": "crowd",
-    "👥🎵 Mulțime la festival": "crowd",
-    "👥🎉 Mulțime la festival de muzică": "crowd",
-    "👥🎨 Mulțime la vernisaj": "crowd",
-    "👥🎓 Mulțime la absolvire": "crowd",
-    "👥💒 Mulțime la nuntă": "party",
-    "👥🤝 Mulțime la conferință": "crowd",
-    "👥🛂 Mulțime la aeroport": "airport",
-    "👥🚉 Mulțime în gară": "station",
-    "👥🚇 Mulțime în metrou": "metro",
-    "👥🚌 Mulțime în autobuz": "bus",
-    "👥🚶 Mulțime pe stradă": "crowd",
-    "👥🛍️ Mulțime la black friday": "crowd",
-    "👥🎄 Mulțime la târg de Crăciun": "crowd",
-    "👥🎃 Mulțime la Halloween": "crowd",
-    "👥🎆 Mulțime la artificii": "crowd",
-    "👥🎪 Mulțime la carnaval": "crowd",
-    "👥🛹 Mulțime la skatepark": "crowd",
-    "👥🚲 Mulțime de bicicliști": "footsteps",
-    "🔥🏕️ Foc de tabără mare": "fire",
-    "🔥🌲 Foc în pădure": "fire",
-    "🔥🪵 Foc cu lemne uscate": "fire",
-    "🔥🏕️ Foc de tabără noaptea": "fire",
-    "🕯️🔥 Lumânare mare": "fire",
-    "🕯️✨ Lumânări multe": "fire",
-    "❤️💓 Bătăi de inimă liniștite": "heartbeat",
-    "❤️🏃 Bătăi de inimă după efort": "heartbeat",
-    "❤️💓 Puls normal": "heartbeat",
-    "⏰🕰️ Ceas de perete": "clock",
-    "⏰🕰️ Pendulă": "clock",
-    "⏰🔔 Alarmă de dimineață": "clock",
-    "⏰🛏️ Alarmă de trezit": "clock",
-    "⏰⏰ Cronometru": "clock",
-    "⏰⏳ Timer": "clock",
-    "🚁🚁 Elicopter zburând": "helicopter",
-    "🚁📡 Dronă": "helicopter",
-    "🚁🛸 Dronă de filmare": "helicopter",
-    "🚁🚁 Elicopter de salvare": "helicopter",
-    "🛸👽 OZN zburând": "helicopter",
-    "🛸✨ Navă spațială": "helicopter",
-    "🚀🔥 Rachetă lansând": "explosion",
-    "🚀💨 Rachetă în spațiu": "wind_strong",
-    "🛸🛸 Flotilă de OZN-uri": "helicopter",
-    "🌌🛸 Navă extraterestră": "helicopter",
-    "🛸🔊 Hum UFO": "helicopter",
-    "🐕🔊 Lătrat de câine": "dogs",
-    "🐕🐕 Lătrat de mai mulți câini": "dogs",
-    "🐕🏠 Câine în curte": "dogs",
-    "🐕🚪 Câine la ușă": "dogs",
-    "🐕🦴 Câine mestecând os": "dogs",
-    "🐕💨 Câine alergând": "footsteps",
-    "🐈🔊 Tors de pisică": "cats",
-    "🐈🛋️ Pisică pe canapea": "cats",
-    "🐈🐱 Pisici la lapte": "cats",
-    "🐈☀️ Pisică tolănind": "cats",
-    "🐿️🌰 Veverițe cu nuci": "squirrels",
-    "🐿️🌲 Veverițe în copac": "squirrels",
-    "🦗🌿 Greieri în tufiș": "crickets",
-    "🐦🌳 Păsări în copac": "birds",
-    "🐦🪶 Păsări ciripind": "birds",
-    "🐦🌅 Păsări de dimineață": "birds_morning",
-    "🐦🎶 Cor de păsări": "birds_morning",
-    "🦆💧 Rățuște la apă": "birds_lake",
-    "🦆🌾 Gâște în curte": "birds",
-    "🦅⛰️ Vulturi în zbor": "birds",
-    "🦉🌙 Bufniță noaptea": "night",
-    "🦇🦇 Lilieci zburând": "night",
-    "🐝🌸 Albine la flori": "bees",
-    "🐝🍯 Stup de albine": "bees",
-    "🐝🌻 Albine la floarea soarelui": "bees",
-    "🐑⛰️ Oi behăind": "farm",
-    "🐑🐑 Turmă de oi": "farm",
-    "🐂🐄 Tauri mugind": "farm",
-    "🐖🔊 Porci grohăind": "farm",
-    "🐐🔊 Capre behăind": "farm",
-    "🐎🔊 Cai nechezând": "farm",
-    "🐎💨 Cai în galop": "footsteps",
-    "🐓🌅 Cocoș cântând": "farm",
-    "🐔🔊 Găini cotcodăcind": "farm",
-    "🦃🔊 Curcan": "farm",
-    "🕊️🕊️ Porumbei gugurzind": "birds",
-    "🦚🔊 Păun strigând": "birds",
-    "🐸🔊 Broaște croncănind": "frogs",
-    "🦎🦎 Șopârle": "footsteps_outside",
-    "🐢🐢 Țestoase": "footsteps_outside",
-    "🐍🐍 Șerpi": "footsteps_outside",
-    "🦟🦟 Țânțari": "bees",
-    "🪰🪰 Muște": "bees",
-    "🕷️🕸️ Păianjen țesând": "makeup",
-    "🎮🕹️ Arcade retro": "arcade",
-    "🎮👾 Arcade modern": "arcade",
-    "🎮🎮 Sală de jocuri video": "arcade",
-    "🎮🎯 Tir cu arcul": "shooting",
-    "🎯🔫 Tir cu pistoale": "shooting",
-    "🎯🎯 Darts": "dice",
-    "🎲🎲 Zaruri pe masă": "dice",
-    "🃏🃏 Cărți amestecate": "typing",
-    "🀄🀄 Mahjong": "dice",
-    "🎰🎰 Slot machine": "arcade",
-    "🎰🔔 Câștig la slot": "arcade",
-    "🎱🎱 Bila de biliard": "dice",
-    "🏓🏓 Ping pong": "dice",
-    "🎯🎯 Bullseye darts": "dice",
-    "🎳 Bowling": "dice",
-    "🎳🎳 Bowling strike": "dice",
-    "🧩🧩 Puzzle piese": "dice",
-    "♟️♟️ Șah pe tablă": "typing",
-    "🎮🕹️ Joystick": "arcade",
-    "🎮🔊 Console gaming": "arcade",
-    "🎮🛒 Coș de cumpărături joc": "typing",
-    "🎮💰 Monede căzând": "dice",
-    "🎮🔔 Notificare joc": "arcade",
-    "🎮⏰ Timer joc": "clock",
-    "🎮🔊 Explozie joc": "explosion",
-    "🎮🔊 Laser joc": "shooting",
-    "🎮🔊 Monede joc": "dice",
-    "🎮🔊 Buzzer joc": "arcade",
-    "🎮🔊 Coin insert": "dice",
-    "🎮🔊 Jump sound": "dice",
-    "🎮🔊 Power-up": "arcade",
-    "🎮🔊 Game over": "arcade",
-    "🎮🔊 Level up": "arcade",
-    "🎮🔊 Menu click": "typing",
-    "🎮🔊 Achievement": "arcade",
-    "🔧🔩 Atelier mecanic": "construction",
-    "🔧🚗 Mecanic sub mașină": "construction",
-    "🔧⚙️ Chei și suruburi": "construction",
-    "🔩🏭 Șurubelniță electrică": "drilling",
-    "⚙️🏭 Uzină metalurgică": "factory",
-    "⚙️🏭 Fabrică de piese": "factory",
-    "⚙️🏭 Fabrică de mobilă": "factory",
-    "⚙️🏭 Fabrică de textile": "factory",
-    "⚙️🏭 Fabrică de hârtie": "factory",
-    "⚙️🏭 Fabrică de sticlă": "factory",
-    "⚙️🏭 Fabrică de beton": "factory",
-    "⚙️🏭 Fabrică de asamblare": "factory",
-    "⚙️🏭 Linie de asamblare": "factory",
-    "⚙️🏭 Bandă rulantă": "factory",
-    "⚙️🏭 Presă hidraulică": "factory",
-    "⚙️🏭 Compresor industrial": "vacuum",
-    "⚙️🏭 Turbină industrială": "factory",
-    "⚙️🏭 Generator": "factory",
-    "⚙️🏭 Motor diesel": "tractor",
-    "⚙️🏭 Motor industrial": "factory",
-    "🔨🏗️ Construcție de casă": "construction",
-    "🔨🏗️ Bătut cuie": "construction",
-    "🔨🏗️ Tăiat cu ferăstrău": "drilling",
-    "🔨🏗️ Foraj cu burghiu": "drilling",
-    "🔨🏗️ Ciment amestecat": "construction",
-    "🔨🏗️ Cărămizi așezate": "construction",
-    "🔨🏗️ Acoperiș reparat": "construction",
-    "🔨🏗️ Instalat țevi": "construction",
-    "🔨🏗️ Vopsea pulverizată": "vacuum",
-    "🔨🏗️ Gips carton montat": "construction",
-    "🔨🏗️ Izolație termică": "construction",
-    "🏭🔥 Oțelărie topire": "factory",
-    "🏭🔥 Forjă de fier": "factory",
-    "🏭🔥 Turnare de aluminiu": "factory",
-    "🏭🔥 Topire de bronz": "factory",
-    "🪨⛏️ Minerit de cărbune": "construction",
-    "🪨⛏️ Carieră de piatră": "construction",
-    "🪨⛏️ Excavator la lucru": "construction",
-    "🪨⛏️ Buldozer la lucru": "tractor",
-    "🪨⛏️ Troliu la lucru": "construction",
-    "💎⛏️ Mină de diamante": "construction",
-    "🛢️⛏️ Foraj petrolier": "drilling",
-    "🛢️⚙️ Rafinărie": "factory",
-    "🛢️🏭 Conductă petrolieră": "vacuum",
-    "🪵🪓 Lemn tăiat cu ferăstrău": "drilling",
-    "🪵🔨 Lemn cioplit": "construction",
-    "🪵🏭 Moară de lemn": "factory",
-    "🌾🏭 Moară de grâu": "factory",
-    "🌾🏭 Mori de vânt": "wind",
-    "🌾🏭 Elevator de cereale": "factory",
-    "🧱🏭 Fabrică de cărămizi": "factory",
-    "🧱🏭 Cuptor de cărămizi": "fire",
-    "🪶🏭 Fabrică de perne": "vacuum",
-    "🧵🏭 Fabrică de textile": "factory",
-    "🧶🏭 Atelier de tricotat": "typing",
-    "🪡🏭 Mașină de cusut": "typing",
-    "👞🏭 Fabrică de pantofi": "typing",
-    "📦🏭 Depozit de marfă": "construction",
-    "📦🏭 Stivuitor": "tractor",
-    "📦🏭 Paleti mișcați": "construction",
-    "📦🏭 Cutii încărcate": "construction",
-    "📦🏭 Bandă de ambalare": "factory",
-    "📦🏭 Carton pliat": "construction",
-    "💾🖥️ Server room": "office",
-    "💾❄️ Server room cu AC": "office",
-    "🖥️📡 Data center": "office",
-    "🖥️💻 Data center mare": "office",
-    "📡📻 Antenă radio": "radio",
-    "📡📶 Antenă 5G": "radio",
-    "📡🛰️ Satelit": "radio",
-    "📻🎵 Radio AM": "radio",
-    "📻🎵 Radio FM": "radio",
-    "📻📻 Radio de mașină": "radio",
-    "📟💻 Calculator vechi": "typing",
-    "📟💾 Calculator DOS": "typing",
-    "📟⌨️ Calculator mecanic": "typing",
-    "📠📄 Fax trimițând": "typing",
-    "📠📠 Fax primind": "typing",
-    "🖨️🖨️ Imprimantă": "typing",
-    "🖨️📄 Imprimantă laser": "typing",
-    "🖨️🖨️ Imprimantă color": "typing",
-    "🖨️🖨️ Imprimantă 3D": "drilling",
-    "🖱️💻 Mouse click": "typing",
-    "⌨️💻 Tastatură mecanică": "typing",
-    "⌨️💻 Tastatură gaming": "typing",
-    "⌨️💻 Tastatură laptop": "typing",
-    "📱🔔 Notificări telefon": "phone",
-    "📱💬 Mesaje pe telefon": "typing",
-    "📱📧 Email pe telefon": "typing",
-    "📱🔔 Alarmă telefon": "clock",
-    "📱⏰ Alarmă telefon": "clock",
-    "📱📳 Vibrație telefon": "phone",
-    "📱🔔 Sonerie telefon": "phone",
-    "📱🔔 SMS primit": "phone",
-    "📱📞 Telefon sunând": "phone",
-    "📱📞 Apel primit": "phone",
-    "📱📞 Apel refuzat": "phone",
-    "📱📞 Apel în curs": "phone",
-    "📱📞 Convorbire telefonică": "phone",
-    "📱📱 Apel video": "phone",
-    "📱💬 Chat WhatsApp": "typing",
-    "📱💬 Chat Telegram": "typing",
-    "📱💬 Chat Messenger": "typing",
-    "📱💬 Chat Discord": "typing",
-    "💻💻 Programare intensă": "typing",
-    "💻⌨️ Cod scris": "typing",
-    "💻🖱️ Debug cod": "typing",
-    "💻🎮 Gaming laptop": "typing",
-    "💻📺 Streaming pe laptop": "tv",
-    "💻💻 Compilare cod": "typing",
-    "💻🔔 Build terminat": "typing",
-    "💻❌ Eroare de cod": "phone",
-    "💻✅ Teste trecute": "typing",
 }
 
 
@@ -4914,7 +4313,6 @@ def render_chat(char):
         prompt = st.session_state.pop("pending_prompt")
 
     if prompt:
-     try:
         # persistă IMEDIAT mesajul utilizatorului (înainte de apelul LLM) ca să NU se piardă
         # la o deconectare / eroare temporară; astfel istoricul crește sigur.
         db.add_message(active_conv, "user", prompt, audio_b64=user_audio)
@@ -4971,6 +4369,9 @@ def render_chat(char):
             reply = " ".join(parts)
 
             # ── AMBIANȚĂ CA PRIM MESAJ ─────────────────────────────────────────
+            # Generăm rapid ambianța din cuvintele-cheie din răspuns (fără LLM),
+            # o afișăm ca un mesaj separat care rulează în buclă ÎNAINTE de text,
+            # și o stocăm la nivel de conversație ca să persiste.
             _scene_amb = None
             if st.session_state.get("ambient_fx"):
                 try:
@@ -4986,18 +4387,15 @@ def render_chat(char):
                 _sb64 = base64.b64encode(_scene_amb).decode()
                 with st.chat_message("assistant", avatar="🎵"):
                     st.caption("🎵 Ambianță scenă")
-                    try:
-                        st.html(
-                            f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
-                            f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
-                            f'<script>(function(){{'
-                            f'var a=document.getElementById("{_suid}");'
-                            f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
-                            f'}})();</script>',
-                            height=1,
-                        )
-                    except Exception:
-                        pass
+                    st.html(
+                        f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
+                        f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
+                        f'<script>(function(){{'
+                        f'var a=document.getElementById("{_suid}");'
+                        f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
+                        f'}})();</script>',
+                        height=0,
+                    )
                     st.audio(_scene_amb, format=None)
 
             # ── MESAJELE TEXT (una câte una, cu pauze naturale) ────────────────
@@ -5016,8 +4414,10 @@ def render_chat(char):
             haptic(25)
             msgs = [db.add_message(active_conv, "assistant", p) for p in parts]
             st.session_state["notif_sound"] = True
+            # Stocăm ambianța pe primul mesaj (pentru redarea manuală „Ascultă")
             if _scene_amb:
                 st.session_state[f"sfx_{msgs[0]['id']}"] = _scene_amb
+            # voce pentru fiecare mesaj — ambianța rulează deja în buclă din mesajul 🎵
             did_voice = False
             _force_voice = st.session_state.pop("force_voice_reply", False)
             if (st.session_state.get("auto_play") or user_audio or _force_voice) and char.get("voice_id"):
@@ -5029,23 +4429,20 @@ def render_chat(char):
                             )
                         except Exception:  # noqa
                             pass
+                # Vocea se redă FĂRĂ ambient suplimentar (ambianța deja rulează în buclă)
                 st.session_state["autoplay_burst"] = {
                     "ids": [_m["id"] for _m in msgs],
                     "uid": "burst_" + msgs[-1]["id"][:8],
                 }
                 did_voice = True
+            # dacă nu redăm voce, ambientul a pornit deja din mesajul 🎵
             if not did_voice and st.session_state.get(f"sfx_{msgs[0]['id']}"):
                 st.session_state["ambient_play_mid"] = msgs[0]["id"]
+            # refresh long-term memory in the background (non-blocking)
             full = db.get_messages(active_conv)
             if len(full) % 6 == 0:
                 queue_memory_update(char, full)
             st.rerun()
-     except Exception as _chat_err:
-        import traceback as _tb
-        _log.exception("chat send crashed")
-        st.error(f"Nu am putut trimite mesajul: {_chat_err}")
-        with st.expander("Detalii eroare"):
-            st.code(_tb.format_exc())
 
 
 
@@ -6089,6 +5486,17 @@ def render_profil():
                 help="Personajul caută informații reale, la zi, pentru întrebări factuale (știri, sănătate, date)",
                 key="web_search_toggle",
             )
+            st.session_state.hf_token = st.text_input(
+                "🔑 Token Hugging Face (opțional — pentru voce fără limite)",
+                value=st.session_state.get("hf_token", ""),
+                type="password",
+                key="hf_token_input",
+                help="Obține un token gratuit de la huggingface.co/settings/tokens — îl introduci aici pentru a evita erorile de tip „epuizat timpul de procesare”.",
+            )
+            if st.session_state.get("hf_token"):
+                os.environ["HF_TOKEN"] = st.session_state["hf_token"]
+                voice._HF_TOKEN = st.session_state["hf_token"]
+                voice._client = None
             st.session_state.theme_light = st.toggle(
                 "☀️ Temă luminoasă",
                 value=st.session_state.theme_light,
