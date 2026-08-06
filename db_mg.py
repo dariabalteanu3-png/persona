@@ -18,6 +18,8 @@ conversations = _db.conversations
 users        = _db.users
 sessions     = _db.sessions
 email_codes  = _db.email_codes
+chat_groups  = _db.chat_groups
+group_messages = _db.group_messages
 
 try:
     users.create_index("email", unique=True)
@@ -281,6 +283,58 @@ def add_message(conversation_id, role, content, audio_b64=None, extra=None):
 
 def get_messages(conversation_id):
     return list(messages.find({"conversation_id": conversation_id}, {"_id": 0}).sort("created_at", 1))
+
+
+# --------------- chat de grup ---------------
+
+def create_group(owner_id, name, character_ids):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "owner_id": owner_id,
+        "name": name,
+        "character_ids": list(character_ids or []),
+        "created_at": _now(),
+    }
+    chat_groups.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def list_groups(owner_id):
+    return list(chat_groups.find({"owner_id": owner_id}, {"_id": 0}).sort("created_at", -1))
+
+
+def get_group(group_id):
+    return chat_groups.find_one({"id": group_id}, {"_id": 0})
+
+
+def delete_group(group_id):
+    chat_groups.delete_one({"id": group_id})
+    group_messages.delete_many({"group_id": group_id})
+
+
+def add_group_message(group_id, speaker_id, speaker_name, content, audio_b64=None):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "group_id": group_id,
+        "speaker_id": speaker_id,
+        "speaker_name": speaker_name,
+        "content": content,
+        "created_at": _now(),
+    }
+    if audio_b64:
+        doc["audio_b64"] = audio_b64
+    group_messages.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def get_group_messages(group_id):
+    return list(group_messages.find({"group_id": group_id}, {"_id": 0}).sort("created_at", 1))
+
+
+def clear_group_messages(group_id):
+    group_messages.delete_many({"group_id": group_id})
 
 
 def list_media(owner_id):

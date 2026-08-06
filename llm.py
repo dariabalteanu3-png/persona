@@ -391,6 +391,48 @@ def burst_reply(character, history, user_text, web_info="", smart=False):
     return _split_burst(raw)
 
 
+def group_turn(speaker, others, history, smart=False):
+    """Generează O SINGURĂ replică pentru `speaker` într-un chat de GRUP.
+    `others` = ceilalți participanți (dict-uri cu name+personality). Relațiile
+    (soț/soție/fost/prieten) se DEDUC automat din personalități.
+    `history` = listă de {"speaker", "content"}. Returnează un string (replica)."""
+    lines = [f"Ești „{speaker['name']}”, într-o conversație de GRUP cu mai multe persoane."]
+    pers = (speaker.get("personality") or "").strip()
+    if pers:
+        lines.append(f"Personalitatea ta: {pers}")
+    scn = (speaker.get("scenario") or "").strip()
+    if scn:
+        lines.append(f"Contextul tău: {scn}")
+    if others:
+        lines.append("Ceilalți participanți și personalitatea lor (DEDU singur relațiile dintre "
+                     "voi — cine e soț/soție/fost/prieten etc. — din aceste descrieri):")
+        for o in others:
+            op = (o.get("personality") or "").strip() or "necunoscut"
+            lines.append(f"- {o['name']}: {op}")
+    lines += [
+        "",
+        "REGULI:",
+        f"- Vorbește DOAR ca tine ({speaker['name']}), o SINGURĂ replică scurtă și naturală, ca într-o discuție reală.",
+        "- NU scrie replicile altora. NU pune numele tău ca prefix.",
+        "- Reacționează la ce s-a spus, adresează-te celorlalți pe nume, ține cont de relații și tensiuni.",
+        "- Fii expresiv și autentic (poți folosi emoji-uri), potrivit pentru a fi citit cu voce.",
+        "- Scrie ÎNTOTDEAUNA în limba ROMÂNĂ.",
+    ]
+    if history:
+        lines.append("")
+        lines.append("Conversația de până acum:")
+        for m in history[-40:]:
+            lines.append(f"{m.get('speaker', '?')}: {m.get('content', '')}")
+    system = "\n".join(lines)
+    prompt = f"E rândul tău, {speaker['name']}. Spune următoarea ta replică (doar una, scurtă)."
+    raw = _run_reply(system, prompt, f"group-{speaker.get('id', 'x')}", smart=smart)
+    line = (raw or "").strip()
+    pre = (speaker["name"] + ":").lower()
+    if line.lower().startswith(pre):
+        line = line[len(pre):].strip()
+    return line
+
+
 def daily_journal(character, history):
     """A warm first-person 'journal of the day' reflection on today's conversation, with voice."""
     instr = (

@@ -97,6 +97,22 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msgs_conv ON messages(conversation_id);
 
+CREATE TABLE IF NOT EXISTS chat_groups (
+    id          TEXT PRIMARY KEY,
+    owner_id    TEXT,
+    created_at  TEXT,
+    doc         JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_groups_owner ON chat_groups(owner_id);
+
+CREATE TABLE IF NOT EXISTS group_messages (
+    id          TEXT PRIMARY KEY,
+    group_id    TEXT,
+    created_at  TEXT,
+    doc         JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_gmsgs_group ON group_messages(group_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
     token    TEXT PRIMARY KEY,
     user_id  TEXT,
@@ -715,6 +731,87 @@ def get_messages(conversation_id):
                 (conversation_id,),
             )
             return _rows(cur.fetchall())
+
+
+# --------------- chat de grup ---------------
+
+def create_group(owner_id, name, character_ids):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "owner_id": owner_id,
+        "name": name,
+        "character_ids": list(character_ids or []),
+        "created_at": _now(),
+    }
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_groups (id, owner_id, created_at, doc)"
+                " VALUES (%s, %s, %s, %s)",
+                (doc["id"], owner_id, doc["created_at"], _jdump(doc)),
+            )
+    return doc
+
+
+def list_groups(owner_id):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM chat_groups WHERE owner_id = %s ORDER BY created_at DESC",
+                (owner_id,),
+            )
+            return _rows(cur.fetchall())
+
+
+def get_group(group_id):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT doc FROM chat_groups WHERE id = %s", (group_id,))
+            return _row(cur.fetchone())
+
+
+def delete_group(group_id):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM group_messages WHERE group_id = %s", (group_id,))
+            cur.execute("DELETE FROM chat_groups WHERE id = %s", (group_id,))
+
+
+def add_group_message(group_id, speaker_id, speaker_name, content, audio_b64=None):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "group_id": group_id,
+        "speaker_id": speaker_id,
+        "speaker_name": speaker_name,
+        "content": content,
+        "created_at": _now(),
+    }
+    if audio_b64:
+        doc["audio_b64"] = audio_b64
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO group_messages (id, group_id, created_at, doc)"
+                " VALUES (%s, %s, %s, %s)",
+                (doc["id"], group_id, doc["created_at"], _jdump(doc)),
+            )
+    return doc
+
+
+def get_group_messages(group_id):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM group_messages WHERE group_id = %s ORDER BY created_at ASC",
+                (group_id,),
+            )
+            return _rows(cur.fetchall())
+
+
+def clear_group_messages(group_id):
+    with _conn() as c:
+        with c.cursor() as cur:
+            cur.execute("DELETE FROM group_messages WHERE group_id = %s", (group_id,))
 
 
 def list_media(owner_id):

@@ -3099,7 +3099,20 @@ def render_create():
             key="cf_clone_file",
         )
         if clone_file is not None:
-            st.success("✅ Mostra a fost încărcată. Salvează personajul pentru a testa vocea.")
+            st.success("✅ Mostra a fost încărcată.")
+            if st.button("🔊 Ascultă vocea (verifică înainte de salvare)",
+                         key="cf_voice_preview", use_container_width=True):
+                try:
+                    with st.spinner("Generez un exemplu cu vocea încărcată "
+                                    "(prima dată poate dura 1-2 minute)..."):
+                        _prev = voice.text_to_speech_from_sample(
+                            "Salut! Aceasta este vocea mea. Îți place cum sună?",
+                            clone_file.getvalue(), None, clone_file.name)
+                    st.audio(_prev, format=None)
+                    st.caption("Dacă îți place cum sună, apasă „Salvează personajul”. "
+                               "Dacă nu, încarcă altă mostră.")
+                except Exception as _e:
+                    st.error(f"Nu am putut genera exemplul acum: {_e}")
         st.caption("Chatterbox TTS — clonare vocală gratuită și open-source, fără text de referință.")
 
     st.session_state.setdefault("cf_stab", 0.5)
@@ -5191,8 +5204,148 @@ def render_amintiri():
         st.markdown("---")
 
 
+def _wav_seconds(b):
+    try:
+        import io as _io, wave as _wave
+        w = _wave.open(_io.BytesIO(b), "rb")
+        return w.getnframes() / float(w.getframerate() or 22050)
+    except Exception:  # noqa
+        return 4.0
+
+
+def render_grup():
+    uid = _identity_id()
+    st.markdown("## 👥 Chat de grup")
+    st.caption("Pune mai multe personaje ale tale să discute între ele — tu asculți și poți interveni "
+               "oricând. Relațiile dintre ele (soț/soție/fost etc.) se deduc automat din personalitatea fiecăruia.")
+    gid = st.session_state.get("active_group")
+
+    # ---------- listă + creare ----------
+    if not gid:
+        groups = db.list_groups(uid) if uid else []
+        if groups:
+            st.markdown("#### Grupurile tale")
+            for g in groups:
+                members = [db.get_character(cid) for cid in g.get("character_ids", [])]
+                mnames = ", ".join(m["name"] for m in members if m) or "—"
+                c1, c2, c3 = st.columns([5, 1.6, 1])
+                c1.markdown(f"**👥 {g['name']}**  \n<span style='opacity:.65;font-size:.85rem'>{mnames}</span>",
+                            unsafe_allow_html=True)
+                if c2.button("Deschide", key=f"grp_open_{g['id']}", use_container_width=True):
+                    st.session_state.active_group = g["id"]
+                    st.rerun()
+                if c3.button("🗑", key=f"grp_del_{g['id']}", use_container_width=True):
+                    db.delete_group(g["id"])
+                    st.rerun()
+            st.markdown("---")
+
+        st.markdown("#### Creează un grup nou")
+        my_chars = db.list_characters(owner_id=uid) if uid else []
+        if len(my_chars) < 2:
+            st.info("Ai nevoie de cel puțin 2 personaje ale tale ca să faci un grup. "
+                    "Creează personaje în fila 🎭 Personaje.")
+            return
+        gname = st.text_input("Nume grup", placeholder="ex. Familia", key="grp_new_name")
+        opts = {c["name"]: c["id"] for c in my_chars}
+        chosen = st.multiselect("Alege personajele (minim 2)", list(opts.keys()), key="grp_new_members")
+        if st.button("➕ Creează grupul", type="primary", key="grp_create", use_container_width=True):
+            if not gname.strip():
+                st.error("Dă un nume grupului.")
+            elif len(chosen) < 2:
+                st.error("Alege cel puțin 2 personaje.")
+            else:
+                g = db.create_group(uid, gname.strip(), [opts[n] for n in chosen])
+                st.session_state.active_group = g["id"]
+                st.rerun()
+        return
+
+    # ---------- grup activ ----------
+    group = db.get_group(gid)
+    if not group:
+        st.session_state.active_group = None
+        st.rerun()
+        return
+    chars = [c for c in (db.get_character(cid) for cid in group.get("character_ids", [])) if c]
+
+    t1, t2, t3 = st.columns([2, 1, 1])
+    t1.markdown(f"### 👥 {group['name']}")
+    if t2.button("⬅️ Grupuri", key="grp_back", use_container_width=True):
+        st.session_state.active_group = None
+        st.session_state.grp_playing = False
+        st.rerun()
+    voice_on = t3.toggle("🔊 Voce", value=st.session_state.get("grp_voice_on", False), key="grp_voice_on")
+    st.caption("Participanți: " + ", ".join(c["name"] for c in chars))
+
+    # ---------- generează o tură dacă rulează ----------
+    new_audio = None
+    if st.session_state.get("grp_playing") and len(chars) >= 2:
+        idx = st.session_state.get("grp_turn_idx", 0) % len(chars)
+        speaker = chars[idx]
+        st.session_state.grp_turn_idx = (idx + 1) % len(chars)
+        others = [c for c in chars if c["id"] != speaker["id"]]
+        hist = [{"speaker": m.get("speaker_name", "?"), "content": m.get("content", "")}
+                for m in db.get_group_messages(gid)]
+        line = ""
+        try:
+            line = llm.group_turn(speaker, others, hist, smart=False)
+        except Exception:  # noqa
+            st.session_state.grp_playing = False
+        if line:
+            if voice_on and speaker.get("voice_id"):
+                try:
+                    new_audio = voice.text_to_speech(line, speaker["voice_id"], **_tts_kwargs(speaker))
+                except Exception:  # noqa
+                    new_audio = None
+            db.add_group_message(gid, speaker["id"], speaker["name"], line)
+
+    # ---------- afișează mesajele ----------
+    msgs = db.get_group_messages(gid)
+    if not msgs:
+        st.info("Apasă ▶️ Pornește discuția ca personajele să înceapă să vorbească între ele.")
+    for m in msgs[-40:]:
+        if m.get("speaker_id") == "user":
+            with st.chat_message("user", avatar="🧑"):
+                st.markdown(m.get("content", ""))
+        else:
+            ch = next((c for c in chars if c["id"] == m.get("speaker_id")), None)
+            av = (ch.get("avatar") if ch else None) or "🎭"
+            with st.chat_message("assistant", avatar=av):
+                st.markdown(f"**{m.get('speaker_name', '?')}**  \n{m.get('content', '')}")
+
+    # ---------- controale ----------
+    playing = st.session_state.get("grp_playing", False)
+    b1, b2 = st.columns(2)
+    if not playing:
+        if b1.button("▶️ Pornește discuția", type="primary", key="grp_play", use_container_width=True):
+            st.session_state.grp_playing = True
+            st.rerun()
+    else:
+        if b1.button("⏹️ Stop", key="grp_stop", use_container_width=True):
+            st.session_state.grp_playing = False
+            st.rerun()
+    if b2.button("🧹 Golește discuția", key="grp_clear", use_container_width=True):
+        db.clear_group_messages(gid)
+        st.session_state.grp_turn_idx = 0
+        st.rerun()
+
+    # intervenția ta
+    u = st.chat_input("Scrie ceva în grup (opțional)...")
+    if u:
+        db.add_group_message(gid, "user", "Tu", u)
+        st.rerun()
+
+    # ---------- redă vocea + avansează (buclă live până la Stop) ----------
+    if st.session_state.get("grp_playing"):
+        if new_audio:
+            _autoplay_voice(new_audio, f"grp_{st.session_state.get('grp_turn_idx', 0)}")
+            time.sleep(min(30.0, _wav_seconds(new_audio) + 0.9))
+        else:
+            time.sleep(2.6)
+        st.rerun()
+
+
 def _nav_bar():
-    items = [("personaje", "🎭 Personaje"),
+    items = [("personaje", "🎭 Personaje"), ("grup", "👥 Grup"),
              ("amintiri", "🎞️ Amintiri"), ("chat", "💬 Chat"), ("profil", "👤 Profil")]
     cur = st.session_state.get("nav", "personaje")
     cols = st.columns(len(items))
@@ -5662,6 +5815,8 @@ try:
                 st.info("Niciun chat activ. Deschide un personaj din fila 🎭 Personaje.")
         elif _nav == "exploreaza":
             render_personaje()
+        elif _nav == "grup":
+            render_grup()
         elif _nav == "amintiri":
             render_amintiri()
         elif _nav == "profil":
