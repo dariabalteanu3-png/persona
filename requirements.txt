@@ -13,3 +13,4 @@ openai
 requests
 numpy
 google-genai
+# rebuild-marker: 2026-08-06 (force full restart -> reload db_pg.py cu fixul de scurgere conexiuni Neon)
