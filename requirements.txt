@@ -13,5 +13,4 @@ openai
 requests
 numpy
 google-genai
-# rebuild-marker: 2026-08-06 (force full restart -> reload db_pg.py cu fixul de scurgere conexiuni Neon)
-# rebuild-marker: 2026-08-06b (chat de grup: db_mg/db_pg/llm functii noi -> force restart)
+# rebuild-marker: 2026-08-06c (fix crash „probleme tehnice" la trimitere mesaj: st.html->components.v1.html + st.audio format="audio/wav")
