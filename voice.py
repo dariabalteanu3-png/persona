@@ -25,8 +25,18 @@ load_dotenv(Path(__file__).parent / ".env")
 _HF_SPACE = os.environ.get("CHATTERBOX_SPACE", "ResembleAI/Chatterbox")
 _HF_TOKEN = os.environ.get("HF_TOKEN", "")  # opțional — fără token rate-limit mai strict
 
+# Servicii de REZERVĂ pentru voce (încercate când cel principal e ocupat/căzut).
+# NOTĂ: sunt tot ZeroGPU pe Hugging Face → împart aceeași cotă zilnică gratuită a contului,
+# deci ajută mai ales când serviciul principal e aglomerat, nu când cota e epuizată.
+_FALLBACK_SPACES = [
+    s.strip() for s in os.environ.get(
+        "FALLBACK_VOICE_SPACES", "mrfakename/E2-F5-TTS"
+    ).split(",") if s.strip()
+]
+
 _voice_samples: dict = {}   # voice_id → (sample_bytes, suffix)
 _client = None
+_fallback_clients: dict = {}
 
 
 class VoiceGenerationError(RuntimeError):
@@ -147,19 +157,59 @@ def _call_chatterbox_space(text, sample_bytes, suffix, exaggeration=0.5, cfg_wei
     API-ul Space-ului (/generate_tts_audio) acceptă:
       text, audio_prompt_path, exaggeration, temperature, seed, cfgw, vad_trim
     și returnează calea către fișierul WAV generat (string).
+
+    Dacă serviciul principal eșuează (ocupat/căzut), încearcă serviciile de rezervă.
     """
     from gradio_client import handle_file
 
     tmp_path = _save_temp_sample(sample_bytes, suffix)
     try:
-        result = _predict_with_retry(tmp_path, text, exaggeration, cfg_weight)
+        try:
+            result = _predict_with_retry(tmp_path, text, exaggeration, cfg_weight)
+            return _result_to_wav_bytes(result)
+        except VoiceGenerationError as primary_exc:
+            # Încearcă serviciile de rezervă (o singură dată fiecare, fără GPU în plus garantat).
+            for space in _FALLBACK_SPACES:
+                try:
+                    result = _predict_fallback(space, tmp_path, text)
+                    return _result_to_wav_bytes(result)
+                except Exception:
+                    continue
+            # Toate au eșuat → păstrăm mesajul clar de la serviciul principal.
+            raise primary_exc
     finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
 
-    return _result_to_wav_bytes(result)
+
+def _get_fallback_client(space):
+    """Client Gradio (lazy) pentru un Space de rezervă."""
+    cli = _fallback_clients.get(space)
+    if cli is not None:
+        return cli
+    from gradio_client import Client
+    cli = Client(space, token=_HF_TOKEN or None, verbose=False)
+    _fallback_clients[space] = cli
+    return cli
+
+
+def _predict_fallback(space, tmp_path, text):
+    """Apel către un Space de rezervă (F5-TTS style: /predict).
+
+    Semnătură /predict: (ref_audio, ref_text, gen_text, remove_silence).
+    ref_text gol → Space-ul transcrie automat mostra. Ridică excepție dacă eșuează.
+    """
+    from gradio_client import handle_file
+    client = _get_fallback_client(space)
+    return client.predict(
+        handle_file(tmp_path),  # ref_audio
+        "",                       # ref_text (auto-transcriere)
+        text[:300],               # gen_text
+        True,                     # remove_silence
+        api_name="/predict",
+    )
 
 
 def _predict_with_retry(tmp_path, text, exaggeration, cfg_weight, max_retries=2):
@@ -184,14 +234,19 @@ def _predict_with_retry(tmp_path, text, exaggeration, cfg_weight, max_retries=2)
         except Exception as exc:
             last_exc = exc
             msg = str(exc).lower()
-            if attempt < max_retries and ("zerogpu" in msg or "quota" in msg or "503" in msg or "rate" in msg):
-                time.sleep(15)
+            is_quota = "zerogpu" in msg or "quota" in msg
+            # NU reîncercăm pe eroare de cotă (nu se resetează în câteva secunde) — eșuăm rapid.
+            if attempt < max_retries and not is_quota and (
+                "503" in msg or "queue" in msg or "busy" in msg or "rate" in msg
+            ):
+                time.sleep(8)
                 continue
-            if "zerogpu" in msg or "quota" in msg:
+            if is_quota:
                 raise VoiceGenerationError(
-                    "Serviciul de voce a epuizat timpul de procesare gratuit pentru acum. "
-                    "Așteaptă 1-2 minute și încearcă din nou. Pentru utilizare intensă, "
-                    "configurează un token Hugging Face gratuit în setările aplicației."
+                    "🔇 Vocea clonată gratuită s-a epuizat pentru azi (limita gratuită "
+                    "Hugging Face — circa 5 minute de voce pe zi, împărțite de toți). "
+                    "Se reîncarcă automat în ~24 de ore. Între timp poți folosi chatul "
+                    "normal — cititorul de ecran îți citește mesajele."
                 ) from exc
             if "rate" in msg or "queue" in msg or "busy" in msg or "503" in msg:
                 raise VoiceGenerationError(
@@ -217,10 +272,15 @@ def _result_to_wav_bytes(result):
     if isinstance(result, str):
         return _download_gradio_file(result)
 
-    # Caz 2: tuplu (sample_rate, numpy_array)
-    if isinstance(result, (list, tuple)) and len(result) >= 2:
-        sr, audio_np = result[0], result[1]
-        return _numpy_to_wav(audio_np, int(sr))
+    # Caz 2: tuplu/listă
+    if isinstance(result, (list, tuple)) and result:
+        first = result[0]
+        # 2a: primul element e o cale de fișier (ex. F5-TTS: (audio_path, ...))
+        if isinstance(first, str):
+            return _download_gradio_file(first)
+        # 2b: (sample_rate, numpy_array)
+        if len(result) >= 2:
+            return _numpy_to_wav(result[1], int(first))
 
     raise VoiceGenerationError("Răspuns invalid de la serviciul de voce.")
 

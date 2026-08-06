@@ -13,4 +13,4 @@ openai
 requests
 numpy
 google-genai
-# rebuild-marker: 2026-08-06c (fix crash „probleme tehnice" la trimitere mesaj: st.html->components.v1.html + st.audio format="audio/wav")
+# rebuild-marker: 2026-08-06d (voce: serviciu de rezervă F5-TTS + mesaj clar la epuizare cotă + salvare personaj chiar dacă vocea e ocupată + cache preview)

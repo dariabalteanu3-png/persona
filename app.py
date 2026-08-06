@@ -1549,6 +1549,20 @@ def haptic(ms=15):
     )
 
 
+def _voice_preview_cached(sample_bytes, text, sample_name):
+    """Generează un preview vocal și îl memorează în sesiune, ca să nu consume
+    cota gratuită Hugging Face de fiecare dată (aceeași mostră + text = o singură generare)."""
+    import hashlib
+    key = "vprev_" + hashlib.md5(sample_bytes + (text or "").encode("utf-8")).hexdigest()
+    cached = st.session_state.get(key)
+    if cached:
+        return cached
+    audio = voice.text_to_speech_from_sample(text, sample_bytes, None, sample_name)
+    st.session_state[key] = audio
+    return audio
+
+
+
 def select_char(cid):
     st.session_state.active_id = cid
     st.session_state.creating = False
@@ -3105,9 +3119,10 @@ def render_create():
                 try:
                     with st.spinner("Generez un exemplu cu vocea încărcată "
                                     "(prima dată poate dura 1-2 minute)..."):
-                        _prev = voice.text_to_speech_from_sample(
+                        _prev = _voice_preview_cached(
+                            clone_file.getvalue(),
                             "Salut! Aceasta este vocea mea. Îți place cum sună?",
-                            clone_file.getvalue(), None, clone_file.name)
+                            clone_file.name)
                     st.audio(_prev, format="audio/wav")
                     st.caption("Dacă îți place cum sună, apasă „Salvează personajul”. "
                                "Dacă nu, încarcă altă mostră.")
@@ -3148,22 +3163,29 @@ def render_create():
                 return
             try:
                 sample_bytes = clone_file.getvalue()
-                with st.spinner("Testez mostra cu Chatterbox (prima generare poate dura 1-2 minute)..."):
-                    preview = voice.text_to_speech_from_sample(
-                        "Salut! Aceasta este vocea personajului meu.",
-                        sample_bytes,
-                        None,
-                        clone_file.name,
-                    )
                 voice_id = voice.voice_id_for_sample(sample_bytes)
                 voice_sample_b64 = base64.b64encode(sample_bytes).decode("ascii")
                 voice_sample_name = clone_file.name
                 voice_ref_text = None
-                st.session_state[f"sample_{voice_id}"] = preview
-                st.session_state[f"sample_play_{voice_id}"] = True
                 voice_name = clone_name.strip()
+                # Testăm mostra — dar reutilizăm preview-ul dacă userul a apăsat deja „Ascultă vocea”.
+                try:
+                    with st.spinner("Testez mostra cu Chatterbox (prima generare poate dura 1-2 minute)..."):
+                        preview = _voice_preview_cached(
+                            sample_bytes,
+                            "Salut! Aceasta este vocea personajului meu.",
+                            clone_file.name,
+                        )
+                    st.session_state[f"sample_{voice_id}"] = preview
+                    st.session_state[f"sample_play_{voice_id}"] = True
+                except voice.VoiceGenerationError as _ve:
+                    # Vocea gratuită e ocupată/epuizată → NU blocăm salvarea; se va auzi când revine cota.
+                    st.warning(
+                        f"Personajul se salvează, dar nu am putut testa vocea acum: {_ve} "
+                        "Vocea clonată va funcționa când serviciul gratuit revine (în ~24h)."
+                    )
             except Exception as e:  # noqa
-                st.error(f"Testarea vocii a eșuat: {e}")
+                st.error(f"Nu am putut pregăti vocea: {e}")
                 return
 
         data = {
