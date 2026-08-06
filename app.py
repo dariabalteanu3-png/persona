@@ -4321,7 +4321,7 @@ def render_chat(char):
             db.rename_conversation(active_conv, prompt.strip()[:32])
         
         # Autoplay pentru sunetele ambientale trimise de utilizator
-        _last_msgs = db.get_conversation(active_conv)
+        _last_msgs = db.get_messages(active_conv)
         if _last_msgs:
             _last = _last_msgs[-1]
             _last_kind = _last.get("media_kind", "")

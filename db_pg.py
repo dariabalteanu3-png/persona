@@ -9,6 +9,7 @@ import os
 import uuid
 import json
 from pathlib import Path
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
 import psycopg2
@@ -28,11 +29,29 @@ def _clean_tok(raw):
 # Conexiune
 # ---------------------------------------------------------------------------
 
+@contextmanager
 def _conn():
-    return psycopg2.connect(
+    """Deschide o conexiune Postgres, commit la succes / rollback la eroare,
+    și O ÎNCHIDE ÎNTOTDEAUNA (fix scurgere de conexiuni — psycopg2 `with conn`
+    NU închide conexiunea, doar tranzacția, ceea ce epuiza limita Neon)."""
+    conn = psycopg2.connect(
         os.environ["DATABASE_URL"],
         cursor_factory=psycopg2.extras.RealDictCursor,
     )
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:  # noqa
+            pass
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa
+            pass
 
 
 def _now():
@@ -150,7 +169,7 @@ try:
     with _with_conn as c:
         with c.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM ambient_library")
-            count = cur.fetchone()[0]
+            count = cur.fetchone()["count"]
         if count == 0:
             print("[db] Seeding ambient library...")
             try:
