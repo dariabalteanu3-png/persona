@@ -2,8 +2,8 @@
 
 Fish Audio (model s2.1-pro-free, limba română) este metoda principală pentru
 clonarea și generarea vocilor când cheia FISH_AUDIO_API_KEY este configurată.
-Vocea se clonează din mostra audio (voice_id asociat personajului) și se
-reutilizează prin cache. Dacă Fish Audio nu este configurat sau eșuează,
+Vocea personajului (voice_id → mostra audio) este clonată zero-shot în fiecare
+cerere /v1/tts (câmpul `references`). Dacă Fish Audio nu este configurat sau eșuează,
 aplicația trece automat la Chatterbox (Hugging Face Space) și apoi la
 serviciile de rezervă F5-TTS.
 Biblioteca de sunete ambientale (DSP cu numpy) rămâne neschimbată.
@@ -41,15 +41,14 @@ _FALLBACK_SPACES = [
 # ── Config Fish Audio (metoda principală de clonare/generare voci) ──────────
 # Cheia se citește din variabila de mediu FISH_AUDIO_API_KEY (în Streamlit Cloud:
 # Settings → Secrets — NU se pune în cod/GitHub). Modelul implicit este
-# s2.1-pro-free (configurabil prin FISH_AUDIO_MODEL).
+# s2.1-pro-free (configurabil prin FISH_AUDIO_MODEL) — trimis ca header `model`.
 _FISH_API_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
 _FISH_MODEL = os.environ.get("FISH_AUDIO_MODEL", "s2.1-pro-free")
 _FISH_BASE_URL = os.environ.get("FISH_AUDIO_BASE_URL", "https://api.fish.audio")
 
-_voice_samples: dict = {}   # voice_id → (sample_bytes, suffix)
+_voice_samples: dict = {}   # voice_id → (sample_bytes, suffix, ref_text)
 _client = None
 _fallback_clients: dict = {}
-_fish_voice_cache: dict = {}   # voice_id local → fish voice id (voce clonată)
 
 
 class VoiceGenerationError(RuntimeError):
@@ -132,7 +131,7 @@ def register_voice(voice_id, sample_b64, reference_text=None, sample_name="refer
     suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
     if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
         suffix = ".wav"
-    _voice_samples[voice_id] = (sample, suffix)
+    _voice_samples[voice_id] = (sample, suffix, (reference_text or "").strip())
 
 
 def register_character_voice(character):
@@ -149,14 +148,15 @@ def forget_registered_voices(voice_ids=None):
     """Șterge mostrele vocale din memorie (după ștergerea de către utilizator)."""
     if voice_ids is None:
         _voice_samples.clear()
-        _fish_voice_cache.clear()
         return
     for voice_id in voice_ids:
         _voice_samples.pop(voice_id, None)
-        _fish_voice_cache.pop(voice_id, None)
 
 
 # ── Generare prin Fish Audio (metoda principală) ─────────────────────────────
+# Fish Audio (REST /v1/tts, model s2.1-pro-free trimis ca header `model`) clonează
+# vocea zero-shot direct din mostra audio a personajului (câmpul `references`),
+# fără un pas separat de creare a unei voci pe server.
 
 def fish_audio_available():
     """True când cheia Fish Audio este configurată (metoda principală activă)."""
@@ -164,9 +164,11 @@ def fish_audio_available():
 
 
 def _fish_headers():
+    """Headers pentru /v1/tts: Bearer token + model (header `model`)."""
     return {
         "Authorization": f"Bearer {_FISH_API_KEY.strip()}",
         "Content-Type": "application/json",
+        "model": _FISH_MODEL,
     }
 
 
@@ -190,88 +192,42 @@ def _fish_error_message(resp):
     return str(data)[:200]
 
 
-def _fish_ensure_voice(sample_bytes, sample_name="reference.wav"):
-    """Creează (o singură dată, cu cache) o voce clonată pe Fish Audio din mostră.
+def _fish_reference_audio(sample_bytes, sample_name, reference_text):
+    """Construiește referința audio (zero-shot cloning) pentru /v1/tts.
 
-    Returnează fish voice id (reference_id). Vocea este legată de voice_id-ul
-    local al personajului, deci aceeași mostră reutilizează aceeași voce.
+    `reference_text` (transcrierea mostrei) îmbunătățește fidelitatea clonării;
+    dacă lipsește, încercăm o transcriere automată (Groq/Gemini, dacă sunt
+    configurate), altfel gol.
+    """
+    ref_text = (reference_text or "").strip()
+    if not ref_text:
+        try:
+            ref_text = (transcribe_sample(sample_bytes, sample_name or "reference.wav") or "").strip()
+        except Exception:
+            ref_text = ""
+    return {
+        "audio": base64.b64encode(sample_bytes).decode("utf-8"),
+        "text": ref_text or "",
+    }
+
+
+def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_text=None):
+    """Generează WAV cu Fish Audio (s2.1-pro-free) — clonare zero-shot din mostră.
+
+    Returnează bytes WAV sau ridică VoiceGenerationError (care declanșează
+    fallback-ul automat către Chatterbox).
     """
     if not sample_bytes:
         raise VoiceGenerationError(
             "Mostra audio lipsește pentru clonarea vocii Fish Audio."
         )
-    voice_id = voice_id_for_sample(sample_bytes)
-    if not voice_id:
-        voice_id = "fish:" + hashlib.sha256(sample_bytes).hexdigest()[:24]
-    cached = _fish_voice_cache.get(voice_id)
-    if cached:
-        return cached
-
-    suffix = Path(str(sample_name or "reference.wav")).suffix.lower() or ".wav"
-    mime = {
-        ".wav": "audio/wav",
-        ".mp3": "audio/mpeg",
-        ".m4a": "audio/mp4",
-        ".ogg": "audio/ogg",
-        ".flac": "audio/flac",
-    }.get(suffix, "audio/wav")
-
-    try:
-        resp = requests.post(
-            f"{_FISH_BASE_URL}/v1/voices",
-            headers={"Authorization": _fish_headers()["Authorization"]},
-            data={
-                "name": f"Persona {voice_id[-8:]}",
-                "title": "Persona voice",
-                "description": "Voce clonată automat din aplicația Persona.",
-            },
-            files={"files": (f"reference{suffix}", io.BytesIO(sample_bytes), mime)},
-            timeout=180,
-        )
-    except requests.RequestException as exc:
-        raise VoiceGenerationError(
-            f"Nu mă pot conecta la Fish Audio: {exc}"
-        ) from exc
-
-    if resp.status_code != 200:
-        raise VoiceGenerationError(
-            f"Fish Audio nu a putut crea vocea ({resp.status_code}): "
-            f"{_fish_error_message(resp)}"
-        )
-
-    try:
-        data = resp.json()
-    except ValueError as exc:
-        raise VoiceGenerationError(
-            "Răspuns invalid de la Fish Audio la crearea vocii."
-        ) from exc
-
-    data = data or {}
-    fish_id = data.get("id") or (data.get("voice") or {}).get("id")
-    if not fish_id:
-        raise VoiceGenerationError(
-            "Fish Audio nu a returnat un voice_id valid pentru mostra dată."
-        )
-    _fish_voice_cache[voice_id] = fish_id
-    return fish_id
-
-
-def _fish_generate(text, sample_bytes, sample_name="reference.wav"):
-    """Generează WAV cu Fish Audio (modelul s2.1-pro-free) folosind vocea clonată.
-
-    Returnează bytes WAV sau ridică VoiceGenerationError (care declanșează
-    fallback-ul automat către Chatterbox).
-    """
-    reference_id = _fish_ensure_voice(sample_bytes, sample_name)
     payload = {
         "text": text,
-        "reference_id": reference_id,
-        "model": _FISH_MODEL,
+        "references": [_fish_reference_audio(sample_bytes, sample_name, reference_text)],
         "format": "wav",
         "chunk_length": 200,
         "normalize": True,
         "latency": "normal",
-        "language": "ro",
     }
     try:
         resp = requests.post(
@@ -308,11 +264,11 @@ def _fish_generate(text, sample_bytes, sample_name="reference.wav"):
     raise VoiceGenerationError("Fish Audio a returnat un răspuns audio gol.")
 
 
-def _call_primary(text, sample_bytes, suffix, exaggeration=0.5, cfg_weight=0.5):
+def _call_primary(text, sample_bytes, suffix, exaggeration=0.5, cfg_weight=0.5, reference_text=None):
     """Metoda principală: Fish Audio → la eșec, Chatterbox/HF (cu rezervele lui)."""
     if fish_audio_available():
         try:
-            return _fish_generate(text, sample_bytes, suffix)
+            return _fish_generate(text, sample_bytes, suffix, reference_text=reference_text)
         except VoiceGenerationError as exc:
             print(f"[voice] Fish Audio indisponibil, trec la Chatterbox: {exc}")
     return _call_chatterbox_space(text, sample_bytes, suffix, exaggeration, cfg_weight)
@@ -522,16 +478,17 @@ def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
             "Vocea acestui personaj nu are o mostră salvată. Editează personajul "
             "și încarcă din nou mostra audio."
         )
-    sample_bytes, suffix = info
-    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight)
+    sample_bytes, suffix = info[0], info[1]
+    ref_text = info[2] if len(info) > 2 else ""
+    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight, reference_text=ref_text)
 
 
-def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5):
+def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5, reference_text=None):
     """Generează un preview direct din bytes (înainte de salvarea personajului)."""
     suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
     if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
         suffix = ".wav"
-    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight)
+    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight, reference_text=reference_text)
 
 
 # ── Normalizare text ─────────────────────────────────────────────────────────
@@ -614,9 +571,10 @@ def text_to_speech(
 
 def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
     """Generează un preview direct din mostră (înainte de salvarea personajului).
-    `reference_text` este ignorat — Chatterbox nu necesită transcriere.
+    `reference_text` (transcrierea mostrei) îmbunătățește clonarea Fish Audio,
+    dar e opțional — Chatterbox nu necesită transcriere.
     """
-    return _generate_preview(expressify(text), sample_bytes, sample_name)
+    return _generate_preview(expressify(text), sample_bytes, sample_name, reference_text=reference_text)
 
 
 # ── Sinteza ambientală DSP (neschimbată) ─────────────────────────────────────
