@@ -13,4 +13,6 @@ openai
 requests
 numpy
 google-genai
-# rebuild-marker: 2026-08-06d (voce: serviciu de rezervă F5-TTS + mesaj clar la epuizare cotă + salvare personaj chiar dacă vocea e ocupată + cache preview)
+# voice generation: Fish Audio (principal) + Chatterbox/F5-TTS (fallback)
+fish-audio-sdk
+# rebuild-marker: 2026-08-07 (voce: Fish Audio metoda principală pentru clonare zero-shot)
