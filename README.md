@@ -9,14 +9,15 @@ pinned: false
 
 # Persona — AI Companion App
 
-Aplicație de companie AI cu **clonare vocală** folosind XTTS-v2 (Coqui TTS).
+Aplicație de companie AI cu **clonare vocală în limba română** (Fish Audio).
 
 **Caracteristici principale:**
-- 🎤 **Clonare vocală cu XTTS-v2** — creează voci unice din mostre audio
-- 🌍 **Suport complet pentru limba română** — XTTS-v2 Romanian v2
+- 🎤 **Clonare vocală cu Fish Audio** (model `s2.1-pro-free`) — creează voci unice din mostre audio, în română
+- 🌍 **Suport complet pentru limba română**
 - 🎵 **150+ sunete ambientale** — ploaie, mare, oraș, fermă, sport, sărbători
 - 🔊 **Mixaj voce + ambient** — vocile personajelor se aud natural
 - 💾 **Date persistente** — PostgreSQL pentru salvare personaje și conversații
+- 🔁 **Fallback automat** — Chatterbox/F5-TTS ca rezervă când Fish Audio nu e disponibil
 - 100% gratuit și open-source
 
 ---
@@ -26,7 +27,7 @@ Aplicație de companie AI cu **clonare vocală** folosind XTTS-v2 (Coqui TTS).
 ### 1. Creează un personaj
 ### 2. Încarcă o mostră audio (10-30 secunde, wav/mp3/ogg)
 ### 3. Dă un nume vocii (ex: "Vocea Mariei")
-### 4. Salvează personajul — XTTS-v2 va clona vocea!
+### 4. Salvează personajul — Fish Audio va clona vocea!
 
 **Recomandări pentru mostra audio:**
 - Voce clară, fără zgomot de fundal
@@ -36,9 +37,18 @@ Aplicație de companie AI cu **clonare vocală** folosind XTTS-v2 (Coqui TTS).
 
 ---
 
-## 🖥️ Deploy (XTTS-v2 + GPU)
+## 🔑 Configurare Fish Audio (metoda principală de clonare a vocii)
 
-**Necesar:** GPU NVIDIA cu minim 6GB VRAM
+1. Obține o cheie gratuită de la https://fish.audio (Settings → API Keys).
+2. În **Streamlit Cloud → Settings → Secrets**, adaugă secretul cu numele exact:
+   `FISH_AUDIO_API_KEY` = valoarea cheii (codul acceptă și `FISH_API_KEY` ca alias).
+3. Codul folosește implicit modelul `s2.1-pro-free` (opțional, se poate schimba prin `FISH_AUDIO_MODEL`).
+
+Vezi exemplul complet în `.streamlit_secrets.toml.example`.
+
+---
+
+## 🖥️ Deploy
 
 ```bash
 # Instalează dependențele
@@ -46,17 +56,16 @@ pip install -r requirements.txt
 
 # Setează variabilele de mediu
 export DATABASE_URL="postgresql://..."  # opțional
-export HF_TOKEN="hf_..."  # pentru descărcare model
+export FISH_AUDIO_API_KEY="..."  # metoda principală de clonare a vocii
+export HF_TOKEN="hf_..."  # opțional — pentru rezerva Chatterbox
 
 # Pornește aplicația
 streamlit run app.py --server.port 8501
 ```
 
-XTTS-v2 Romanian v2 va fi descărcat automat de pe HuggingFace.
-
 ---
 
-## 📚 Voci XTTS-v2 (Clonare)
+## 📚 Voci (Clonare)
 
 Poți crea voci nelimitate din mostre audio:
 
@@ -67,7 +76,7 @@ Poți crea voci nelimitate din mostre audio:
 | Personaj fictiv | Folosește o voce din film/joc |
 | Celebritate | Cu atenție la drepturi de autor |
 
-**Vocea se salvează cu personajul** și poate fi reutilizată oricând.
+**Vocea se salvează cu personajul** (asociată prin `voice_id`) și poate fi reutilizată oricând.
 
 ---
 
@@ -96,13 +105,7 @@ Poți crea voci nelimitate din mostre audio:
 
 ## 🔧 Cerințe Tehnice
 
-### Server propriu (XTTS-v2):
-- Python 3.9-3.11
-- GPU NVIDIA CUDA (6GB+ VRAM)
-- 8GB+ RAM
-- PostgreSQL (opțional)
-
 ### Streamlit Cloud:
 - Python 3.9+
-- Necesita GPU pentru XTTS-v2
+- Cheie Fish Audio (`FISH_AUDIO_API_KEY`) — pentru clonarea vocii în română
 - PostgreSQL (opțional dar recomandat)

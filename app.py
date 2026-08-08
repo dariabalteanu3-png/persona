@@ -1597,7 +1597,7 @@ def _tts_kwargs(char):
 
 
 def _any_voice_id():
-    """Return the first saved Chatterbox voice for the current user."""
+    """Return the first saved voice (Fish Audio / cloned) for the current user."""
     try:
         for c in db.list_characters(owner_id=_identity_id()):
             if c.get("voice_id"):
@@ -2954,7 +2954,7 @@ def render_create():
         st.markdown(
             '<div class="hero"><h1>Creează un <span class="accent">personaj</span></h1>'
             "<p>Dă-i un nume, o personalitate și un scenariu. Încarcă o mostră audio "
-            "pentru a-i clona vocea gratuit cu Chatterbox.</p></div>",
+            "pentru a-i clona vocea în română cu Fish Audio.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -3128,7 +3128,8 @@ def render_create():
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     st.error(f"Nu am putut genera exemplul acum: {_e}")
-        st.caption("Chatterbox TTS — clonare vocală gratuită și open-source, fără text de referință.")
+        st.caption("Fish Audio — clonare vocală în română (metoda principală). "
+                   "Chatterbox rămâne ca rezervă automată.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -3170,7 +3171,7 @@ def render_create():
                 voice_name = clone_name.strip()
                 # Testăm mostra — dar reutilizăm preview-ul dacă userul a apăsat deja „Ascultă vocea”.
                 try:
-                    with st.spinner("Testez mostra cu Chatterbox (prima generare poate dura 1-2 minute)..."):
+                    with st.spinner("Testez mostra cu Fish Audio (prima generare poate dura 1-2 minute)..."):
                         preview = _voice_preview_cached(
                             sample_bytes,
                             "Salut! Aceasta este vocea personajului meu.",
@@ -4987,7 +4988,7 @@ def render_gallery():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată gratuit prin Chatterbox. Alege un șablon de mai jos sau apasă "
+            "răspunsul cu vocea clonată în română prin Fish Audio. Alege un șablon de mai jos sau apasă "
             "<b>＋ Personaj nou</b>.</p></div>",
             unsafe_allow_html=True,
         )
@@ -5464,7 +5465,7 @@ def render_personaje():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată gratuit prin Chatterbox. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
+            "răspunsul cu vocea clonată în română prin Fish Audio. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
             unsafe_allow_html=True,
         )
 

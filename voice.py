@@ -1,11 +1,12 @@
 """Generare vocală: Fish Audio (metoda principală) + Chatterbox/F5-TTS (rezervă).
 
 Fish Audio (model s2.1-pro-free, limba română) este metoda principală pentru
-clonarea și generarea vocilor când cheia FISH_AUDIO_API_KEY este configurată.
-Vocea personajului (voice_id → mostra audio) este clonată zero-shot în fiecare
-cerere /v1/tts (câmpul `references`). Dacă Fish Audio nu este configurat sau eșuează,
-aplicația trece automat la Chatterbox (Hugging Face Space) și apoi la
-serviciile de rezervă F5-TTS.
+clonarea și generarea vocilor când cheia este configurată. Vocea personajului
+(voice_id → mostra audio) este clonată zero-shot în fiecare cerere /v1/tts
+(câmpul `references`). Clonarea folosește fish-audio-sdk (msgpack, streaming),
+cu reîncercare prin REST JSON dacă SDK-ul eșuează. Dacă Fish Audio nu este
+configurat sau eșuează, aplicația trece automat la Chatterbox (Hugging Face
+Space) și apoi la serviciile de rezervă F5-TTS.
 Biblioteca de sunete ambientale (DSP cu numpy) rămâne neschimbată.
 """
 
@@ -16,6 +17,7 @@ import math
 import os
 import random
 import re
+import struct
 import tempfile
 import wave
 from pathlib import Path
@@ -39,10 +41,13 @@ _FALLBACK_SPACES = [
 ]
 
 # ── Config Fish Audio (metoda principală de clonare/generare voci) ──────────
-# Cheia se citește din variabila de mediu FISH_AUDIO_API_KEY (în Streamlit Cloud:
-# Settings → Secrets — NU se pune în cod/GitHub). Modelul implicit este
-# s2.1-pro-free (configurabil prin FISH_AUDIO_MODEL) — trimis ca header `model`.
-_FISH_API_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
+# Cheia se citește din variabila de mediu FISH_AUDIO_API_KEY (alias acceptat:
+# FISH_API_KEY). În Streamlit Cloud: Settings → Secrets — NU se pune în cod/GitHub.
+# Modelul implicit este s2.1-pro-free (configurabil prin FISH_AUDIO_MODEL).
+_FISH_API_KEY = (
+    os.environ.get("FISH_AUDIO_API_KEY", "")
+    or os.environ.get("FISH_API_KEY", "")
+)
 _FISH_MODEL = os.environ.get("FISH_AUDIO_MODEL", "s2.1-pro-free")
 _FISH_BASE_URL = os.environ.get("FISH_AUDIO_BASE_URL", "https://api.fish.audio")
 
@@ -154,22 +159,104 @@ def forget_registered_voices(voice_ids=None):
 
 
 # ── Generare prin Fish Audio (metoda principală) ─────────────────────────────
-# Fish Audio (REST /v1/tts, model s2.1-pro-free trimis ca header `model`) clonează
-# vocea zero-shot direct din mostra audio a personajului (câmpul `references`),
-# fără un pas separat de creare a unei voci pe server.
+# Fish Audio (s2.1-pro-free) clonează vocea zero-shot direct din mostra audio a
+# personajului (câmpul `references`), fără un pas separat de creare a unei voci
+# pe server. Clonarea se face prin fish-audio-sdk (protocol msgpack + streaming,
+# recomandat de Fish Audio) cu fallback pe REST JSON dacă SDK-ul nu e disponibil.
 
 def fish_audio_available():
     """True când cheia Fish Audio este configurată (metoda principală activă)."""
     return bool(_FISH_API_KEY and _FISH_API_KEY.strip())
 
 
-def _fish_headers():
-    """Headers pentru /v1/tts: Bearer token + model (header `model`)."""
-    return {
-        "Authorization": f"Bearer {_FISH_API_KEY.strip()}",
-        "Content-Type": "application/json",
-        "model": _FISH_MODEL,
-    }
+def _fish_reference_audio(sample_bytes, sample_name, reference_text):
+    """Construiește referința audio (zero-shot cloning) pentru /v1/tts.
+
+    `reference_text` (transcrierea mostrei) îmbunătățește fidelitatea clonării;
+    dacă lipsește, încercăm o transcriere automată (Groq/Gemini, dacă sunt
+    configurate), altfel gol.
+    """
+    ref_text = (reference_text or "").strip()
+    if not ref_text:
+        try:
+            ref_text = (transcribe_sample(sample_bytes, sample_name or "reference.wav") or "").strip()
+        except Exception:
+            ref_text = ""
+    return ref_text
+
+
+def _repair_wav_header(data):
+    """Rescrie header-ul RIFF dacă SDK-ul a returnat un WAV cu dimensiuni
+    placeholder (streaming), ca fișierul să fie valid pentru playere."""
+    if not data or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return data
+    pos = 12
+    fmt = None
+    data_start = None
+    while pos + 8 <= len(data):
+        cid = data[pos:pos + 4]
+        csize = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        if cid == b"fmt " and csize >= 16:
+            fmt = data[pos + 8:pos + 24]
+        elif cid == b"data":
+            data_start = pos + 8
+            break
+        pos += 8 + csize + (csize & 1)
+    if fmt is None or data_start is None:
+        return data
+    channels = struct.unpack("<H", fmt[2:4])[0]
+    sample_rate = struct.unpack("<I", fmt[4:8])[0]
+    bits = struct.unpack("<H", fmt[14:16])[0] or 16
+    sampwidth = bits // 8
+    block_align = channels * sampwidth
+    byte_rate = sample_rate * block_align
+    audio = data[data_start:]
+    out = bytearray()
+    out += b"RIFF" + struct.pack("<I", 36 + len(audio)) + b"WAVE"
+    out += b"fmt " + struct.pack("<IHHIIHH", 16, 1, channels, sample_rate,
+                                 byte_rate, block_align, bits)
+    out += b"data" + struct.pack("<I", len(audio))
+    out += audio
+    return bytes(out)
+
+
+def _fish_generate_sdk(text, sample_bytes, reference_text):
+    """Generează WAV cu Fish Audio via fish-audio-sdk (msgpack + streaming).
+
+    Returnează bytes WAV sau ridică VoiceGenerationError (declanșează
+    fallback-ul către REST JSON și apoi Chatterbox).
+    """
+    if not sample_bytes:
+        raise VoiceGenerationError(
+            "Mostra audio lipsește pentru clonarea vocii Fish Audio."
+        )
+    try:
+        from fish_audio_sdk import Session
+        from fish_audio_sdk.schemas import TTSRequest, ReferenceAudio
+    except ImportError as exc:
+        raise VoiceGenerationError(
+            "Biblioteca fish-audio-sdk nu este instalată. "
+            "Adaugă 'fish-audio-sdk' în requirements.txt."
+        ) from exc
+    try:
+        session = Session(_FISH_API_KEY.strip(), base_url=_FISH_BASE_URL)
+        stream = session.tts(
+            TTSRequest(
+                text=text,
+                references=[ReferenceAudio(audio=sample_bytes, text=reference_text or "")],
+                format="wav",
+                chunk_length=200,
+                normalize=True,
+                latency="normal",
+            ),
+            backend=_FISH_MODEL,
+        )
+        wav_bytes = b"".join(stream)
+    except Exception as exc:
+        raise VoiceGenerationError(f"Fish Audio (SDK) a eșuat: {exc}") from exc
+    if not wav_bytes:
+        raise VoiceGenerationError("Fish Audio (SDK) a returnat un răspuns audio gol.")
+    return _repair_wav_header(wav_bytes)
 
 
 def _fish_error_message(resp):
@@ -192,30 +279,11 @@ def _fish_error_message(resp):
     return str(data)[:200]
 
 
-def _fish_reference_audio(sample_bytes, sample_name, reference_text):
-    """Construiește referința audio (zero-shot cloning) pentru /v1/tts.
+def _fish_generate_json(text, sample_bytes, sample_name, reference_text):
+    """Fallback REST JSON pentru Fish Audio /v1/tts (clonare zero-shot).
 
-    `reference_text` (transcrierea mostrei) îmbunătățește fidelitatea clonării;
-    dacă lipsește, încercăm o transcriere automată (Groq/Gemini, dacă sunt
-    configurate), altfel gol.
-    """
-    ref_text = (reference_text or "").strip()
-    if not ref_text:
-        try:
-            ref_text = (transcribe_sample(sample_bytes, sample_name or "reference.wav") or "").strip()
-        except Exception:
-            ref_text = ""
-    return {
-        "audio": base64.b64encode(sample_bytes).decode("utf-8"),
-        "text": ref_text or "",
-    }
-
-
-def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_text=None):
-    """Generează WAV cu Fish Audio (s2.1-pro-free) — clonare zero-shot din mostră.
-
-    Returnează bytes WAV sau ridică VoiceGenerationError (care declanșează
-    fallback-ul automat către Chatterbox).
+    Folosit dacă fish-audio-sdk nu este instalat sau eșuează. Returnează
+    bytes WAV sau ridică VoiceGenerationError.
     """
     if not sample_bytes:
         raise VoiceGenerationError(
@@ -223,16 +291,24 @@ def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_te
         )
     payload = {
         "text": text,
-        "references": [_fish_reference_audio(sample_bytes, sample_name, reference_text)],
+        "references": [{
+            "audio": base64.b64encode(sample_bytes).decode("utf-8"),
+            "text": reference_text or "",
+        }],
         "format": "wav",
         "chunk_length": 200,
         "normalize": True,
         "latency": "normal",
     }
+    headers = {
+        "Authorization": f"Bearer {_FISH_API_KEY.strip()}",
+        "Content-Type": "application/json",
+        "model": _FISH_MODEL,
+    }
     try:
         resp = requests.post(
             f"{_FISH_BASE_URL}/v1/tts",
-            headers=_fish_headers(),
+            headers=headers,
             json=payload,
             timeout=120,
         )
@@ -260,8 +336,23 @@ def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_te
             )
         return base64.b64decode(audio_b64)
     if resp.content:
-        return resp.content
+        return _repair_wav_header(resp.content)
     raise VoiceGenerationError("Fish Audio a returnat un răspuns audio gol.")
+
+
+def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_text=None):
+    """Generează WAV cu Fish Audio (s2.1-pro-free) — clonare zero-shot din mostră.
+
+    Metoda principală de clonare/generare a vocii în limba română. Încearcă mai
+    întâi fish-audio-sdk (msgpack), apoi REST JSON. Returnează bytes WAV sau
+    ridică VoiceGenerationError (declanșează fallback-ul către Chatterbox).
+    """
+    ref_text = _fish_reference_audio(sample_bytes, sample_name, reference_text)
+    try:
+        return _fish_generate_sdk(text, sample_bytes, ref_text)
+    except VoiceGenerationError as sdk_exc:
+        print(f"[voice] Fish Audio SDK eșuat, încerc REST JSON: {sdk_exc}")
+    return _fish_generate_json(text, sample_bytes, sample_name, ref_text)
 
 
 def _call_primary(text, sample_bytes, suffix, exaggeration=0.5, cfg_weight=0.5, reference_text=None):
