@@ -791,15 +791,71 @@ def _render_verify():
         st.rerun()
 
 
+def _pw_field(label, key, min_len=6, confirm=False, confirm_label=None):
+    """Câmp de parolă îmbunătățit.
+
+    - comutator „👁️ Arată parola" (verifici ce ai tastat, util pe telefon),
+    - contor live de caractere (✅ verde când atinge minimul cerut),
+    - opțional câmp de confirmare cu verificare live a potrivirii.
+
+    Returnează (parola, confirmarea sau None).
+    """
+    pw = st.text_input(
+        label,
+        type="password" if not st.session_state.get(f"show_{key}", False) else "default",
+        key=key,
+    )
+    st.checkbox(
+        "👁️ Arată parola",
+        key=f"show_{key}",
+        help="Afișează parola ca să poți verifica ce ai tastat.",
+    )
+    typed = st.session_state.get(key, "") or ""
+    n = len(typed)
+    if not typed:
+        st.caption(f"🔒 Minim {min_len} caractere.")
+    elif n > 72:
+        st.caption("⚠️ Parola e prea lungă (maxim 72 de caractere).")
+    elif n >= min_len:
+        st.caption(f"✅ Parolă ok — {n} caractere (minim {min_len}).")
+    else:
+        _rest = min_len - n
+        st.caption(
+            f"⚠️ Mai trebuie {_rest} {'caracter' if _rest == 1 else 'caractere'} — "
+            f"ai {n} din {min_len}."
+        )
+    pw2 = None
+    if confirm:
+        pw2 = st.text_input(
+            confirm_label or "Confirmă parola",
+            type="password" if st.session_state.get(f"show_{key}", False) else "default",
+            key=f"{key}_2",
+        )
+        t2 = st.session_state.get(f"{key}_2", "") or ""
+        if t2:
+            if t2 == typed:
+                st.caption("✅ Parolele coincid.")
+            else:
+                st.caption("❌ Parolele nu coincid încă.")
+    return pw, pw2
+
+
 def _render_reset():
     email = st.session_state["pending_reset_email"]
     st.markdown("🔑 **Resetează parola**")
     st.caption(f"Am trimis un cod de 6 cifre la {email}.")
     code = st.text_input("Cod din email", key="reset_code", max_chars=6)
-    newpw = st.text_input("Parolă nouă (min. 6)", type="password", key="reset_newpw")
+    newpw, newpw2 = _pw_field(
+        "Parolă nouă (min. 6)", "reset_newpw",
+        confirm=True, confirm_label="Confirmă parola nouă",
+    )
     if st.button("Resetează parola", key="do_reset", type="primary", use_container_width=True):
         if not newpw or len(newpw) < 6:
             st.error("Parola trebuie să aibă minim 6 caractere.")
+        elif len(newpw) > 72:
+            st.error("Parola e prea lungă (maxim 72 de caractere).")
+        elif newpw2 != newpw:
+            st.error("Parolele nu se potrivesc.")
         elif not auth.check_code(email, code, "reset"):
             st.error("Cod invalid sau expirat.")
         else:
@@ -847,7 +903,16 @@ def _render_login_register():
         )
         if _mode == "Intră în cont":
             le = st.text_input("Nume utilizator", key="login_email", placeholder="ex: daria")
-            lp = st.text_input("Parolă", type="password", key="login_pw")
+            lp = st.text_input(
+                "Parolă",
+                type="password" if not st.session_state.get("show_login_pw", False) else "default",
+                key="login_pw",
+            )
+            st.checkbox(
+                "👁️ Arată parola",
+                key="show_login_pw",
+                help="Afișează parola ca să poți verifica ce ai tastat.",
+            )
             if st.button("Intră în cont", key="do_login", use_container_width=True, type="primary"):
                 u = auth.authenticate(le, lp)
                 if not u:
@@ -871,12 +936,19 @@ def _render_login_register():
                 if st.session_state.get("fp_question"):
                     st.info(f"Întrebare secretă: **{st.session_state.fp_question}**")
                     fa = st.text_input("Răspunsul tău", key="fp_answer")
-                    fnew = st.text_input("Parolă nouă (min. 6 caractere)", type="password", key="fp_newpw")
+                    fnew, fnew2 = _pw_field(
+                        "Parolă nouă (min. 6 caractere)", "fp_newpw",
+                        confirm=True, confirm_label="Confirmă parola nouă",
+                    )
                     if st.button("Resetează parola", key="fp_reset", use_container_width=True, type="primary"):
                         if not auth.verify_security_answer(st.session_state.fp_user_val, fa):
                             st.error("Răspuns greșit. Mai încearcă.")
                         elif not fnew or len(fnew) < 6:
                             st.error("Parola trebuie să aibă minim 6 caractere.")
+                        elif len(fnew) > 72:
+                            st.error("Parola e prea lungă (maxim 72 de caractere).")
+                        elif fnew2 != fnew:
+                            st.error("Parolele nu se potrivesc.")
                         else:
                             auth.reset_password(st.session_state.fp_user_val, fnew)
                             _login_user(auth.public_by_email(st.session_state.fp_user_val))
@@ -886,18 +958,28 @@ def _render_login_register():
                             st.rerun()
         else:
             rge = st.text_input("Nume utilizator", key="reg_email", placeholder="ex: daria")
-            rgp = st.text_input("Parolă (min. 6 caractere)", type="password", key="reg_pw")
+            rgp, rgp2 = _pw_field(
+                "Parolă (min. 6 caractere)", "reg_pw",
+                confirm=True, confirm_label="Confirmă parola",
+            )
             st.caption("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
             rq = st.selectbox("Alege o întrebare", SECURITY_QUESTIONS, key="reg_q")
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
-                try:
-                    uname = auth.register(rge, rgp, question=rq, answer=ra)
-                    _login_user(auth.public_by_email(uname))
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
+                if not rgp or len(rgp) < 6:
+                    st.error("Parola trebuie să aibă minim 6 caractere.")
+                elif len(rgp) > 72:
+                    st.error("Parola e prea lungă (maxim 72 de caractere).")
+                elif rgp2 != rgp:
+                    st.error("Parolele nu se potrivesc.")
+                else:
+                    try:
+                        uname = auth.register(rge, rgp, question=rq, answer=ra)
+                        _login_user(auth.public_by_email(uname))
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
         st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
         _fix_autofill_js()
 
