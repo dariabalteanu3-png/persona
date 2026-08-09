@@ -333,6 +333,19 @@ async def _reply(system, text, sid, smart=False):
     raise RuntimeError("niciun provider LLM configurat — adaugă GROQ_API_KEY sau GEMINI_API_KEY în secrets")
 
 
+def provider_configuration_error():
+    """Returnează un mesaj sigur pentru UI când nu există un provider de text.
+
+    Nu include valorile secretelor, ci doar numele configurațiilor necesare.
+    """
+    if USE_GROQ or USE_GEMINI or _emergent_key():
+        return ""
+    return (
+        "Chatul AI nu este configurat. Adaugă în Streamlit Secrets unul dintre "
+        "secretele GROQ_API_KEY sau GEMINI_API_KEY, apoi repornește aplicația."
+    )
+
+
 def _run_reply(system, text, sid, tries=2, smart=False):
     """Run a one-shot reply with a light automatic retry on transient failures."""
     last = None

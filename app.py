@@ -3696,7 +3696,11 @@ def render_chat(char):
     # 🔄 „Încearcă din nou" — dacă ultimul mesaj e al utilizatorului și n-a primit răspuns
     # (generarea a eșuat), oferă un buton care regenerează răspunsul, fără a rescrie mesajul.
     if history and history[-1]["role"] == "user":
-        st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
+        _chat_config_error = st.session_state.get("_chat_config_error")
+        if _chat_config_error:
+            st.error(_chat_config_error)
+        else:
+            st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
         if st.button("🔄 Încearcă din nou", key=f"regen_{active_conv}",
                      use_container_width=True, type="primary"):
             _last = history[-1]
@@ -3718,7 +3722,10 @@ def render_chat(char):
                     st.session_state["_last_chat_error"] = f"retry: {e!r}\n{_tb.format_exc()}"
                     _parts = []
             if not _parts:
-                st.error("Tot nu a mers. Mai încearcă în câteva secunde. 💛")
+                st.error(
+                    st.session_state.get("_chat_config_error")
+                    or "Tot nu a mers. Mai încearcă în câteva secunde. 💛"
+                )
             else:
                 _reply = " ".join(_parts)
                 _new = [db.add_message(active_conv, "assistant", p) for p in _parts]
@@ -4400,9 +4407,11 @@ def render_chat(char):
         if not parts:
             # generarea a eșuat: mesajul userului rămâne salvat → reîncărcăm ca să apară
             # butonul „🔄 Încearcă din nou" (de sub mesaje), în loc de o eroare trecătoare.
+            st.session_state["_chat_config_error"] = llm.provider_configuration_error()
             st.rerun()
         else:
             reply = " ".join(parts)
+            st.session_state.pop("_chat_config_error", None)
 
             # ── AMBIANȚĂ CA PRIM MESAJ ─────────────────────────────────────────
             # Generăm rapid ambianța din cuvintele-cheie din răspuns (fără LLM),
