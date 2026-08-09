@@ -3722,6 +3722,7 @@ def render_chat(char):
                     st.session_state["_last_chat_error"] = f"retry: {e!r}\n{_tb.format_exc()}"
                     _parts = []
             if not _parts:
+                st.session_state["_chat_config_error"] = llm.provider_configuration_error()
                 st.error(
                     st.session_state.get("_chat_config_error")
                     or "Tot nu a mers. Mai încearcă în câteva secunde. 💛"
