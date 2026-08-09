@@ -1,1 +1,2 @@
 - [Chatterbox TTS architecture](chatterbox-tts.md) — vocea rulează in-proces Chatterbox TTS (fără server separat); suportă limba română și clonare vocală.
+- [Chat provider secrets](chat-provider-secrets.md) — chatul text are nevoie de un provider LLM separat de cheia Fish Audio pentru voce.
