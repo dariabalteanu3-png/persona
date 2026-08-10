@@ -756,6 +756,71 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
                 out[pos:pos + clen] += tone * env * float(rng.uniform(0.15, 0.5))
         return out
 
+    def clicks(count, lo=1000, hi=8000, min_len=0.01, max_len=0.05, amp=0.5, decay=18):
+        """Clicuri/ciocniri scurte la poziții aleatorii (obiecte, taste, chei)."""
+        out = np.zeros(n)
+        for _ in range(count):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(min_len, max_len) * sr), n - p)
+            if blen > 0:
+                out[p:p + blen] += fband(rng.uniform(-1, 1, blen), lo, hi) * np.exp(-np.linspace(0, decay, blen)) * float(rng.uniform(0.4, 1.0)) * amp
+        return out
+
+    def metal_ring(freq, min_len=0.3, max_len=1.2, amp=0.3, count=3, partials=(1.0, 2.76, 5.4)):
+        """Clic metalic cu parțiale — chei, bijuterii, clopoței."""
+        out = np.zeros(n)
+        for _ in range(count):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(min_len, max_len) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                tone = np.zeros(clen)
+                for i, m in enumerate(partials):
+                    tone += (0.7 ** i) * np.sin(2 * np.pi * freq * m * tl)
+                env = np.exp(-np.linspace(0, 3.5, clen))
+                out[p:p + clen] += tone * env * float(rng.uniform(0.5, 1.0)) * amp
+        return out
+
+    def creak_sound(freq_lo=120, freq_hi=500, count=3, min_len=0.3, max_len=1.0, amp=0.3):
+        """Scârțâit de lemn/mobilier/ușă — glisare de frecvență."""
+        out = np.zeros(n)
+        for _ in range(count):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(min_len, max_len) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                f = float(rng.uniform(freq_lo, freq_hi))
+                glide = f * (1 + float(rng.uniform(-0.5, 0.5)) * np.sin(2 * np.pi * float(rng.uniform(1, 4)) * tl))
+                tone = np.sin(2 * np.pi * np.cumsum(glide) / sr)
+                out[p:p + clen] += tone * np.sin(np.pi * np.linspace(0, 1, clen)) * float(rng.uniform(0.5, 1.0)) * amp
+        return out
+
+    def snap_sound(count=1, lo=2000, hi=8000, amp=0.5):
+        """Trosnet/uscat — elastic, capace, nasturi."""
+        out = np.zeros(n)
+        for _ in range(count):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.01, 0.03) * sr), n - p)
+            if blen > 0:
+                out[p:p + blen] += fband(rng.uniform(-1, 1, blen), lo, hi) * np.exp(-np.linspace(0, 30, blen)) * float(rng.uniform(0.4, 1.0)) * amp
+        return out
+
+    def foley_rush(lo=300, hi=6000, rate=4.0, amp=0.3):
+        """Foșnet/frecătură textilă sau de material — zgomot filtrat cu LFO."""
+        return fband(pink(lo, hi), lo, hi) * am(rate, 0.45, 0.55) * amp
+
+    def water_bubble(count=8, min_len=0.04, max_len=0.15, lo=600, hi=2500, amp=0.12):
+        """Bule de apă — clicuri cu frecvență în creștere."""
+        out = np.zeros(n)
+        for _ in range(count):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(min_len, max_len) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                freq = float(rng.uniform(lo, hi)) * (1 + 0.8 * tl / (blen / sr))
+                out[p:p + blen] += np.sin(2 * np.pi * np.cumsum(freq) / sr) * np.sin(np.pi * np.linspace(0, 1, blen)) * amp
+        return out
+
     # ── Preseturi ────────────────────────────────────────────────────────────
     if preset == "rain":
         base = pink(100, 8000) * am(rng.uniform(0.05, 0.15), 0.1, 0.9) * 0.55
@@ -2070,6 +2135,1216 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         silence = pink(40, 400) * 0.02
         sig = gongs + silence
 
+    # ══════════════ SUNETE NOI — FAMILII FIZICE ═══════════════════════════════
+    # ── 🚪 Casă / obiecte ─────────────────────────────────────────────────────
+    elif preset == "keys_jingle":
+        base = foley_rush(2500, 9500, float(rng.uniform(3, 8)), 0.10)
+        sig = metal_ring(float(rng.uniform(2500, 6500)), 0.03, 0.15, 0.28, int(rng.integers(4, 10))) + base
+
+    elif preset == "keys_put":
+        sig = clicks(int(rng.integers(3, 7)), 2000, 9000, 0.01, 0.04, 0.4) + metal_ring(float(rng.uniform(3000, 7000)), 0.05, 0.2, 0.18, 3)
+
+    elif preset == "door_handle":
+        sig = clicks(2, 800, 4000, 0.01, 0.04, 0.5) + fband(pink(200, 2500), 300, 2000) * np.exp(-np.linspace(0, 15, n)) * 0.2
+
+    elif preset == "door_creak_open":
+        sig = creak_sound(120, 500, int(rng.integers(2, 5)), 0.4, 1.2, 0.35)
+        sig += foley_rush(200, 3000, float(rng.uniform(2, 5)), 0.12)
+
+    elif preset == "door_close":
+        sig = fband(pink(60, 1200), 80, 1000) * np.exp(-np.linspace(0, 8, n)) * 0.5
+        sig += clicks(2, 400, 3000, 0.01, 0.05, 0.45)
+
+    elif preset == "door_slam":
+        sig = fband(pink(40, 900), 50, 700) * np.exp(-np.linspace(0, 6, n)) * 0.75
+        sig += clicks(2, 300, 2500, 0.01, 0.06, 0.5)
+
+    elif preset == "door_fridge":
+        sig = fband(pink(60, 1500), 70, 1200) * np.exp(-np.linspace(0, 9, n)) * 0.5
+        sig += clicks(2, 600, 4000, 0.008, 0.03, 0.35)
+        sig += metal_ring(float(rng.uniform(1500, 3000)), 0.05, 0.25, 0.15, 2)
+
+    elif preset == "door_oven":
+        sig = fband(pink(100, 2200), 150, 1800) * np.exp(-np.linspace(0, 8, n)) * 0.45
+        sig += clicks(3, 900, 5000, 0.008, 0.04, 0.4) + creak_sound(300, 700, 1, 0.2, 0.5, 0.15)
+
+    elif preset == "door_lift":
+        sig = metal_ring(float(rng.uniform(1200, 2600)), 0.05, 0.3, 0.2, 3) + clicks(2, 1500, 6000, 0.01, 0.04, 0.35)
+        sig += fband(pink(60, 800), 70, 700) * np.exp(-np.linspace(0, 10, n)) * 0.3
+
+    elif preset == "door_train":
+        sig = fband(pink(200, 4000), 300, 3500) * np.exp(-np.linspace(0, 6, n)) * 0.5
+        sig += clicks(3, 800, 4000, 0.01, 0.05, 0.5) + creak_sound(200, 600, 1, 0.3, 0.8, 0.2)
+
+    elif preset == "door_plane":
+        sig = fband(pink(60, 1500), 80, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.45
+        sig += clicks(2, 500, 3500, 0.01, 0.05, 0.4) + foley_rush(300, 2500, 3, 0.12)
+
+    elif preset == "door_cabinet":
+        sig = fband(pink(150, 2500), 200, 2000) * np.exp(-np.linspace(0, 8, n)) * 0.4
+        sig += clicks(2, 1000, 5000, 0.008, 0.03, 0.35) + creak_sound(400, 900, 1, 0.15, 0.4, 0.15)
+
+    elif preset == "door_bathroom":
+        sig = creak_sound(150, 600, int(rng.integers(1, 3)), 0.3, 0.9, 0.3)
+        sig += fband(pink(80, 1500), 90, 1200) * np.exp(-np.linspace(0, 9, n)) * 0.4
+        sig += clicks(1, 500, 3000, 0.01, 0.04, 0.35)
+
+    elif preset == "floor_creak":
+        sig = creak_sound(90, 350, int(rng.integers(2, 5)), 0.3, 1.1, 0.35)
+        sig += pink(40, 300) * 0.03
+
+    elif preset == "furniture_move":
+        sig = foley_rush(100, 2000, float(rng.uniform(1.5, 4)), 0.35) + creak_sound(80, 300, int(rng.integers(2, 4)), 0.4, 1.2, 0.3)
+
+    elif preset == "chair_pull":
+        sig = foley_rush(150, 3000, float(rng.uniform(2, 5)), 0.3) + creak_sound(150, 500, int(rng.integers(1, 3)), 0.2, 0.6, 0.3)
+
+    elif preset == "chair_push":
+        sig = foley_rush(200, 3000, float(rng.uniform(2, 5)), 0.3)
+        sig += clicks(2, 400, 2500, 0.01, 0.06, 0.4)
+
+    elif preset == "table_touch":
+        sig = clicks(1, 500, 3000, 0.01, 0.05, 0.4) + fband(pink(100, 2000), 150, 1500) * np.exp(-np.linspace(0, 14, n)) * 0.2
+
+    elif preset == "object_fall":
+        sig = fband(pink(50, 1500), 60, 1200) * np.exp(-np.linspace(0, 7, n)) * 0.55
+        sig += clicks(2, 500, 3500, 0.01, 0.05, 0.4)
+
+    elif preset == "object_break":
+        sig = clicks(int(rng.integers(6, 14)), 2000, 9500, 0.01, 0.04, 0.5) + metal_ring(float(rng.uniform(3000, 8000)), 0.05, 0.3, 0.25, 5)
+        sig += fband(pink(100, 3000), 150, 2500) * np.exp(-np.linspace(0, 5, n)) * 0.4
+
+    elif preset == "glass_put":
+        sig = clicks(2, 2000, 9000, 0.005, 0.03, 0.35) + metal_ring(float(rng.uniform(3000, 7000)), 0.05, 0.25, 0.2, 3)
+        sig += fband(pink(80, 1000), 100, 800) * np.exp(-np.linspace(0, 12, n)) * 0.2
+
+    elif preset == "box_open":
+        sig = foley_rush(300, 3000, float(rng.uniform(2, 4)), 0.3) + clicks(2, 500, 3000, 0.01, 0.05, 0.4)
+        sig += creak_sound(200, 700, 1, 0.2, 0.6, 0.2)
+
+    elif preset == "box_close":
+        sig = fband(pink(100, 2000), 150, 1500) * np.exp(-np.linspace(0, 8, n)) * 0.45
+        sig += clicks(2, 600, 3500, 0.008, 0.04, 0.4)
+
+    elif preset == "packaging":
+        sig = foley_rush(800, 8000, float(rng.uniform(4, 8)), 0.3) + snap_sound(int(rng.integers(2, 5)), 2000, 7000, 0.35)
+
+    elif preset == "tape_peel":
+        sig = foley_rush(1200, 7000, float(rng.uniform(3, 6)), 0.28) + snap_sound(2, 1500, 6000, 0.3)
+
+    elif preset == "pen_write":
+        sig = clicks(int(rng.integers(6, 16)), 800, 3500, 0.01, 0.03, 0.35)
+        sig += foley_rush(800, 4000, float(rng.uniform(6, 12)), 0.12)
+
+    elif preset == "paper_rustle":
+        sig = foley_rush(1500, 8000, float(rng.uniform(4, 9)), 0.3) + clicks(int(rng.integers(3, 8)), 2000, 8000, 0.01, 0.03, 0.2)
+
+    elif preset == "paperclip":
+        sig = metal_ring(float(rng.uniform(4000, 8000)), 0.03, 0.12, 0.25, int(rng.integers(2, 5)))
+
+    elif preset == "rubber_band":
+        sig = snap_sound(int(rng.integers(2, 5)), 1000, 5000, 0.4) + foley_rush(500, 3500, 4, 0.15)
+
+    # ── 👕 Haine ──────────────────────────────────────────────────────────────
+    elif preset == "fabric_rustle":
+        sig = foley_rush(400, 6000, float(rng.uniform(3, 8)), 0.3)
+
+    elif preset == "clothes_put":
+        sig = foley_rush(300, 5000, float(rng.uniform(2, 5)), 0.35) + clicks(2, 800, 4000, 0.01, 0.05, 0.25)
+
+    elif preset == "jacket_zip":
+        sig = foley_rush(800, 7000, float(rng.uniform(2, 4)), 0.25) + clicks(int(rng.integers(2, 5)), 1500, 8000, 0.01, 0.03, 0.4)
+
+    elif preset == "zipper":
+        sig = foley_rush(1200, 8000, float(rng.uniform(3, 6)), 0.28)
+        sig += clicks(int(rng.integers(2, 5)), 1500, 8000, 0.005, 0.03, 0.4)
+
+    elif preset == "button":
+        sig = snap_sound(int(rng.integers(1, 3)), 1500, 6000, 0.4) + clicks(1, 800, 4000, 0.01, 0.03, 0.3)
+
+    elif preset == "belt_buckle":
+        sig = metal_ring(float(rng.uniform(2500, 5000)), 0.05, 0.25, 0.25, int(rng.integers(2, 4))) + clicks(1, 1000, 4000, 0.01, 0.03, 0.35)
+
+    elif preset == "socks":
+        sig = foley_rush(400, 4500, float(rng.uniform(2, 5)), 0.25)
+
+    elif preset == "gloves_put":
+        sig = foley_rush(300, 5000, float(rng.uniform(2, 4)), 0.3) + clicks(1, 600, 3000, 0.01, 0.04, 0.25)
+
+    elif preset == "scarf":
+        sig = foley_rush(300, 4500, float(rng.uniform(2, 5)), 0.3)
+
+    elif preset == "hanger":
+        sig = metal_ring(float(rng.uniform(2000, 4500)), 0.05, 0.3, 0.22, int(rng.integers(2, 5)))
+        sig += foley_rush(400, 4000, float(rng.uniform(2, 5)), 0.15)
+
+    elif preset == "closet":
+        sig = creak_sound(150, 600, int(rng.integers(2, 4)), 0.3, 1.0, 0.28)
+        sig += foley_rush(400, 4500, float(rng.uniform(2, 4)), 0.2) + clicks(2, 600, 3500, 0.01, 0.05, 0.3)
+
+    elif preset == "clothes_fold":
+        sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.3) + clicks(2, 700, 3500, 0.01, 0.05, 0.25)
+
+    elif preset == "clothes_bag":
+        sig = foley_rush(500, 6000, float(rng.uniform(3, 6)), 0.3) + foley_rush(1500, 7000, 3, 0.2)
+
+    # ── 👜 Genți / obiecte personale ──────────────────────────────────────────
+    elif preset == "bag_open":
+        sig = foley_rush(800, 7000, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 5)), 1200, 7000, 0.01, 0.03, 0.35)
+
+    elif preset == "bag_zip":
+        sig = foley_rush(1200, 8000, float(rng.uniform(2, 5)), 0.3) + clicks(int(rng.integers(2, 4)), 1500, 7000, 0.005, 0.03, 0.4)
+
+    elif preset == "wallet":
+        sig = clicks(2, 500, 3000, 0.01, 0.04, 0.4) + foley_rush(800, 5000, 4, 0.2) + metal_ring(float(rng.uniform(3000, 6000)), 0.03, 0.15, 0.15, 2)
+
+    elif preset == "money":
+        sig = foley_rush(1500, 7000, float(rng.uniform(3, 6)), 0.25) + clicks(int(rng.integers(2, 5)), 2000, 6000, 0.01, 0.03, 0.2)
+
+    elif preset == "coins":
+        sig = metal_ring(float(rng.uniform(4000, 9000)), 0.03, 0.12, 0.28, int(rng.integers(4, 9)))
+
+    elif preset == "card_swipe":
+        sig = foley_rush(800, 6000, float(rng.uniform(2, 4)), 0.25) + clicks(2, 1500, 6000, 0.005, 0.02, 0.35)
+
+    elif preset == "keys_bag":
+        sig = metal_ring(float(rng.uniform(2500, 7000)), 0.03, 0.15, 0.3, int(rng.integers(4, 9)))
+        sig += foley_rush(500, 5000, 4, 0.15)
+
+    elif preset == "bag_put":
+        sig = fband(pink(50, 1500), 60, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.5
+        sig += clicks(2, 400, 2500, 0.01, 0.05, 0.4)
+
+    elif preset == "suitcase_open":
+        sig = clicks(2, 500, 3000, 0.01, 0.05, 0.45) + creak_sound(200, 700, 2, 0.3, 0.8, 0.25)
+        sig += foley_rush(400, 4000, 3, 0.2)
+
+    elif preset == "suitcase_zip":
+        sig = foley_rush(1000, 8000, float(rng.uniform(2, 5)), 0.3) + clicks(int(rng.integers(2, 5)), 1500, 7000, 0.005, 0.03, 0.4)
+
+    elif preset == "suitcase_wheels":
+        sig = footsteps(float(rng.uniform(4, 8)), lo=200, hi=3500, amp=0.3)
+        sig += foley_rush(300, 2500, float(rng.uniform(4, 8)), 0.12)
+
+    elif preset == "luggage_lift":
+        sig = foley_rush(200, 2500, float(rng.uniform(2, 4)), 0.3) + clicks(2, 400, 2500, 0.01, 0.05, 0.4)
+
+    # ── 🚿 Baie ───────────────────────────────────────────────────────────────
+    elif preset == "toilet_seat":
+        sig = clicks(2, 300, 2500, 0.01, 0.06, 0.5) + fband(pink(100, 1500), 120, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.35
+
+    elif preset == "toilet_flush":
+        rush = fband(pink(300, 5000), 400, 4000) * np.exp(-np.linspace(0, 3, n)) * 0.6
+        gurgle = foley_rush(200, 2000, float(rng.uniform(3, 6)), 0.3)
+        sig = rush + gurgle + water_bubble(int(rng.integers(3, 7)), 0.05, 0.2, 400, 1800, 0.15)
+
+    elif preset == "sink_water":
+        sig = fband(pink(500, 8000), 700, 7000) * am(rng.uniform(0.2, 0.4), 0.15, 0.85) * 0.4
+        sig += foley_rush(2000, 9000, 4, 0.12)
+
+    elif preset == "bath_fill":
+        sig = fband(pink(300, 6000), 400, 5000) * am(rng.uniform(0.15, 0.3), 0.2, 0.8) * 0.4
+        sig += water_bubble(int(rng.integers(4, 10)), 0.04, 0.12, 500, 2500, 0.1)
+
+    elif preset == "drain":
+        sig = fband(pink(200, 4000), 250, 3500) * np.exp(-np.linspace(0, 3.5, n)) * 0.5
+        sig += water_bubble(int(rng.integers(5, 12)), 0.04, 0.18, 300, 2000, 0.2)
+
+    elif preset == "cosmetic_pump":
+        sig = clicks(2, 500, 2500, 0.01, 0.05, 0.4) + foley_rush(800, 4000, 3, 0.2)
+
+    elif preset == "tube_squeeze":
+        sig = foley_rush(800, 4000, float(rng.uniform(3, 6)), 0.25) + clicks(1, 1000, 3500, 0.01, 0.04, 0.3)
+
+    elif preset == "toothbrush":
+        sig = clicks(2, 1000, 4500, 0.01, 0.04, 0.3) + foley_rush(800, 4500, 4, 0.15)
+
+    elif preset == "rinse_cup":
+        sig = metal_ring(float(rng.uniform(2500, 5500)), 0.05, 0.3, 0.2, 3)
+        sig += water_bubble(int(rng.integers(3, 6)), 0.04, 0.12, 600, 2500, 0.1)
+
+    elif preset == "mirror_steam":
+        sig = foley_rush(300, 3500, float(rng.uniform(2, 4)), 0.25)
+
+    elif preset == "razor":
+        sig = foley_rush(1500, 8000, float(rng.uniform(4, 8)), 0.2)
+        sig += clicks(int(rng.integers(3, 8)), 2000, 8000, 0.01, 0.03, 0.3)
+
+    elif preset == "electric_razor":
+        sig = fband(pink(300, 5000), 400, 4000) * am(float(rng.uniform(50, 90)), 0.4, 0.6) * 0.35
+        sig += sine(float(rng.uniform(1500, 3500)), 0.02)
+
+    elif preset == "epilator":
+        sig = fband(pink(500, 7000), 600, 6000) * am(float(rng.uniform(60, 100)), 0.45, 0.55) * 0.3
+        sig += clicks(int(rng.integers(4, 10)), 2000, 8000, 0.005, 0.02, 0.2)
+
+    elif preset == "tweezers":
+        sig = clicks(int(rng.integers(1, 3)), 2500, 8000, 0.005, 0.02, 0.35)
+
+    # ── 💇 Salon / îngrijire ──────────────────────────────────────────────────
+    elif preset == "scissors":
+        sig = clicks(int(rng.integers(2, 5)), 2000, 8000, 0.005, 0.03, 0.4)
+        sig += metal_ring(float(rng.uniform(4000, 8000)), 0.02, 0.1, 0.18, 2)
+
+    elif preset == "clippers":
+        sig = fband(pink(150, 3000), 200, 2500) * am(float(rng.uniform(45, 80)), 0.5, 0.5) * 0.4
+        sig += sine(float(rng.uniform(120, 300)), 0.03)
+
+    elif preset == "rotating_brush":
+        sig = foley_rush(300, 4000, float(rng.uniform(6, 12)), 0.3)
+        sig += fband(pink(100, 1500), 120, 1200) * am(float(rng.uniform(8, 16)), 0.4, 0.6) * 0.15
+
+    elif preset == "flat_iron":
+        sig = foley_rush(500, 5000, float(rng.uniform(2, 4)), 0.28)
+        sig += clicks(1, 1000, 4000, 0.01, 0.03, 0.2)
+
+    elif preset == "hair_spray":
+        sig = foley_rush(2000, 9500, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 4)), 3000, 9000, 0.02, 0.06, 0.25)
+
+    elif preset == "hair_cut":
+        sig = clicks(int(rng.integers(4, 9)), 2000, 8000, 0.005, 0.03, 0.3)
+        sig += foley_rush(500, 6000, 4, 0.12)
+
+    elif preset == "comb_put":
+        sig = clicks(1, 800, 3500, 0.01, 0.04, 0.35) + fband(pink(200, 2000), 300, 1500) * np.exp(-np.linspace(0, 12, n)) * 0.18
+
+    elif preset == "salon_chair":
+        sig = creak_sound(200, 700, int(rng.integers(1, 3)), 0.3, 0.9, 0.3)
+        sig += foley_rush(300, 3000, float(rng.uniform(2, 4)), 0.2)
+
+    # ── 💄 Cosmetice ──────────────────────────────────────────────────────────
+    elif preset == "makeup_open":
+        sig = clicks(2, 800, 4500, 0.01, 0.04, 0.4) + foley_rush(500, 5000, 3, 0.2)
+
+    elif preset == "makeup_close":
+        sig = clicks(1, 800, 4500, 0.01, 0.05, 0.45) + fband(pink(200, 3000), 300, 2500) * np.exp(-np.linspace(0, 10, n)) * 0.25
+
+    elif preset == "brush_tap":
+        sig = clicks(int(rng.integers(2, 6)), 2000, 7000, 0.01, 0.03, 0.35)
+
+    elif preset == "foundation_pump":
+        sig = clicks(2, 500, 2500, 0.01, 0.05, 0.4) + foley_rush(800, 4000, 3, 0.15)
+
+    elif preset == "concealer":
+        sig = clicks(1, 800, 3500, 0.01, 0.04, 0.35) + foley_rush(500, 3500, 3, 0.2)
+
+    elif preset == "bronzer":
+        sig = foley_rush(1000, 5000, float(rng.uniform(3, 6)), 0.3) + clicks(1, 1500, 5000, 0.01, 0.03, 0.25)
+
+    elif preset == "brow_pencil":
+        sig = clicks(int(rng.integers(3, 8)), 800, 4000, 0.01, 0.03, 0.3)
+        sig += foley_rush(500, 3500, 5, 0.12)
+
+    elif preset == "mascara":
+        sig = clicks(int(rng.integers(2, 5)), 1500, 6000, 0.01, 0.04, 0.35) + foley_rush(800, 4500, 4, 0.15)
+
+    elif preset == "lash_glue":
+        sig = foley_rush(800, 5000, float(rng.uniform(2, 4)), 0.25) + clicks(1, 1500, 6000, 0.01, 0.03, 0.3)
+
+    elif preset == "sponge":
+        sig = foley_rush(500, 4000, float(rng.uniform(3, 6)), 0.25) + water_bubble(int(rng.integers(2, 5)), 0.05, 0.15, 500, 2000, 0.12)
+
+    elif preset == "spray_mist":
+        sig = foley_rush(2000, 9500, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 4)), 3000, 9000, 0.02, 0.06, 0.25)
+
+    elif preset == "cotton_pad":
+        sig = foley_rush(1500, 6000, float(rng.uniform(3, 6)), 0.25)
+
+    elif preset == "cream_apply":
+        sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.3)
+
+    elif preset == "serum_drop":
+        sig = water_bubble(int(rng.integers(1, 3)), 0.05, 0.15, 800, 3000, 0.25)
+        sig += foley_rush(800, 4000, 2, 0.1)
+
+    elif preset == "face_mask":
+        sig = foley_rush(600, 6000, float(rng.uniform(3, 6)), 0.3) + clicks(1, 1000, 4000, 0.01, 0.04, 0.2)
+
+    # ── 🌸 Parfumuri ──────────────────────────────────────────────────────────
+    elif preset == "perfume_spray":
+        sig = foley_rush(2000, 9500, float(rng.uniform(3, 6)), 0.32) + clicks(int(rng.integers(2, 5)), 3000, 9000, 0.02, 0.07, 0.3)
+
+    elif preset == "bottle_cap":
+        sig = clicks(2, 1000, 5000, 0.01, 0.04, 0.4) + metal_ring(float(rng.uniform(2500, 5000)), 0.03, 0.15, 0.2, 2)
+
+    elif preset == "deodorant_spray":
+        sig = foley_rush(1800, 9000, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 4)), 2500, 8500, 0.02, 0.06, 0.28)
+
+    elif preset == "roll_on":
+        sig = foley_rush(500, 4500, float(rng.uniform(3, 6)), 0.28) + water_bubble(int(rng.integers(1, 3)), 0.05, 0.12, 600, 2000, 0.12)
+
+    elif preset == "stick_deo":
+        sig = foley_rush(300, 3500, float(rng.uniform(2, 5)), 0.25) + clicks(1, 600, 3000, 0.01, 0.04, 0.2)
+
+    elif preset == "body_spray":
+        sig = foley_rush(2000, 9500, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 4)), 3000, 9000, 0.02, 0.06, 0.28)
+
+    elif preset == "hand_cream":
+        sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.28)
+
+    elif preset == "perfume_wrist":
+        sig = clicks(1, 1500, 6000, 0.01, 0.04, 0.2) + foley_rush(2000, 9000, 4, 0.12)
+
+    # ── 💅 Unghii ─────────────────────────────────────────────────────────────
+    elif preset == "polish_shake":
+        sig = clicks(int(rng.integers(3, 7)), 800, 4000, 0.01, 0.05, 0.35) + foley_rush(300, 2500, 6, 0.12)
+
+    elif preset == "polish_open":
+        sig = clicks(2, 800, 4500, 0.01, 0.05, 0.4) + foley_rush(500, 4000, 3, 0.15)
+
+    elif preset == "polish_brush":
+        sig = foley_rush(800, 4500, float(rng.uniform(3, 6)), 0.2) + clicks(1, 1000, 4000, 0.01, 0.03, 0.2)
+
+    elif preset == "nail_file":
+        sig = foley_rush(1200, 7000, float(rng.uniform(5, 10)), 0.3)
+
+    elif preset == "nail_clipper":
+        sig = clicks(int(rng.integers(2, 5)), 1500, 7000, 0.005, 0.03, 0.4)
+
+    elif preset == "cuticle":
+        sig = clicks(int(rng.integers(2, 6)), 1500, 6000, 0.01, 0.04, 0.3) + foley_rush(800, 4000, 4, 0.12)
+
+    # ── 💎 Bijuterii ──────────────────────────────────────────────────────────
+    elif preset == "jewelry_box_open":
+        sig = clicks(2, 800, 4000, 0.01, 0.05, 0.4) + creak_sound(300, 800, 1, 0.2, 0.6, 0.2)
+
+    elif preset == "jewelry_box_close":
+        sig = clicks(2, 800, 4000, 0.01, 0.05, 0.45) + fband(pink(200, 2500), 300, 2000) * np.exp(-np.linspace(0, 9, n)) * 0.3
+
+    elif preset == "earrings":
+        sig = metal_ring(float(rng.uniform(4000, 8000)), 0.03, 0.15, 0.25, int(rng.integers(2, 5))) + clicks(1, 2000, 6000, 0.005, 0.02, 0.2)
+
+    elif preset == "bracelet":
+        sig = metal_ring(float(rng.uniform(3000, 7000)), 0.05, 0.25, 0.25, int(rng.integers(3, 6))) + clicks(1, 2000, 6000, 0.005, 0.03, 0.25)
+
+    elif preset == "necklace":
+        sig = metal_ring(float(rng.uniform(2500, 6000)), 0.05, 0.3, 0.22, int(rng.integers(3, 7))) + clicks(1, 1500, 5000, 0.005, 0.03, 0.2)
+
+    elif preset == "ring_put":
+        sig = clicks(1, 2000, 6000, 0.005, 0.03, 0.25) + metal_ring(float(rng.uniform(4000, 8000)), 0.03, 0.12, 0.2, 2)
+
+    elif preset == "jewelry_clink":
+        sig = metal_ring(float(rng.uniform(3000, 7000)), 0.03, 0.15, 0.22, int(rng.integers(3, 7)))
+
+    # ── 👠 Îmbrăcare / încălțare ─────────────────────────────────────────────
+    elif preset == "shoe_box":
+        sig = foley_rush(400, 4000, float(rng.uniform(2, 4)), 0.3) + clicks(2, 500, 3000, 0.01, 0.05, 0.35)
+
+    elif preset == "shoe_put":
+        sig = foley_rush(300, 3500, float(rng.uniform(2, 4)), 0.3) + clicks(2, 400, 2500, 0.01, 0.06, 0.4)
+
+    elif preset == "shoe_takeoff":
+        sig = foley_rush(300, 3500, float(rng.uniform(2, 5)), 0.3) + clicks(2, 300, 2000, 0.02, 0.08, 0.4)
+
+    elif preset == "shoelace":
+        sig = foley_rush(800, 4500, float(rng.uniform(3, 6)), 0.25) + clicks(int(rng.integers(2, 5)), 1000, 4000, 0.01, 0.03, 0.3)
+
+    elif preset == "boot_zip":
+        sig = foley_rush(1000, 7000, float(rng.uniform(2, 4)), 0.28) + clicks(int(rng.integers(2, 5)), 1500, 7000, 0.005, 0.03, 0.4)
+
+    elif preset == "sandals":
+        sig = clicks(int(rng.integers(2, 5)), 400, 2500, 0.01, 0.05, 0.35) + foley_rush(300, 3000, 3, 0.15)
+
+    elif preset == "footsteps_stone":
+        sig = footsteps(float(rng.uniform(1.0, 1.8)), lo=300, hi=5000, amp=0.55)
+        sig += clicks(int(rng.integers(3, 8)), 2000, 7000, 0.01, 0.03, 0.15)
+
+    elif preset == "footsteps_floor":
+        sig = footsteps(float(rng.uniform(1.0, 1.8)), lo=200, hi=4500, amp=0.5)
+
+    # ── 🏢 Spații interioare ──────────────────────────────────────────────────
+    elif preset == "hall":
+        sig = fband(pink(80, 2200), 100, 1800) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.22
+        sig += footsteps(float(rng.uniform(0.8, 1.6)), lo=250, hi=3500, amp=0.3)
+
+    elif preset == "staircase":
+        sig = footsteps(float(rng.uniform(0.6, 1.2)), lo=150, hi=3500, amp=0.45)
+        sig += creak_sound(90, 350, int(rng.integers(1, 4)), 0.3, 0.9, 0.2)
+
+    elif preset == "empty_room":
+        sig = fband(pink(70, 1800), 90, 1500) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.14
+        sig += pink(30, 200) * 0.03
+
+    elif preset == "crowded_room":
+        murmur = fband(pink(140, 3200), 160, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.35
+        sig = murmur + clicks(int(rng.integers(4, 10)), 1000, 5000, 0.01, 0.04, 0.15)
+
+    elif preset == "bedroom":
+        sig = fband(pink(80, 2000), 100, 1500) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.12
+        sig += sine(50, 0.01) + creak_sound(100, 300, int(rng.integers(0, 2)), 0.3, 0.8, 0.08)
+
+    elif preset == "dressing":
+        sig = fband(pink(150, 3000), 200, 2500) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.14
+        sig += foley_rush(300, 3500, 3, 0.1)
+
+    elif preset == "balcony":
+        sig = fband(pink(150, 4000), 200, 3500) * am(rng.uniform(0.05, 0.12), 0.3, 0.7) * 0.2
+        sig += pink(40, 600) * 0.05
+
+    elif preset == "garage":
+        sig = fband(pink(60, 1500), 70, 1200) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.25
+        sig += sine(50, 0.012) + sine(100, 0.008)
+
+    elif preset == "basement":
+        sig = fband(pink(50, 1200), 60, 1000) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.25
+        sig += pink(25, 200) * 0.04
+
+    elif preset == "attic":
+        sig = fband(pink(60, 1500), 70, 1200) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.14
+        sig += creak_sound(90, 300, int(rng.integers(0, 2)), 0.3, 0.8, 0.1)
+
+    elif preset == "office_space":
+        sig = fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.16
+        sig += clicks(int(rng.integers(3, 8)), 1500, 6000, 0.005, 0.02, 0.18)
+
+    elif preset == "mall_space":
+        murmur = fband(pink(130, 3000), 160, 2500) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.3
+        sig = murmur + sine(523, 0.01) + sine(659, 0.008)
+
+    elif preset == "salon_space":
+        sig = fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.16
+        sig += foley_rush(400, 3500, 3, 0.1) + clicks(2, 1000, 4500, 0.01, 0.04, 0.12)
+
+    elif preset == "hotel":
+        sig = fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.18
+        sig += footsteps(float(rng.uniform(0.6, 1.2)), lo=300, hi=3500, amp=0.18)
+
+    elif preset == "reception":
+        murmur = fband(pink(140, 3000), 160, 2500) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.25
+        sig = murmur + clicks(int(rng.integers(2, 6)), 1500, 6000, 0.005, 0.02, 0.15)
+
+    elif preset == "hotel_corridor":
+        sig = fband(pink(80, 2000), 100, 1500) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.16
+        sig += footsteps(float(rng.uniform(0.6, 1.2)), lo=300, hi=3000, amp=0.2)
+
+    elif preset == "hotel_lift":
+        sig = fband(pink(60, 1200), 70, 1000) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.22
+        sig += sine(50, 0.014) + clicks(2, 1500, 5000, 0.01, 0.04, 0.18)
+
+    elif preset == "parking":
+        sig = fband(pink(60, 1500), 70, 1200) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.22
+        sig += sine(50, 0.012) + sine(100, 0.008)
+
+    # ── 🌳 Exterior ───────────────────────────────────────────────────────────
+    elif preset == "gate_open":
+        sig = creak_sound(150, 600, int(rng.integers(2, 5)), 0.4, 1.2, 0.3)
+        sig += metal_ring(float(rng.uniform(1500, 3500)), 0.05, 0.25, 0.18, 2)
+
+    elif preset == "gate_close":
+        sig = metal_ring(float(rng.uniform(1500, 3500)), 0.05, 0.3, 0.25, 3)
+        sig += fband(pink(60, 1200), 70, 1000) * np.exp(-np.linspace(0, 8, n)) * 0.4
+
+    elif preset == "gravel":
+        sig = footsteps(float(rng.uniform(1.0, 1.8)), lo=400, hi=6000, amp=0.5)
+        sig += clicks(int(rng.integers(5, 12)), 2500, 9000, 0.01, 0.04, 0.18)
+
+    elif preset == "grass":
+        sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.25)
+        sig += footsteps(float(rng.uniform(1.0, 1.8)), lo=150, hi=3000, amp=0.3)
+
+    elif preset == "leaves":
+        sig = foley_rush(1500, 7000, float(rng.uniform(3, 7)), 0.3)
+        sig += clicks(int(rng.integers(3, 8)), 2000, 8000, 0.01, 0.04, 0.25)
+
+    elif preset == "branches":
+        sig = snap_sound(int(rng.integers(2, 6)), 1000, 6000, 0.3) + creak_sound(200, 800, 2, 0.2, 0.6, 0.25)
+
+    elif preset == "garage_door":
+        sig = creak_sound(80, 400, int(rng.integers(2, 5)), 0.5, 1.5, 0.35)
+        sig += foley_rush(150, 2000, float(rng.uniform(2, 4)), 0.25) + metal_ring(float(rng.uniform(1000, 2500)), 0.05, 0.3, 0.15, 2)
+
+    elif preset == "car_door":
+        sig = fband(pink(50, 1500), 60, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.55
+        sig += clicks(2, 500, 3000, 0.01, 0.06, 0.4)
+
+    elif preset == "car_trunk":
+        sig = fband(pink(50, 1200), 60, 1000) * np.exp(-np.linspace(0, 8, n)) * 0.6
+        sig += clicks(2, 400, 2500, 0.01, 0.06, 0.4)
+
+    elif preset == "wipers":
+        sig = foley_rush(300, 3500, float(rng.uniform(1, 2)), 0.25) + clicks(2, 1500, 5000, 0.01, 0.04, 0.25)
+
+    elif preset == "car_window":
+        sig = foley_rush(400, 4000, float(rng.uniform(2, 4)), 0.25) + clicks(2, 1000, 4500, 0.01, 0.04, 0.2)
+
+    elif preset == "engine_electric":
+        sig = fband(pink(100, 2000), 120, 1500) * am(float(rng.uniform(10, 20)), 0.4, 0.6) * 0.35
+        sig += sine(float(rng.uniform(200, 400)), 0.02)
+
+    elif preset == "engine_diesel":
+        sig = fband(pink(30, 500), 40, 400) * am(float(rng.uniform(8, 14)), 0.35, 0.65) * 0.5
+        sig += foley_rush(200, 2500, 6, 0.12)
+
+    # ── 🚆 Transport suplimentar ──────────────────────────────────────────────
+    elif preset == "train_doors":
+        sig = fband(pink(200, 4000), 300, 3500) * np.exp(-np.linspace(0, 6, n)) * 0.5
+        sig += clicks(3, 800, 4000, 0.01, 0.05, 0.5) + creak_sound(200, 600, 1, 0.3, 0.8, 0.2)
+
+    elif preset == "train_brake":
+        sig = fband(pink(1500, 6000), 2000, 5000) * am(float(rng.uniform(3, 6)), 0.4, 0.6) * 0.35
+        sig += fband(pink(100, 2000), 150, 1500) * am(float(rng.uniform(6, 12)), 0.3, 0.7) * 0.3
+
+    elif preset == "train_accel":
+        ramp = np.linspace(0, 1, n) ** 0.6
+        sig = fband(pink(40, 800), 50, 600) * am(float(rng.uniform(4, 8)), 0.3, 0.7) * 0.5 * ramp
+        sig += foley_rush(300, 3000, 8, 0.15) * ramp
+
+    elif preset == "train_depart":
+        rumble = fband(pink(40, 700), 50, 600) * am(float(rng.uniform(4, 8)), 0.3, 0.7) * 0.5
+        joints = footsteps(float(rng.uniform(3, 6)), lo=50, hi=400, amp=0.5)
+        ramp = np.linspace(0, 1, n) ** 0.5
+        sig = (rumble + joints * 0.6) * ramp
+
+    elif preset == "train_pass":
+        env = np.concatenate([np.linspace(0, 1, n // 2), np.linspace(1, 0, n - n // 2)]) ** 0.7
+        sig = fband(pink(40, 900), 50, 700) * am(float(rng.uniform(6, 10)), 0.3, 0.7) * 0.6 * env
+        sig += foley_rush(500, 4000, 10, 0.15) * env
+
+    elif preset == "train_station":
+        crowd = fband(pink(150, 3000), 160, 2500) * am(rng.uniform(0.04, 0.1), 0.2, 0.8) * 0.3
+        hum = fband(pink(50, 400), 60, 350) * 0.12
+        sig = crowd + hum + clicks(int(rng.integers(3, 8)), 1500, 6000, 0.01, 0.04, 0.15)
+
+    elif preset == "train_interior":
+        rumble = fband(pink(30, 400), 35, 350) * am(rng.uniform(0.6, 1.2), 0.15, 0.85) * 0.4
+        joints = footsteps(float(rng.uniform(3, 5)), lo=50, hi=400, amp=0.35)
+        sig = rumble + joints * 0.5 + foley_rush(300, 2500, 3, 0.08)
+
+    elif preset == "station_announce":
+        sig = np.zeros(n)
+        p = int(rng.integers(int(0.1 * n), int(0.4 * n)))
+        alen = min(int(rng.uniform(2, 6) * sr), n - p)
+        if alen > 0:
+            ann = fband(pink(250, 3200, alen), 300, 2800)
+            syl = np.zeros(alen)
+            sp = 0
+            while sp < alen:
+                sdur = int(rng.uniform(0.06, 0.16) * sr)
+                se = min(sp + sdur, alen)
+                syl[sp:se] = float(rng.uniform(0.3, 0.9))
+                sp += sdur + int(rng.uniform(0.03, 0.1) * sr)
+            frame = np.sin(np.pi * np.linspace(0, 1, alen)) ** 0.3
+            sig[p:p + alen] += ann * syl * frame * 0.3
+        sig += fband(pink(150, 3000), 160, 2500) * 0.2
+
+    elif preset == "crowd_station":
+        sig = fband(pink(150, 3200), 160, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.4
+        sig += footsteps(float(rng.uniform(1, 3)), lo=250, hi=3500, amp=0.25)
+
+    elif preset == "metro_station":
+        rumble = fband(pink(30, 500), 40, 400) * am(rng.uniform(0.8, 1.5), 0.15, 0.85) * 0.5
+        screech = fband(pink(2000, 6000), 2500, 5500) * am(rng.uniform(0.3, 0.6), 0.4, 0.6) * 0.12
+        sig = rumble + screech + clicks(3, 1500, 5000, 0.01, 0.04, 0.2)
+
+    elif preset == "bus_doors":
+        sig = fband(pink(200, 4000), 300, 3500) * np.exp(-np.linspace(0, 6, n)) * 0.5
+        sig += clicks(3, 800, 4000, 0.01, 0.05, 0.45)
+
+    elif preset == "transport_announce":
+        sig = fband(pink(250, 3200), 300, 2800) * am(float(rng.uniform(0.3, 0.6)), 0.3, 0.7) * 0.22
+        sig += foley_rush(300, 3000, 4, 0.1)
+
+    elif preset == "airport_extra":
+        sig = fband(pink(100, 3000), 120, 2500) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.3
+        sig += sine(60, 0.012) + sine(120, 0.008)
+
+    elif preset == "baggage_belt":
+        sig = fband(pink(80, 1500), 100, 1200) * am(rng.uniform(0.3, 0.6), 0.2, 0.8) * 0.3
+        sig += clicks(int(rng.integers(3, 8)), 800, 4000, 0.01, 0.05, 0.25)
+
+    elif preset == "luggage_cart":
+        sig = footsteps(float(rng.uniform(3, 6)), lo=150, hi=3000, amp=0.3)
+        sig += foley_rush(200, 2000, float(rng.uniform(3, 6)), 0.12) + clicks(2, 500, 2500, 0.01, 0.04, 0.2)
+
+    elif preset == "plane_cabin":
+        sig = fband(pink(40, 900), 50, 800) * am(rng.uniform(0.3, 0.7), 0.15, 0.85) * 0.45
+        sig += foley_rush(500, 4000, 3, 0.08) + sine(60, 0.012)
+
+    elif preset == "seatbelt":
+        sig = clicks(2, 1500, 6000, 0.005, 0.03, 0.4) + metal_ring(float(rng.uniform(3000, 6000)), 0.03, 0.12, 0.2, 2)
+
+    # ── 🏙️ Oraș ──────────────────────────────────────────────────────────────
+    elif preset == "crowd_moving":
+        murmur = fband(pink(140, 3200), 160, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.32
+        sig = murmur + footsteps(float(rng.uniform(1, 3)), lo=250, hi=3500, amp=0.25)
+
+    elif preset == "people_walk":
+        sig = footsteps(float(rng.uniform(1, 2)), lo=250, hi=4000, amp=0.4)
+
+    elif preset == "people_run":
+        sig = footsteps(float(rng.uniform(2, 3.5)), lo=200, hi=4500, amp=0.45)
+
+    elif preset == "trotinette":
+        sig = fband(pink(40, 800), 50, 600) * am(float(rng.uniform(6, 12)), 0.3, 0.7) * 0.35
+        sig += sine(float(rng.uniform(300, 700)), 0.015)
+
+    elif preset == "tram":
+        rumble = fband(pink(30, 500), 40, 400) * am(rng.uniform(0.6, 1.2), 0.15, 0.85) * 0.5
+        bell = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.2 * n), n))
+            blen = min(int(0.3 * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                bell[p:p + blen] += (np.sin(2 * np.pi * 2200 * tl) + 0.4 * np.sin(2 * np.pi * 2900 * tl)) * np.exp(-np.linspace(0, 5, blen)) * 0.14
+        sig = rumble + bell
+
+    elif preset == "distant_horn":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(0, n))
+            hlen = min(int(rng.uniform(0.3, 1.2) * sr), n - p)
+            if hlen > 0:
+                tl = np.linspace(0, hlen / sr, hlen)
+                env = np.sin(np.pi * np.linspace(0, 1, hlen)) ** 0.3
+                sig[p:p + hlen] += np.sin(2 * np.pi * float(rng.uniform(300, 600)) * tl) * env * 0.12
+        sig += fband(pink(50, 1500), 60, 1200) * 0.1
+
+    elif preset == "distant_siren":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(0, int(0.6 * n)))
+            slen = min(int(rng.uniform(2, 5) * sr), n - p)
+            if slen > 0:
+                tl = np.linspace(0, slen / sr, slen)
+                freq = float(rng.uniform(500, 900))
+                sweep = freq + 150 * np.sin(2 * np.pi * 0.6 * tl)
+                env = np.sin(np.pi * np.linspace(0, 1, slen)) ** 0.3
+                sig[p:p + slen] += np.sin(2 * np.pi * sweep * tl) * env * 0.1
+        sig += fband(pink(50, 1500), 60, 1200) * 0.1
+
+    elif preset == "traffic_light":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 6))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.1 * sr), n - p)
+            if blen > 0:
+                sig[p:p + blen] += sine(2200, 0.18)[:blen] * np.exp(-np.linspace(0, 20, blen))
+        sig += fband(pink(50, 1500), 60, 1200) * 0.12
+
+    elif preset == "crosswalk":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 8))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.3 * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                sig[p:p + blen] += (np.sin(2 * np.pi * 2000 * tl) + 0.5 * np.sin(2 * np.pi * 2600 * tl)) * np.sin(np.pi * np.linspace(0, 1, blen)) * 0.14
+        sig += fband(pink(50, 1500), 60, 1200) * 0.12
+
+    elif preset == "roadwork":
+        sig = clicks(int(rng.integers(8, 18)), 300, 3000, 0.01, 0.05, 0.5)
+        sig += fband(pink(100, 2000), 150, 1500) * am(float(rng.uniform(4, 8)), 0.3, 0.7) * 0.25
+
+    elif preset == "jackhammer":
+        sig = fband(pink(100, 2500), 150, 2000) * am(float(rng.uniform(8, 14)), 0.5, 0.5) * 0.4
+        sig += clicks(int(rng.integers(8, 16)), 500, 3000, 0.01, 0.04, 0.4)
+
+    elif preset == "construction_extra":
+        sig = clicks(int(rng.integers(6, 14)), 400, 3500, 0.01, 0.06, 0.45)
+        sig += foley_rush(300, 3000, float(rng.uniform(3, 6)), 0.2)
+
+    elif preset == "distant_cars":
+        sig = fband(pink(50, 1500), 60, 1200) * am(rng.uniform(0.04, 0.1), 0.25, 0.75) * 0.25
+        sig += foley_rush(200, 2500, 3, 0.1)
+
+    elif preset == "night_traffic":
+        sig = fband(pink(40, 1500), 50, 1200) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.22
+        sig += sine(50, 0.01) + foley_rush(200, 2000, 2, 0.08)
+
+    elif preset == "market_square":
+        murmur = fband(pink(150, 3200), 180, 2600) * am(rng.uniform(0.05, 0.12), 0.25, 0.75) * 0.35
+        calls = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.4, 1.2) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(300, 800))
+                calls[p:p + clen] += np.sin(2 * np.pi * freq * tl) * np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.3 * 0.12
+        sig = murmur + calls
+
+    elif preset == "park_space":
+        sig = birds(nb=10, lo_f=1200, hi_f=5500) * 0.4
+        sig += fband(pink(150, 4000), 200, 3500) * am(rng.uniform(0.04, 0.1), 0.3, 0.7) * 0.15
+        sig += footsteps(float(rng.uniform(0.6, 1.4)), lo=250, hi=3500, amp=0.2)
+
+    elif preset == "fountain_water":
+        sig = fband(pink(2000, 8000), 2500, 7000) * am(rng.uniform(0.15, 0.3), 0.2, 0.8) * 0.3
+        sig += water_bubble(int(rng.integers(4, 10)), 0.04, 0.12, 800, 3500, 0.12)
+
+    # ── 🏫 Școală / birou ─────────────────────────────────────────────────────
+    elif preset == "classroom":
+        sig = fband(pink(150, 3000), 180, 2500) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.3
+        sig += clicks(int(rng.integers(2, 6)), 800, 4000, 0.01, 0.04, 0.15)
+
+    elif preset == "chairs_move":
+        sig = foley_rush(200, 3000, float(rng.uniform(2, 5)), 0.3) + creak_sound(150, 500, int(rng.integers(1, 4)), 0.2, 0.6, 0.3)
+
+    elif preset == "chalk_board":
+        sig = foley_rush(1000, 6000, float(rng.uniform(3, 7)), 0.3) + clicks(int(rng.integers(3, 8)), 2000, 8000, 0.005, 0.03, 0.25)
+
+    elif preset == "board_wipe":
+        sig = foley_rush(500, 4000, float(rng.uniform(2, 4)), 0.35) + foley_rush(1500, 6000, 3, 0.15)
+
+    elif preset == "notebook":
+        sig = foley_rush(1000, 5000, float(rng.uniform(3, 6)), 0.28) + clicks(1, 800, 3500, 0.01, 0.04, 0.2)
+
+    elif preset == "page_turn":
+        sig = foley_rush(1500, 7000, float(rng.uniform(3, 6)), 0.25) + clicks(1, 1500, 5000, 0.01, 0.03, 0.15)
+
+    elif preset == "page_rip":
+        sig = foley_rush(1200, 8000, float(rng.uniform(2, 4)), 0.3) + clicks(int(rng.integers(2, 5)), 1500, 7000, 0.01, 0.04, 0.25)
+
+    elif preset == "backpack":
+        sig = foley_rush(500, 6000, float(rng.uniform(3, 6)), 0.3) + clicks(2, 1000, 4500, 0.01, 0.04, 0.3)
+
+    elif preset == "students":
+        sig = fband(pink(150, 3200), 180, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.35
+        sig += footsteps(float(rng.uniform(1, 2.5)), lo=250, hi=3500, amp=0.3)
+
+    elif preset == "hall_steps":
+        sig = footsteps(float(rng.uniform(1, 2)), lo=250, hi=4000, amp=0.4)
+        sig += fband(pink(100, 2500), 120, 2000) * 0.15
+
+    elif preset == "school_bell":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.2 * n), int(0.7 * n)))
+            blen = min(int(rng.uniform(0.5, 1.2) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                env = np.exp(-np.linspace(0, 3, blen))
+                sig[p:p + blen] += (np.sin(2 * np.pi * 880 * tl) + 0.3 * np.sin(2 * np.pi * 1760 * tl)) * env * 0.16
+        sig += fband(pink(150, 3000), 180, 2500) * 0.12
+
+    elif preset == "computer_typing":
+        sig = clicks(int(rng.integers(10, 25)), 1500, 7000, 0.005, 0.02, 0.35)
+        sig += foley_rush(300, 2500, 3, 0.08)
+
+    elif preset == "printer_extra":
+        sig = fband(pink(150, 3000), 200, 2500) * am(float(rng.uniform(4, 8)), 0.3, 0.7) * 0.3
+        sig += clicks(int(rng.integers(3, 7)), 1000, 5000, 0.01, 0.03, 0.25)
+
+    elif preset == "desk_phone":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(0, n))
+            rlen = min(int(rng.uniform(0.3, 0.8) * sr), n - p)
+            if rlen > 0:
+                tl = np.linspace(0, rlen / sr, rlen)
+                sig[p:p + rlen] += (np.sin(2 * np.pi * 440 * tl) + 0.5 * np.sin(2 * np.pi * 480 * tl)) * np.sin(np.pi * np.linspace(0, 1, rlen)) ** 0.4 * 0.14
+        sig += fband(pink(100, 2500), 120, 2000) * 0.12
+
+    # ── 🏥 Medical ────────────────────────────────────────────────────────────
+    elif preset == "clinic_door":
+        sig = creak_sound(150, 600, int(rng.integers(1, 3)), 0.3, 0.9, 0.3)
+        sig += fband(pink(80, 1500), 90, 1200) * np.exp(-np.linspace(0, 9, n)) * 0.4
+
+    elif preset == "wheelchair":
+        sig = footsteps(float(rng.uniform(3, 6)), lo=200, hi=3000, amp=0.3)
+        sig += foley_rush(200, 2000, float(rng.uniform(4, 8)), 0.12) + clicks(2, 500, 2500, 0.01, 0.04, 0.2)
+
+    elif preset == "stretcher":
+        sig = foley_rush(200, 2000, float(rng.uniform(2, 4)), 0.3) + clicks(2, 400, 2500, 0.01, 0.06, 0.35)
+
+    elif preset == "stethoscope":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(4, 8))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.05, 0.15) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                sig[p:p + blen] += np.sin(2 * np.pi * float(rng.uniform(120, 250)) * tl) * np.exp(-np.linspace(0, 12, blen)) * 0.2
+
+    elif preset == "blood_pressure":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.3, 0.7) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                env = np.sin(np.pi * np.linspace(0, 1, blen)) ** 0.4
+                sig[p:p + blen] += np.sin(2 * np.pi * float(rng.uniform(60, 120)) * tl) * env * 0.25
+        sig += foley_rush(300, 2500, 3, 0.08)
+
+    elif preset == "monitor_beep":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.08 * sr), n - p)
+            if blen > 0:
+                sig[p:p + blen] += sine(1800, 0.18)[:blen] * np.exp(-np.linspace(0, 20, blen))
+        sig += fband(pink(60, 1500), 70, 1200) * 0.08
+
+    elif preset == "monitor_alarm":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.4 * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                sig[p:p + blen] += (np.sin(2 * np.pi * 900 * tl) + 0.5 * np.sin(2 * np.pi * 1350 * tl)) * np.sin(np.pi * np.linspace(0, 1, blen)) ** 0.3 * 0.18
+        sig += fband(pink(60, 1500), 70, 1200) * 0.1
+
+    elif preset == "medical_gloves":
+        sig = foley_rush(500, 6000, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 5)), 1500, 6000, 0.005, 0.03, 0.25)
+
+    elif preset == "syringe":
+        sig = foley_rush(1000, 5000, float(rng.uniform(2, 4)), 0.25) + clicks(2, 1500, 5000, 0.005, 0.02, 0.3)
+
+    elif preset == "medical_pack":
+        sig = foley_rush(1500, 8000, float(rng.uniform(3, 6)), 0.3) + snap_sound(2, 1500, 6000, 0.3)
+
+    elif preset == "sanitizer":
+        sig = clicks(2, 500, 2500, 0.01, 0.05, 0.4) + foley_rush(800, 4000, 3, 0.2)
+
+    elif preset == "curtain_draw":
+        sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.3)
+        sig += metal_ring(float(rng.uniform(2000, 4500)), 0.03, 0.15, 0.12, int(rng.integers(2, 5)))
+
+    # ── 🎵 Divertisment ───────────────────────────────────────────────────────
+    elif preset == "applause_soft":
+        claps = np.zeros(n)
+        for _ in range(int(rng.integers(15, 35))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.01, 0.03) * sr), n - p)
+            if clen > 0:
+                claps[p:p + clen] += fband(rng.uniform(-1, 1, clen), 900, 5500) * np.exp(-np.linspace(0, 22, clen)) * float(rng.uniform(0.05, 0.12))
+        sig = claps + fband(pink(140, 3000), 160, 2500) * 0.08
+
+    elif preset == "laugh":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.3, 1.0) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(350, 700))
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.4
+                mod = 1 + 0.3 * np.sin(2 * np.pi * float(rng.uniform(4, 8)) * tl)
+                sig[p:p + clen] += np.sin(2 * np.pi * freq * tl) * mod * env * 0.14
+
+    elif preset == "giggle":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(4, 9))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.2, 0.6) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(500, 1000))
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.5
+                mod = 1 + 0.4 * np.sin(2 * np.pi * float(rng.uniform(6, 11)) * tl)
+                sig[p:p + clen] += np.sin(2 * np.pi * freq * tl) * mod * env * 0.1
+
+    elif preset == "whisper":
+        sig = fband(pink(250, 2500), 300, 2000) * am(rng.uniform(0.1, 0.3), 0.4, 0.6) * 0.12
+
+    elif preset == "whistle":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.1 * n), n))
+            wlen = min(int(rng.uniform(0.3, 0.9) * sr), n - p)
+            if wlen > 0:
+                tl = np.linspace(0, wlen / sr, wlen)
+                env = np.sin(np.pi * np.linspace(0, 1, wlen)) ** 0.5
+                sig[p:p + wlen] += np.sin(2 * np.pi * float(rng.uniform(1800, 3200)) * tl) * env * 0.14
+
+    elif preset == "boo":
+        sig = fband(pink(150, 1500), 200, 1200) * am(float(rng.uniform(2, 4)), 0.4, 0.6) * 0.22
+        sig += np.zeros(n)
+
+    elif preset == "stage":
+        murmur = fband(pink(150, 3200), 180, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.28
+        sig = murmur + clicks(int(rng.integers(3, 8)), 1000, 5000, 0.01, 0.04, 0.15)
+
+    elif preset == "microphone":
+        sig = clicks(2, 400, 2500, 0.01, 0.05, 0.35) + foley_rush(300, 2500, 3, 0.12)
+
+    elif preset == "speaker_feedback":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(0.4, 1.5) * sr), n - p)
+            if slen > 0:
+                tl = np.linspace(0, slen / sr, slen)
+                freq = float(rng.uniform(600, 2400))
+                sig[p:p + slen] += np.sin(2 * np.pi * freq * tl) * np.sin(np.pi * np.linspace(0, 1, slen)) ** 0.5 * 0.12
+        sig += fband(pink(150, 3000), 180, 2500) * 0.12
+
+    elif preset == "dance":
+        beat = float(rng.uniform(2, 3))
+        sig = np.zeros(n)
+        pos = 0
+        while pos < n:
+            blen = min(int(0.06 * sr), n - pos)
+            if blen > 0:
+                sig[pos:pos + blen] += fband(rng.uniform(-1, 1, blen), 50, 400) * np.exp(-np.linspace(0, 15, blen)) * 0.5
+            pos += int(sr / beat)
+        sig += fband(pink(100, 2000), 150, 1500) * am(beat, 0.4, 0.6) * 0.15
+
+    elif preset == "club":
+        beat = float(rng.uniform(2, 3))
+        sig = np.zeros(n)
+        pos = 0
+        while pos < n:
+            blen = min(int(0.08 * sr), n - pos)
+            if blen > 0:
+                sig[pos:pos + blen] += fband(rng.uniform(-1, 1, blen), 50, 500) * np.exp(-np.linspace(0, 12, blen)) * 0.6
+            pos += int(sr / beat)
+        sig += fband(pink(100, 3000), 150, 2500) * am(beat * 2, 0.4, 0.6) * 0.2
+
+    elif preset == "concert":
+        murmur = fband(pink(150, 3000), 180, 2500) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.3
+        beat = float(rng.uniform(1.5, 2.5))
+        sig = murmur + fband(pink(100, 2000), 150, 1500) * am(beat, 0.4, 0.6) * 0.18
+
+    elif preset == "theater":
+        sig = fband(pink(120, 2800), 150, 2200) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.25
+        sig += clicks(int(rng.integers(2, 6)), 1000, 4500, 0.01, 0.04, 0.12)
+
+    elif preset == "cinema":
+        sig = fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.2
+        sig += foley_rush(300, 2500, 2, 0.1) + sine(60, 0.008)
+
+    elif preset == "projector":
+        sig = fband(pink(150, 3000), 200, 2500) * am(float(rng.uniform(10, 20)), 0.35, 0.65) * 0.18
+
+    # ── ❤️ Emoții ambientale ──────────────────────────────────────────────────
+    elif preset == "breath_calm":
+        sig = fband(pink(200, 1500), 250, 1200) * am(float(rng.uniform(0.15, 0.3)), 0.6, 0.4) * 0.12
+
+    elif preset == "breath_agitated":
+        sig = fband(pink(200, 1800), 250, 1500) * am(float(rng.uniform(0.4, 0.8)), 0.6, 0.4) * 0.18
+
+    elif preset == "sigh":
+        sig = fband(pink(200, 1800), 250, 1500) * np.exp(-np.linspace(0, 6, n)) * 0.18
+
+    elif preset == "cry_soft":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.3, 1.2) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(300, 700))
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.4
+                mod = 1 + 0.3 * np.sin(2 * np.pi * float(rng.uniform(3, 6)) * tl)
+                sig[p:p + clen] += np.sin(2 * np.pi * freq * tl) * mod * env * 0.1
+
+    elif preset == "cry_loud":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.5, 1.5) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(250, 600))
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.4
+                mod = 1 + 0.35 * np.sin(2 * np.pi * float(rng.uniform(3, 6)) * tl)
+                sig[p:p + clen] += np.sin(2 * np.pi * freq * tl) * mod * env * 0.18
+
+    elif preset == "heartbeat_fast":
+        sig = np.zeros(n)
+        bpm = float(rng.uniform(100, 150))
+        beat_int = sr / (bpm / 60)
+        pos = 0
+        while pos < n:
+            for freq, amp, decay in [(70, 0.4, 15), (45, 0.25, 10)]:
+                blen = min(int(0.06 * sr), n - pos)
+                if blen > 0:
+                    tl = np.linspace(0, blen / sr, blen)
+                    sig[pos:pos + blen] += np.sin(2 * np.pi * freq * tl) * np.exp(-decay * tl) * amp
+            pos += int(beat_int)
+
+    elif preset == "tremble":
+        sig = fband(pink(100, 3000), 120, 2500) * am(float(rng.uniform(6, 12)), 0.5, 0.5) * 0.12
+
+    elif preset == "silence_tension":
+        sig = pink(40, 400) * 0.03 + sine(50, 0.006) + fband(pink(300, 2000), 400, 1500) * am(0.5, 0.5, 0.5) * 0.04
+
+    elif preset == "romance":
+        sig = sine(196, 0.012) + sine(247, 0.010) + sine(294, 0.008)
+        sig += fband(pink(100, 2000), 120, 1500) * am(rng.uniform(0.04, 0.1), 0.3, 0.7) * 0.05
+
+    elif preset == "relaxation":
+        sig = sine(130, 0.014) + sine(164, 0.011) + sine(196, 0.009)
+        sig += fband(pink(100, 1800), 120, 1500) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.05
+
+    elif preset == "warm_atmos":
+        sig = fband(pink(80, 2000), 100, 1500) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.12
+        sig += sine(60, 0.008)
+
+    elif preset == "cold_atmos":
+        sig = fband(pink(200, 4000), 250, 3500) * am(rng.uniform(0.05, 0.12), 0.4, 0.6) * 0.1
+        sig += pink(40, 400) * 0.03
+
+    elif preset == "night_atmos":
+        sig = fband(pink(50, 800), 60, 600) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.14
+        sig += sine(50, 0.008)
+
+    elif preset == "morning_atmos":
+        sig = birds(nb=12, lo_f=1400, hi_f=5800) * 0.4
+        sig += fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.04, 0.1), 0.25, 0.75) * 0.08
+
+    # ── 🌙 Ambianțe temporale ────────────────────────────────────────────────
+    elif preset == "morning":
+        sig = birds(nb=14, lo_f=1200, hi_f=5800) * 0.45
+        sig += fband(pink(100, 2500), 120, 2000) * am(rng.uniform(0.04, 0.1), 0.25, 0.75) * 0.08
+
+    elif preset == "afternoon":
+        sig = fband(pink(150, 3500), 180, 3000) * am(rng.uniform(0.04, 0.1), 0.25, 0.75) * 0.12
+        sig += birds(nb=6, lo_f=1500, hi_f=5000) * 0.15
+
+    elif preset == "evening":
+        crk = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            freq = float(rng.uniform(2000, 3000))
+            rate = float(rng.uniform(3, 5))
+            ph = float(rng.uniform(0, 2 * np.pi))
+            chirp = np.maximum(0.0, np.sin(2 * np.pi * rate * t + ph)) ** 16
+            crk += chirp * sine(freq, 0.12)
+        sig = crk + fband(pink(60, 1200), 70, 1000) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.08
+
+    elif preset == "quiet_house":
+        sig = fband(pink(60, 1800), 70, 1400) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.1
+        sig += sine(50, 0.008) + creak_sound(100, 300, int(rng.integers(0, 2)), 0.3, 0.8, 0.06)
+
+    elif preset == "busy_house":
+        murmur = fband(pink(140, 3200), 160, 2600) * am(rng.uniform(0.05, 0.12), 0.2, 0.8) * 0.3
+        sig = murmur + clicks(int(rng.integers(3, 8)), 1000, 5000, 0.01, 0.04, 0.15)
+
+    elif preset == "quiet_city":
+        sig = fband(pink(40, 1500), 50, 1200) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.18
+        sig += sine(50, 0.008)
+
+    elif preset == "busy_city":
+        sig = fband(pink(40, 1500), 50, 1200) * am(rng.uniform(0.05, 0.15), 0.25, 0.75) * 0.45
+        sig += foley_rush(200, 3000, 4, 0.12)
+
+    elif preset == "distant_rain":
+        sig = fband(pink(150, 6000), 200, 5000) * am(rng.uniform(0.05, 0.12), 0.1, 0.9) * 0.18
+
+    elif preset == "distant_storm":
+        sig = fband(pink(25, 200), 30, 150) * am(rng.uniform(0.06, 0.15), 0.4, 0.6) * 0.2
+        sig += fband(pink(150, 6000), 200, 5000) * 0.08
+
+    elif preset == "distant_people":
+        sig = fband(pink(200, 3000), 250, 2500) * am(rng.uniform(0.05, 0.15), 0.3, 0.7) * 0.14
+
+    elif preset == "big_echo":
+        sig = fband(pink(60, 2000), 80, 1500) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.12
+        sig += pink(30, 200) * 0.03
+
+    elif preset == "small_echo":
+        sig = fband(pink(200, 3000), 250, 2500) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.08
+
+    elif preset == "big_room":
+        sig = fband(pink(60, 1800), 80, 1400) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.12
+
+    elif preset == "small_room":
+        sig = fband(pink(150, 2800), 200, 2200) * am(rng.uniform(0.03, 0.08), 0.2, 0.8) * 0.09
+
+    elif preset == "long_corridor":
+        sig = fband(pink(80, 2200), 100, 1800) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.12
+        sig += footsteps(float(rng.uniform(0.6, 1.4)), lo=250, hi=3000, amp=0.2)
+
+    elif preset == "empty_space":
+        sig = fband(pink(50, 1500), 60, 1200) * am(rng.uniform(0.03, 0.08), 0.3, 0.7) * 0.08
+        sig += pink(25, 150) * 0.03
+
+    # ── 🔊 Efecte diverse ─────────────────────────────────────────────────────
+    elif preset == "object_lift":
+        sig = foley_rush(300, 3000, float(rng.uniform(2, 4)), 0.2)
+
+    elif preset == "object_put":
+        sig = fband(pink(50, 1500), 60, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.45
+        sig += clicks(1, 400, 2500, 0.01, 0.05, 0.35)
+
+    elif preset == "hit":
+        sig = fband(pink(50, 2000), 60, 1500) * np.exp(-np.linspace(0, 5, n)) * 0.6
+        sig += clicks(2, 300, 3000, 0.01, 0.06, 0.45)
+
+    elif preset == "knock":
+        sig = clicks(int(rng.integers(2, 5)), 400, 3000, 0.02, 0.07, 0.5)
+        sig += fband(pink(80, 1500), 90, 1200) * np.exp(-np.linspace(0, 10, n)) * 0.25
+
+    elif preset == "scratch":
+        sig = foley_rush(1000, 6000, float(rng.uniform(4, 8)), 0.3)
+        sig += clicks(int(rng.integers(2, 5)), 2000, 7000, 0.01, 0.04, 0.2)
+
+    elif preset == "rub":
+        sig = foley_rush(500, 4000, float(rng.uniform(3, 6)), 0.25)
+
+    elif preset == "tear":
+        sig = foley_rush(1500, 8000, float(rng.uniform(3, 6)), 0.3)
+        sig += clicks(int(rng.integers(2, 5)), 2000, 8000, 0.01, 0.04, 0.25)
+
+    elif preset == "unwrap":
+        sig = foley_rush(800, 7000, float(rng.uniform(4, 8)), 0.3) + snap_sound(int(rng.integers(2, 5)), 2000, 7000, 0.35)
+
+    elif preset == "close":
+        sig = fband(pink(100, 2500), 150, 2000) * np.exp(-np.linspace(0, 8, n)) * 0.4
+        sig += clicks(2, 800, 4000, 0.01, 0.04, 0.35)
+
+    elif preset == "button_press":
+        sig = clicks(1, 2000, 7000, 0.005, 0.02, 0.4) + clicks(1, 1500, 5000, 0.005, 0.02, 0.3)
+
+    elif preset == "switch_flip":
+        sig = clicks(2, 1500, 6000, 0.005, 0.03, 0.45)
+
+    elif preset == "beep_electronic":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.1 * sr), n - p)
+            if blen > 0:
+                sig[p:p + blen] += sine(2000, 0.15)[:blen] * np.exp(-np.linspace(0, 20, blen))
+        sig += fband(pink(60, 1200), 70, 1000) * 0.06
+
+    elif preset == "alarm_effect":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(4, 8))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.3 * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                sig[p:p + blen] += (np.sin(2 * np.pi * 800 * tl) + 0.5 * np.sin(2 * np.pi * 1200 * tl)) * np.sin(np.pi * np.linspace(0, 1, blen)) ** 0.3 * 0.16
+        sig += fband(pink(60, 1500), 70, 1200) * 0.08
+
+    elif preset == "vibration":
+        sig = fband(pink(100, 2000), 120, 1500) * am(float(rng.uniform(20, 40)), 0.6, 0.4) * 0.3
+
+    elif preset == "buzz":
+        sig = fband(pink(200, 2500), 250, 2000) * am(float(rng.uniform(30, 60)), 0.5, 0.5) * 0.22
+        sig += sine(float(rng.uniform(100, 200)), 0.02)
+
+    elif preset == "mechanism":
+        sig = clicks(int(rng.integers(3, 7)), 500, 3000, 0.01, 0.05, 0.35)
+        sig += creak_sound(100, 400, int(rng.integers(1, 3)), 0.2, 0.7, 0.2)
+
+    elif preset == "metal_hit":
+        sig = metal_ring(float(rng.uniform(1500, 4000)), 0.1, 0.4, 0.3, 3) + clicks(2, 1000, 5000, 0.01, 0.04, 0.35)
+
+    elif preset == "glass_touch":
+        sig = metal_ring(float(rng.uniform(3000, 7000)), 0.03, 0.15, 0.2, int(rng.integers(2, 5))) + clicks(1, 2500, 7000, 0.005, 0.02, 0.2)
+
+    elif preset == "ceramic_touch":
+        sig = metal_ring(float(rng.uniform(2000, 5000)), 0.03, 0.15, 0.22, int(rng.integers(2, 5))) + clicks(1, 1500, 5000, 0.005, 0.03, 0.2)
+
+    elif preset == "wood_hit":
+        sig = clicks(2, 300, 2500, 0.01, 0.06, 0.5) + fband(pink(100, 1500), 150, 1200) * np.exp(-np.linspace(0, 8, n)) * 0.3
+
+    elif preset == "paper_rip":
+        sig = foley_rush(1500, 8000, float(rng.uniform(3, 6)), 0.3) + clicks(int(rng.integers(2, 5)), 2000, 8000, 0.01, 0.04, 0.25)
+
+    elif preset == "brush_sweep":
+        sig = foley_rush(1000, 5000, float(rng.uniform(4, 8)), 0.25)
+
+    elif preset == "footsteps_dressing":
+        sig = footsteps(float(rng.uniform(1.0, 1.8)), lo=200, hi=4000, amp=0.45)
+        sig += foley_rush(300, 3500, 3, 0.1)
+
     else:  # "room" și orice preset necunoscut
         sig = pink(70, 3200) * 0.052 + sine(50, 0.016) + sine(100, 0.009)
 
@@ -2094,6 +3369,307 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
     """Returnează un sunet ambient sintetizat local; nu apelează niciun API extern."""
     text = str(prompt or "").lower()
     presets = (
+        # ── Sunete contextuale suplimentare: casă și obiecte ──────────────────
+        ("door_slam",          ("ușă trântit", "door slam", "trântește ușa", "ușa se trântește")),
+        ("door_train",         ("ușa trenului", "train door opens")),
+        ("train_doors",        ("uși tren", "train doors", "închidere uși tren")),
+        ("door_creak_open",    ("ușa se deschide", "door opens", "ușă scârțâie", "door creak", "scârțâit ușă")),
+        ("bus_doors",          ("uși autobuz", "bus doors")),
+        ("door_plane",         ("ușă avion", "plane door", "avion ușă")),
+        ("door_lift",          ("uși lift", "elevator doors", "lift doors")),
+        ("hotel_lift",         ("lift hotel", "hotel elevator", "ascensor hotel")),
+        ("door_cabinet",       ("ușă dulap", "cabinet door", "dulap ușă")),
+        ("door_fridge",        ("ușă frigider", "fridge door", "frigider")),
+        ("door_oven",          ("ușă cuptor", "oven door", "cuptor")),
+        ("door_bathroom",      ("ușă baie", "bathroom door")),
+        ("car_door",           ("ușă mașină", "car door", "portieră")),
+        ("garage_door",        ("ușă garaj", "garage door")),
+        ("clinic_door",        ("ușă clinică", "clinic door", "cabinete medicale")),
+        ("door_handle",        ("clanță", "door handle", "mâner ușă")),
+        ("door_close",         ("ușa se închide", "door close", "door shuts", "închide ușa")),
+        ("keys_put",           ("chei pe masă", "keys on table", "pune cheile")),
+        ("keys_bag",           ("chei în geantă", "keys bag")),
+        ("keys_jingle",        ("cheile", "keys jingle", "keyring", "chei zăngănesc", "zăngănit de chei")),
+        ("floor_creak",        ("parchet scârțâie", "floor creak", "podea scârțâie")),
+        ("furniture_move",     ("mobilă", "furniture move", "mută mobila")),
+        ("chair_pull",         ("scaun trage", "chair pull", "trage scaunul")),
+        ("chair_push",         ("scaun împinge", "chair push", "împinge scaunul")),
+        ("table_touch",        ("masă ating", "table touch")),
+        ("object_fall",        ("obiect cade", "object fall", "lucru cade", "cade pe jos")),
+        ("object_break",       ("obiect sparge", "object break", "ceva se sparge", "sparge")),
+        ("glass_put",          ("pahar pe masă", "glass put", "pahar așezat")),
+        ("box_open",           ("cutie deschide", "deschide cutia", "desface cutia")),
+        ("box_close",          ("cutie închide", "închide cutia")),
+        ("packaging",          ("ambalaj", "packaging", "pachet desface")),
+        ("tape_peel",          ("bandă adezivă", "tape peel", "scoci")),
+        ("pen_write",          ("pix scrie", "pen write", "scrie cu pixul")),
+        ("paper_rustle",       ("hârtie foșnesc", "paper rustle", "hârtie foșnet")),
+        ("paperclip",          ("aglutină", "paperclip", "clamă hârtie")),
+        ("rubber_band",        ("elastic", "rubber band")),
+        # ── Haine ─────────────────────────────────────────────────────────────
+        ("fabric_rustle",      ("țesătură", "fabric rustle", "haine foșnesc", "material foșnet")),
+        ("clothes_put",        ("haine pune", "clothes put", "îmbracă")),
+        ("jacket_zip",         ("geacă fermoar", "jacket zip")),
+        ("bag_zip",            ("geantă fermoar", "bag zip")),
+        ("boot_zip",           ("cizmă fermoar", "boot zip", "ghete")),
+        ("button",             ("nasture", "nasturi")),
+        ("belt_buckle",        ("curea", "belt buckle", "cataramă")),
+        ("socks",              ("șosete", "socks")),
+        ("medical_gloves",     ("mănuși medicale", "medical gloves", "mănuși latex")),
+        ("gloves_put",         ("mănuși", "gloves")),
+        ("scarf",              ("eșarfă", "scarf", "fular")),
+        ("hanger",             ("umeraș", "hanger")),
+        ("closet",             ("dulap haine", "closet", "garderob")),
+        ("clothes_fold",       ("haine împăturit", "clothes fold", "împăturește haine")),
+        ("clothes_bag",        ("haine în geantă", "clothes bag")),
+        # ── Genți și bagaje ───────────────────────────────────────────────────
+        ("suitcase_zip",       ("valiză fermoar", "suitcase zip")),
+        ("suitcase_wheels",    ("valiză roți", "suitcase wheels", "valiză pe roți")),
+        ("suitcase_open",      ("valiză", "suitcase open", "deschide valiza")),
+        ("bag_open",           ("geantă deschide", "bag open", "deschide geanta")),
+        ("wallet",             ("portofel", "wallet")),
+        ("money",              ("bani", "money", "bancnote")),
+        ("coins",              ("monede", "coins")),
+        ("card_swipe",         ("card bancar", "card swipe", "card de credit", "cardul")),
+        ("bag_put",            ("geantă pe masă", "bag put", "pune geanta")),
+        ("luggage_lift",       ("bagaj ridică", "luggage lift", "ridică bagajul")),
+        ("zipper",             ("fermoar", "zipper", "zip")),
+        # ── Baie și igienă ────────────────────────────────────────────────────
+        ("toilet_seat",        ("capac toaletă", "toilet seat")),
+        ("toilet_flush",       ("toaletă", "toilet flush", "spălare toaletă")),
+        ("sink_water",         ("chiuvetă", "sink water", "apă chiuvetă")),
+        ("bath_fill",          ("cadă umple", "bath fill", "umple cada")),
+        ("drain",              ("scurgere", "drain", "apă se scurge")),
+        ("cosmetic_pump",      ("pompiță", "cosmetic pump", "pompa cremă")),
+        ("tube_squeeze",       ("tub", "tube squeeze", "stoarce tub")),
+        ("toothbrush",         ("periuță", "toothbrush", "spălat dinți")),
+        ("rinse_cup",          ("pahar clătire", "rinse cup", "clătește")),
+        ("mirror_steam",       ("oglindă aburit", "mirror steam")),
+        ("electric_razor",     ("brici electric", "electric razor")),
+        ("razor",              ("aparat ras", "razor")),
+        ("epilator",           ("epilator", "epilation")),
+        ("tweezers",           ("pensetă", "tweezers", "pensat")),
+        # ── Salon de înfrumusețare ────────────────────────────────────────────
+        ("scissors",           ("foarfece", "scissors")),
+        ("clippers",           ("mașină tuns", "clippers", "tuns mașină")),
+        ("hair_cut",           ("tuns", "haircut", "tuns părul")),
+        ("rotating_brush",     ("perie rotativ", "rotating brush")),
+        ("flat_iron",          ("placa par", "flat iron", "netezi parul")),
+        ("hair_spray",         ("spray păr", "hair spray", "spray de păr")),
+        ("comb_put",           ("pieptene", "comb")),
+        ("salon_chair",        ("scaun salon", "salon chair")),
+        # ── Cosmetice și machiaj ──────────────────────────────────────────────
+        ("makeup_open",        ("ruj deschide", "makeup open", "deschide rujul")),
+        ("makeup_close",       ("ruj închide", "makeup close", "închide rujul")),
+        ("brush_tap",          ("perie machiaj", "brush tap", "pensulă")),
+        ("foundation_pump",    ("fond de ten", "foundation")),
+        ("concealer",          ("corector", "concealer")),
+        ("bronzer",            ("bronzer", "bronzant")),
+        ("brow_pencil",        ("creion sprâncene", "brow pencil")),
+        ("mascara",            ("mascara", "rimel")),
+        ("lash_glue",          ("lipici gene", "lash glue")),
+        ("sponge",             ("burete", "sponge")),
+        ("cotton_pad",         ("disc demachiant", "cotton pad", "vată")),
+        ("cream_apply",        ("aplică crema", "cream rub", "cream apply")),
+        ("serum_drop",         ("serum", "serum drop", "picături serum")),
+        ("face_mask",          ("mască facială", "face mask")),
+        # ── Parfum și îngrijire ───────────────────────────────────────────────
+        ("perfume_wrist",      ("parfum la încheietură", "perfume wrist")),
+        ("perfume_spray",      ("spray parfum", "parfum", "perfume")),
+        ("body_spray",         ("spray corp", "body spray")),
+        ("spray_mist",         ("spray fin", "mist", "ceață spray")),
+        ("bottle_cap",         ("capac sticlă", "bottle cap", "desfac capac")),
+        ("roll_on",            ("roll on", "deodorant roll")),
+        ("stick_deo",          ("stick deodorant", "deodorant stick")),
+        ("deodorant_spray",    ("deodorant", "deodorant spray")),
+        ("hand_cream",         ("cremă mâini", "hand cream")),
+        ("perfume_wrist",      ("parfum la încheietură", "perfume wrist")),
+        # ── Unghii ────────────────────────────────────────────────────────────
+        ("polish_open",        ("ojă deschide", "polish open")),
+        ("polish_brush",       ("aplică ojă", "polish brush")),
+        ("polish_shake",       ("ojă", "nail polish shake", "agită ojă")),
+        ("nail_file",          ("pilă unghii", "nail file", "pile unghii")),
+        ("nail_clipper",       ("clește unghii", "nail clipper", "taie unghii")),
+        ("cuticle",            ("cuticula", "cuticle")),
+        # ── Bijuterii ─────────────────────────────────────────────────────────
+        ("jewelry_box_close",  ("cutie bijuterii închide", "jewelry box close")),
+        ("jewelry_box_open",   ("cutie bijuterii", "jewelry box open")),
+        ("earrings",           ("cercei", "earrings")),
+        ("bracelet",           ("brățară", "bracelet")),
+        ("necklace",           ("colier", "necklace", "lanț gât")),
+        ("ring_put",           ("inel", "ring put", "pune inelul")),
+        ("jewelry_clink",      ("bijuterii zăngănesc", "jewelry clink")),
+        # ── Îmbrăcăminte încălțăminte ─────────────────────────────────────────
+        ("shoe_takeoff",       ("scoate pantofii", "shoe takeoff", "descălțat")),
+        ("shoe_box",           ("cutie pantofi", "shoe box")),
+        ("shoe_put",           ("pantofi", "shoe put", "încălțat")),
+        ("shoelace",           ("șireturi", "shoelace", "leagă șireturile")),
+        ("sandals",            ("sandale", "sandals")),
+        ("footsteps_stone",    ("pași piatră", "footsteps stone", "pași pe piatră")),
+        ("footsteps_floor",    ("pași interior", "footsteps floor", "pași pe jos")),
+        ("footsteps_dressing", ("pași dressing", "footsteps dressing", "pași vestiar")),
+        # ── Spații interioare ─────────────────────────────────────────────────
+        ("hall_steps",         ("pași hol școală", "hall steps", "coridor pași")),
+        ("long_corridor",      ("coridor lung", "long corridor")),
+        ("hotel_corridor",     ("coridor hotel", "hotel corridor")),
+        ("hall",               ("hol", "coridor", "lobby clădire")),
+        ("staircase",          ("scara interioară", "staircase", "trepte interioare")),
+        ("empty_room",         ("cameră goală", "empty room", "odaie goală")),
+        ("crowded_room",       ("cameră aglomerat", "crowded room", "cameră plină de oameni")),
+        ("bedroom",            ("dormitor", "bedroom", "cameră de dormit")),
+        ("dressing",           ("dressing", "vestiar")),
+        ("balcony",            ("balcon", "balcony")),
+        ("garage",             ("garaj", "garage")),
+        ("basement",           ("subsol", "basement", "beci")),
+        ("attic",              ("mansardă", "attic", "pod casă")),
+        ("office_space",       ("open space", "office space", "spațiu birou")),
+        ("mall_space",         ("spațiu mall", "mall space", "zgomot mall")),
+        ("salon_space",        ("salon coafură", "hair salon", "salon înfrumusețare")),
+        ("hotel",              ("hotel", "lobby hotel")),
+        ("reception",          ("recepție", "reception")),
+        ("parking",            ("parcare", "parking", "parking lot")),
+        # ── Exterior și casă ──────────────────────────────────────────────────
+        ("gate_open",          ("poarta se deschide", "gate open", "porțile se deschid")),
+        ("gate_close",         ("poarta se închide", "gate close", "închide poarta")),
+        ("gravel",             ("pietriș", "gravel", "pași pietriș")),
+        ("grass",              ("iarbă", "grass", "pași iarbă")),
+        ("leaves",             ("foșnet frunze", "frunze foșnesc", "leaves rustle")),
+        ("branches",           ("crengi", "branches", "crengi scrâșnesc")),
+        ("car_trunk",          ("portbagaj", "car trunk")),
+        ("wipers",             ("ștergătoare", "wipers")),
+        ("car_window",         ("geam mașină", "car window", "fereastră mașină")),
+        ("engine_electric",    ("motor electric", "electric engine", "motor lin")),
+        ("engine_diesel",      ("motor diesel", "diesel engine", "motor pornit", "motorul pornește")),
+        # ── Transport ─────────────────────────────────────────────────────────
+        ("train_brake",        ("frânare tren", "train brake", "frana trenului")),
+        ("train_accel",        ("accelerare tren", "train accelerate", "tren pornește")),
+        ("train_depart",       ("tren pleacă", "train depart")),
+        ("train_pass",         ("tren trece", "train passing")),
+        ("train_station",      ("tren stație", "train station")),
+        ("train_interior",     ("interior tren", "train interior", "vagon interior")),
+        ("station_announce",   ("anunț gară", "station announcement", "anunț peron")),
+        ("crowd_station",      ("peron aglomerat", "station crowd", "mulțime peron")),
+        ("metro_station",      ("stație metrou", "metro station")),
+        ("transport_announce", ("anunț transport", "transport announcement")),
+        ("airport_extra",      ("aeroport zgomot", "airport hall", "terminal zgomot")),
+        ("baggage_belt",       ("bandă bagaje", "baggage belt", "bagaje carusel")),
+        ("luggage_cart",       ("cărucior bagaje", "luggage cart", "cărucior")),
+        ("plane_cabin",        ("cabina avion", "plane cabin")),
+        ("seatbelt",           ("centura de siguranță", "seatbelt", "se ataseaza centura")),
+        # ── Oraș ──────────────────────────────────────────────────────────────
+        ("crowd_moving",       ("oameni în mișcare", "crowd moving")),
+        ("people_walk",        ("oameni care merg", "people walking", "transeunte")),
+        ("people_run",         ("oameni care aleargă", "people running")),
+        ("trotinette",         ("trotinetă", "scooter", "trotineta")),
+        ("tram",               ("tramvai", "tram")),
+        ("distant_horn",       ("claxon depărtat", "distant horn", "claxoane")),
+        ("distant_siren",      ("sirenă depărtată", "distant siren", "sirene depărtate")),
+        ("traffic_light",      ("semafor", "traffic light", "bip semafor")),
+        ("crosswalk",          ("trecere de pietoni", "crosswalk", "zebra")),
+        ("roadwork",           ("lucrări drum", "roadwork", "drum în lucru")),
+        ("jackhammer",         ("ciocan pneumatic", "jackhammer", "pneumatic")),
+        ("construction_extra", ("șantier zgomot", "construction noise")),
+        ("distant_cars",       ("mașini depărtate", "distant cars", "trafic depărtat")),
+        ("night_traffic",      ("trafic nocturn", "night traffic", "trafic noaptea")),
+        ("market_square",      ("piața centrală", "market square", "piața oraș")),
+        ("park_space",         ("parc public", "city park", "parc oraș")),
+        ("fountain_water",     ("fântână arteziană", "fountain water", "fântână oraș")),
+        # ── Școală și birou ───────────────────────────────────────────────────
+        ("classroom",          ("sală de clasă", "classroom", "clasa elevi")),
+        ("chairs_move",        ("scaune mișcate", "chairs moving", "scaune mută")),
+        ("chalk_board",        ("cretă tablă", "chalk board", "scrie pe tablă")),
+        ("board_wipe",         ("șterge tabla", "board wipe", "tabla sterge")),
+        ("notebook",           ("caiet", "notebook")),
+        ("page_turn",          ("pagina întoarce", "page turn", "răsfoiește")),
+        ("page_rip",           ("pagina rupe", "page rip", "rupe pagina")),
+        ("backpack",           ("ghiozdan", "backpack", "rucsac")),
+        ("students",           ("elevii", "students", "școlari", "elevi la școală")),
+        ("school_bell",        ("clopoțel școală", "school bell", "suna clopoțelul")),
+        ("computer_typing",    ("tastare calculator", "computer typing", "taste calculator")),
+        ("printer_extra",      ("alimentare hârtie", "printer noise", "imprimanta scoate pagini")),
+        ("desk_phone",         ("telefon birou", "desk phone", "telefon fix")),
+        # ── Medical ───────────────────────────────────────────────────────────
+        ("wheelchair",         ("scaun cu rotile", "wheelchair")),
+        ("stretcher",          ("targă", "stretcher", "pat de targă")),
+        ("stethoscope",        ("stetoscop", "stethoscope")),
+        ("blood_pressure",     ("tensiune arterială", "blood pressure", "măsoară tensiunea")),
+        ("monitor_alarm",      ("alarmă monitor", "monitor alarm", "alarma aparaturii")),
+        ("monitor_beep",       ("bip monitor", "monitor beep", "monitor pacienți")),
+        ("syringe",            ("seringă", "syringe", "injecție")),
+        ("medical_pack",       ("trusa medicală", "medical pack", "trusă de prim ajutor")),
+        ("sanitizer",          ("dezinfectant", "sanitizer", "gel de mâini")),
+        ("curtain_draw",       ("perdea trasă", "curtain draw", "draperii", "trage draperia")),
+        # ── Divertisment ──────────────────────────────────────────────────────
+        ("applause_soft",      ("aplauze discrete", "soft applause", "aplauze lin")),
+        ("laugh",              ("râs", "laugh", "râsete")),
+        ("giggle",             ("chicot", "giggle", "chicoteli")),
+        ("whisper",            ("șoaptă", "whisper", "șoptit")),
+        ("whistle",            ("fluier", "whistle", "fluierat")),
+        ("boo",                ("huo", "boo crowd")),
+        ("stage",              ("scenă", "stage")),
+        ("speaker_feedback",   ("feedback microfon", "speaker feedback", "zgomot microfon")),
+        ("microphone",         ("microfon", "microphone")),
+        ("dance",              ("dans", "dance", "dansatori")),
+        ("club",               ("club de noapte", "club", "nightclub")),
+        ("concert",            ("concert", "concerte")),
+        ("theater",            ("teatru", "theater", "spectacol teatru")),
+        ("cinema",             ("sală film", "cinematograf", "la cinema", "proiecție de film")),
+        ("projector",          ("proiector", "projector")),
+        # ── Emoții și stări ───────────────────────────────────────────────────
+        ("breath_calm",        ("respirație calmă", "calm breathing", "respirație lină")),
+        ("breath_agitated",    ("respirație agitată", "agitated breathing", "respirație grea")),
+        ("sigh",               ("oftat", "sigh", "suspin")),
+        ("cry_soft",           ("plâns lin", "soft crying", "plânge încet")),
+        ("cry_loud",           ("plâns", "crying", "plânge tare", "bocește")),
+        ("heartbeat_fast",     ("bătăi inimă rapide", "fast heartbeat", "inima bate repede")),
+        ("tremble",            ("tremurat", "tremble", "frisoane")),
+        ("silence_tension",    ("tensiune liniște", "tense silence", "liniște tensionată")),
+        ("romance",            ("romantism", "romance", "atmosferă romantică")),
+        ("relaxation",         ("relaxare", "relaxation", "liniște relaxant")),
+        ("warm_atmos",         ("atmosferă caldă", "warm atmosphere", "ambient cald")),
+        ("cold_atmos",         ("atmosferă rece", "cold atmosphere", "ambient rece")),
+        ("night_atmos",        ("atmosferă nocturnă", "night atmosphere", "noapte ambient")),
+        ("morning_atmos",      ("atmosferă de dimineață", "morning atmosphere", "ambient dimineață")),
+        # ── Ambiante temporale ────────────────────────────────────────────────
+        ("morning",            ("dimineață liniștit", "quiet morning", "dimineață calmă")),
+        ("afternoon",          ("după-amiază", "afternoon", "amiază")),
+        ("evening",            ("seară liniștit", "evening calm", "seară calmă")),
+        ("quiet_house",        ("casă liniștit", "quiet house", "casă calmă")),
+        ("busy_house",         ("casă aglomerat", "busy house", "casă cu oameni")),
+        ("quiet_city",         ("oraș liniștit", "quiet city", "liniște urbană")),
+        ("busy_city",          ("oraș aglomerat", "busy city", "aglomerație urbană")),
+        ("distant_rain",       ("ploaie depărtată", "distant rain", "ploaie în depărtare")),
+        ("distant_storm",      ("furtună depărtată", "distant storm", "furtună în depărtare")),
+        ("distant_people",     ("voci depărtate", "distant voices", "oameni în depărtare")),
+        ("small_echo",         ("ecou mic", "small echo", "ecou încăpere mică")),
+        ("big_echo",           ("ecou", "big echo", "sala ecou")),
+        ("big_room",           ("sală mare", "big room", "încăpere mare")),
+        ("small_room",         ("încăpere mică", "small room", "cameră mică")),
+        ("empty_space",        ("spațiu gol", "empty space", "încăpere goală")),
+        # ── Efecte ────────────────────────────────────────────────────────────
+        ("object_lift",        ("obiect ridică", "object lift", "ridică obiectul")),
+        ("object_put",         ("obiect pune", "object put", "pune obiectul")),
+        ("hit",                ("lovitură", "lovește", "impact puternic")),
+        ("knock",              ("bătut în ușă", "knock", "ciocăni")),
+        ("scratch",            ("zgârietură", "scratch", "zgârie")),
+        ("rub",                ("frecare", "rub", "frecat")),
+        ("tear",               ("rupere", "tear", "sfâșiere")),
+        ("unwrap",             ("despachetează", "unwrap", "desface cadou")),
+        ("close",              ("închidere", "close sound", "se închide")),
+        ("button_press",       ("buton apăsare", "button press", "apasă butonul")),
+        ("switch_flip",        ("întrerupător", "switch flip", "comutator")),
+        ("monitor_alarm",      ("alarmă monitor", "monitor alarm", "alarma aparaturii")),
+        ("alarm_effect",       ("alarmă efect", "alarm beep", "bip de alarmă")),
+        ("beep_electronic",    ("bip", "bip electronic", "electronic beep", "bip aparat")),
+        ("vibration",          ("vibrație", "vibration", "vibrează")),
+        ("buzz",               ("bâzâit", "buzz", "zâzâit")),
+        ("mechanism",          ("mecanism", "mechanism", "angrenaj")),
+        ("metal_hit",          ("metal lovit", "metal hit", "atingere metal")),
+        ("glass_touch",        ("sticlă atingere", "glass touch", "atinge sticla")),
+        ("ceramic_touch",      ("ceramică atingere", "ceramic touch")),
+        ("wood_hit",           ("lemn lovit", "wood hit", "atinge lemnul")),
+        ("paper_rip",          ("hârtie ruptă", "paper rip", "hârtie rupe")),
+        ("brush_sweep",        ("mătura", "brush sweep", "măturat")),
         ("storm",              ("tunet", "furtun", "thunder", "storm", "lightning", "fulger", "grindină")),
         ("blizzard",           ("crivăț", "viscol", "blizzard", "howling wind", "vânt puternic", "uragan", "tornado", "vulcan")),
         ("rain_window",         ("ploaie geam", "rain window", "rain on window", "picături geam")),
@@ -2228,6 +3804,68 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         ("bicycle",              ("biciclet", "bicycle", "clopoțel bicicletă", "velo")),
         ("organ",                ("orgă", "organ", "orgă biserică")),
         ("gong",                 ("gong", "tam-tam", "gong meditație")),
+        # ── Aliasuri pentru forme flexionate / articulate în română ──────────
+        ("door_cabinet",         ("ușa de la dulap", "ușa dulapului")),
+        ("door_plane",           ("ușa avionului", "ușa de la avion")),
+        ("clinic_door",          ("ușa de la clinică", "ușa clinicii")),
+        ("furniture_move",       ("muta mobila", "mută mobila", "mobila")),
+        ("glass_put",            ("paharul pe masă", "pune paharul")),
+        ("tape_peel",            ("scoate banda", "banda adezivă")),
+        ("paper_rustle",         ("hârtia foșnește", "hârtie foșnește", "foșnet de hârtie", "foșnet hârtie")),
+        ("fabric_rustle",        ("materialul foșnește", "material foșnește", "foșnet de material", "foșnet material")),
+        ("scarf",                ("eșarfa", "își înfășoară eșarfa")),
+        ("toilet_seat",          ("capacul toaletei", "ridică capacul")),
+        ("drain",                ("apa se scurge", "se scurge apa")),
+        ("cosmetic_pump",        ("pompează crema", "pompează cremă")),
+        ("toothbrush",           ("se spală pe dinți", "spală dinții")),
+        ("mirror_steam",         ("oglinda se aburește", "oglinda aburită")),
+        ("razor",                ("aparatul de ras",)),
+        ("electric_razor",       ("briciul electric",)),
+        ("tweezers",             ("penseta", "pensat sprâncene")),
+        ("rotating_brush",       ("peria rotativă", "perie rotativă")),
+        ("salon_chair",          ("scaunul de salon",)),
+        ("brow_pencil",          ("creion de sprâncene",)),
+        ("lash_glue",            ("lipici pentru gene",)),
+        ("cotton_pad",           ("discul demachiant",)),
+        ("face_mask",            ("masca facială",)),
+        ("bottle_cap",           ("desface capacul sticlei", "capacul sticlei")),
+        ("body_spray",           ("spray de corp",)),
+        ("hand_cream",           ("cremă de mâini",)),
+        ("polish_shake",         ("agită oja",)),
+        ("polish_brush",         ("aplică oja",)),
+        ("nail_file",            ("pila de unghii", "pila unghii")),
+        ("nail_clipper",         ("cleștele de unghii", "cleștele unghii")),
+        ("bracelet",             ("brățara",)),
+        ("jewelry_clink",        ("bijuteriile zăngănesc",)),
+        ("empty_room",           ("camera goală",)),
+        ("crowded_room",         ("camera aglomerată", "camera plină de oameni")),
+        ("attic",                ("mansarda",)),
+        ("salon_space",          ("salonul de coafură",)),
+        ("reception",            ("recepția",)),
+        ("grass",                ("iarba", "pași pe iarbă")),
+        ("engine_electric",      ("motorul electric",)),
+        ("engine_diesel",        ("motorul diesel",)),
+        ("baggage_belt",         ("banda de bagaje", "banda bagaje")),
+        ("roadwork",             ("lucrări la drum",)),
+        ("park_space",           ("parcul public", "parcul central", "grădina publică")),
+        ("fountain_water",       ("fântâna arteziană",)),
+        ("classroom",            ("sala de clasă",)),
+        ("chairs_move",          ("scaunele mișcate", "scaunele se mișcă")),
+        ("page_turn",            ("întoarce pagina", "întoarce o pagină")),
+        ("school_bell",          ("clopoțelul școlii",)),
+        ("wheelchair",           ("scaunul cu rotile",)),
+        ("stretcher",            ("targa", "targa cu roți")),
+        ("monitor_alarm",        ("alarma monitorului", "alarma aparatului")),
+        ("syringe",              ("seringa", "seringa cu medicament")),
+        ("whisper",              ("șoapte", "în șoaptă")),
+        ("stage",                ("scena",)),
+        ("tremble",              ("tremură", "îi tremură mâinile")),
+        ("silence_tension",      ("tensiune în liniște",)),
+        ("hit",                  ("lovitura", "o lovitură")),
+        ("knock",                ("bate în ușă", "bate la ușă")),
+        ("vibration",            ("vibrația", "vibrează telefonul")),
+        ("paper_rip",            ("hârtia ruptă", "rupe hârtia")),
+        ("brush_sweep",          ("mătură", "cu mătura")),
     )
     preset = next(
         (name for name, words in presets if any(word in text for word in words)),
