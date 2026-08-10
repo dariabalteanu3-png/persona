@@ -637,3 +637,73 @@ def search_ambients(query, category=None):
     if category:
         q["category"] = category
     return list(ambients_collection.find(q, {"audio_b64": 0}).sort("created_at", -1))
+
+
+def seed_ambient_library():
+    """Populează biblioteca de sunete ambientale (Mongo) cu presetări sintetice."""
+    from db_pg import seed_ambient_library as _pg_seed  # noqa: F401 (reutilizăm lista)
+    # Nu putem importa simplu lista din db_pg (depinde de _conn PG).
+    # Definim lista local pentru backend-ul Mongo.
+    ambients = [
+        {"name": "Tren în mers", "category": "transport", "description": "Sunet de tren care circulă pe șine", "tags": ["tren", "transport", "călătorie"]},
+        {"name": "Metrou", "category": "transport", "description": "Sunet de metrou care circulă", "tags": ["metrou", "transport", "urban"]},
+        {"name": "Autobuz", "category": "transport", "description": "Sunet de autobuz care circulă", "tags": ["autobuz", "transport", "urban"]},
+        {"name": "Stradă cu trafic", "category": "transport", "description": "Sunet de stradă cu mașini și trafic", "tags": ["stradă", "trafic", "mașini", "urban"]},
+        {"name": "Ploaie ușoară", "category": "natură", "description": "Sunet de ploaie ușoară", "tags": ["ploaie", "natură", "vreme"]},
+        {"name": "Ploaie puternică", "category": "natură", "description": "Sunet de ploaie puternică", "tags": ["ploaie", "furtună", "vreme"]},
+        {"name": "Furtună cu tunete", "category": "natură", "description": "Sunet de furtună cu tunete", "tags": ["furtună", "tunete", "vreme"]},
+        {"name": "Vânt puternic", "category": "natură", "description": "Sunet de vânt puternic", "tags": ["vânt", "natură", "vreme"]},
+        {"name": "Pădure", "category": "natură", "description": "Sunet de pădure cu păsări", "tags": ["pădure", "natură", "păsări"]},
+        {"name": "Râu care curge", "category": "natură", "description": "Sunet de apă care curge", "tags": ["râu", "apă", "natură"]},
+        {"name": "Valuri de mare", "category": "natură", "description": "Sunet de valuri la mare", "tags": ["mare", "valuri", "plajă"]},
+        {"name": "Șemineu", "category": "natură", "description": "Sunet de foc în șemineu", "tags": ["foc", "șemineu", "casă"]},
+        {"name": "Zăpadă", "category": "natură", "description": "Sunet de ninsoare", "tags": ["zăpadă", "iarnă", "natură"]},
+        {"name": "Câine care latră", "category": "animale", "description": "Sunet de câine care latră", "tags": ["câine", "lătrat", "animal"]},
+        {"name": "Pisică care toarce", "category": "animale", "description": "Sunet de pisică care toarce", "tags": ["pisică", "tors", "animal"]},
+        {"name": "Păsări în natură", "category": "animale", "description": "Sunet de păsări în natură", "tags": ["păsări", "natură", "cânt"]},
+        {"name": "Greieri noaptea", "category": "animale", "description": "Sunet de greieri noaptea", "tags": ["greieri", "noapte", "natură"]},
+        {"name": "Conversație în cafenea", "category": "oameni", "description": "Sunet de conversații într-o cafenea", "tags": ["cafenea", "conversație", "oameni"]},
+        {"name": "Copii care se joacă", "category": "oameni", "description": "Sunet de copii care se joacă", "tags": ["copii", "joacă", "oameni"]},
+        {"name": "Restaurant aglomerat", "category": "oameni", "description": "Sunet de restaurant cu mulți oameni", "tags": ["restaurant", "oameni", "aglomerat"]},
+        {"name": "Televizor în fundal", "category": "tehnologie", "description": "Sunet de televizor care merge în fundal", "tags": ["televizor", "tehnologie", "fundal"]},
+        {"name": "Calculator", "category": "tehnologie", "description": "Sunet de calculator care funcționează", "tags": ["calculator", "tehnologie", "birou"]},
+        {"name": "Notificări telefon", "category": "tehnologie", "description": "Sunet de notificări de telefon", "tags": ["telefon", "notificări", "tehnologie"]},
+        {"name": "Supermarket", "category": "public", "description": "Sunet de supermarket cu oameni", "tags": ["supermarket", "public", "magazin"]},
+        {"name": "Gara", "category": "public", "description": "Sunet de gară cu anunțuri", "tags": ["gară", "public", "transport"]},
+        {"name": "Bibliotecă", "category": "public", "description": "Sunet de bibliotecă liniștită", "tags": ["bibliotecă", "public", "liniște"]},
+        {"name": "Cafea la espressor", "category": "cafea", "description": "Sunet de preparare a cafelei la espressor", "tags": ["cafea", "espressor", "bucătărie"]},
+        {"name": "Apă care fierbe", "category": "cafea", "description": "Sunet de apă care fierbe", "tags": ["apă", "fierbere", "bucătărie"]},
+        {"name": "Farfurii și tacâmuri", "category": "cafea", "description": "Sunet de vase și tacâmuri", "tags": ["farfurii", "tacâmuri", "bucătărie"]},
+        {"name": "Frigider", "category": "cafea", "description": "Sunet de frigider care funcționează", "tags": ["frigider", "bucătărie", "electrocasnice"]},
+        {"name": "Ușă care se deschide", "category": "cameră", "description": "Sunet de ușă care se deschide", "tags": ["ușă", "cameră", "casă"]},
+        {"name": "Parchet - pași", "category": "cameră", "description": "Sunet de pași pe parchet", "tags": ["pași", "parchet", "cameră"]},
+        {"name": "Lift", "category": "cameră", "description": "Sunet de lift care urcă și coboară", "tags": ["lift", "clădire", "cameră"]},
+    ]
+    for amb in ambients:
+        try:
+            create_ambient(
+                owner_id="system",
+                name=amb["name"],
+                category=amb["category"],
+                description=amb["description"],
+                tags=amb["tags"],
+                visibility="public",
+                is_synthetic=True,
+            )
+            print(f"✅ Adăugat: {amb['name']}")
+        except Exception as e:
+            print(f"⚠️ {amb['name']}: {e}")
+
+
+# Seed biblioteca de sunete ambientale (doar dacă e goală)
+try:
+    if ambients_collection.count_documents({}) == 0:
+        print("[db] Seeding ambient library (Mongo)...")
+        try:
+            seed_ambient_library()
+            print("[db] Ambient library seeded successfully!")
+        except Exception as _seed_err:
+            print(f"[db] Seed warning: {_seed_err}")
+except Exception as _e2:
+    import sys
+    print(f"[db] Ambient seed error: {_e2}", file=sys.stderr)

@@ -1715,6 +1715,361 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
                 beep[p:p+blen] += sine(1500, 0.12)[:blen] * np.exp(-np.linspace(0, 25, blen))
         sig = hum + vent + beep * 0.08
 
+    elif preset == "desert":
+        heat = pink(200, 4500) * am(rng.uniform(0.08, 0.18), 0.45, 0.55) * 0.22
+        shimmer = fband(pink(3000, 9000), 3500, 8000) * am(rng.uniform(0.5, 1.2), 0.60, 0.40) * 0.08
+        gust = np.zeros(n)
+        for _ in range(int(rng.integers(1, 4))):
+            p = int(rng.integers(0, n))
+            glen = min(int(rng.uniform(0.4, 1.5) * sr), n - p)
+            if glen > 0:
+                gust[p:p+glen] += pink(150, 3500, glen) * np.sin(np.pi * np.linspace(0, 1, glen)) * 0.20
+        sig = heat + shimmer + gust
+
+    elif preset == "waterfall":
+        roar = pink(40, 6000) * am(rng.uniform(0.5, 1.5), 0.15, 0.85) * 0.60
+        mid = fband(pink(200, 4000), 300, 3500) * am(rng.uniform(2, 5), 0.20, 0.80) * 0.35
+        spray = pink(2000, 9000) * 0.18
+        sig = roar + mid + spray
+
+    elif preset == "stream":
+        base = pink(120, 5000) * am(rng.uniform(0.2, 0.5), 0.30, 0.70) * 0.40
+        gurgle = footsteps(float(rng.uniform(18, 34)), lo=450, hi=3800, amp=0.20)
+        sig = base + gurgle * 0.30
+
+    elif preset == "rain_roof":
+        base = pink(150, 6000) * am(rng.uniform(0.05, 0.12), 0.10, 0.90) * 0.52
+        taps = footsteps(float(rng.uniform(28, 45)), lo=2500, hi=8500, amp=0.22)
+        rumble = pink(30, 200) * 0.08
+        sig = base + taps * 0.32 + rumble
+
+    elif preset == "thunder_roll":
+        low = pink(25, 180) * am(rng.uniform(0.06, 0.15), 0.40, 0.60) * 0.30
+        roll = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(int(0.05 * n), n))
+            tlen = min(int(rng.uniform(1.5, 4.0) * sr), n - p)
+            if tlen > 0:
+                boom = pink(20, 300, tlen)
+                env = np.concatenate([
+                    np.linspace(0, 1, max(1, tlen // 6)),
+                    np.exp(-np.linspace(0, 2.5, tlen - tlen // 6))
+                ])[:tlen]
+                roll[p:p + tlen] += boom * env * float(rng.uniform(0.30, 0.55))
+        sig = low + roll
+
+    elif preset == "wind_chimes":
+        base = pink(60, 2500) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.08
+        chimes = np.zeros(n)
+        notes = [660, 784, 880, 990, 1175, 1320]
+        for _ in range(int(rng.integers(3, 8))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.4, 1.5) * sr), n - p)
+            if clen > 0:
+                freq = float(rng.choice(notes)) * float(rng.uniform(0.98, 1.02))
+                tl = np.linspace(0, clen / sr, clen)
+                tone = np.sin(2 * np.pi * freq * tl) + 0.4 * np.sin(2 * np.pi * freq * 2.76 * tl)
+                env = np.exp(-np.linspace(0, 2.5, clen))
+                chimes[p:p + clen] += tone * env * float(rng.uniform(0.12, 0.30))
+        sig = base + chimes
+
+    elif preset == "church_bells":
+        base = pink(50, 1000) * 0.05
+        bells = np.zeros(n)
+        freqs = [(130, 2.1), (164, 2.7), (196, 3.1)]
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.1 * n), int(0.7 * n)))
+            blen = min(int(rng.uniform(2, 5) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                f, decay = rng.choice(freqs)
+                tone = (np.sin(2 * np.pi * f * tl) + 0.3 * np.sin(2 * np.pi * f * 2.4 * tl))
+                env = np.exp(-decay * tl)
+                bells[p:p + blen] += tone * env * float(rng.uniform(0.10, 0.20))
+        sig = base + bells
+
+    elif preset == "temple_gong":
+        base = pink(50, 900) * 0.04
+        gongs = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.15 * n), int(0.8 * n)))
+            glen = min(int(rng.uniform(3, 7) * sr), n - p)
+            if glen > 0:
+                tl = np.linspace(0, glen / sr, glen)
+                freq = float(rng.uniform(110, 150))
+                tone = (np.sin(2 * np.pi * freq * tl) + 0.5 * np.sin(2 * np.pi * freq * 2.76 * tl)
+                        + 0.3 * np.sin(2 * np.pi * freq * 5.4 * tl))
+                env = np.exp(-np.linspace(0, 0.9, glen))
+                gongs[p:p + glen] += tone * env * float(rng.uniform(0.15, 0.28))
+        drone = sine(55, 0.02) + sine(82, 0.012)
+        sig = base + gongs + drone
+
+    elif preset == "meadow":
+        wind = pink(70, 2000) * am(rng.uniform(0.03, 0.08), 0.25, 0.75) * 0.12
+        brd = birds(nb=10, lo_f=1500, hi_f=5500) * 0.35
+        insects = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            freq = float(rng.uniform(3000, 6500))
+            insects += sine(freq, 0.04) * am(float(rng.uniform(4, 9)), 0.50, 0.50)
+        sig = wind + brd + insects * 0.12
+
+    elif preset == "night_forest":
+        crk = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            freq = float(rng.uniform(2000, 3000))
+            rate = float(rng.uniform(2.5, 4.5))
+            ph = float(rng.uniform(0, 2 * np.pi))
+            chirp = np.maximum(0.0, np.sin(2 * np.pi * rate * t + ph)) ** 16
+            crk += chirp * sine(freq, 0.16)
+        owl = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.1 * n), int(0.8 * n)))
+            olen = min(int(0.5 * sr), n - p)
+            if olen > 0:
+                tl = np.linspace(0, olen / sr, olen)
+                env = np.sin(np.pi * np.linspace(0, 1, olen))
+                owl[p:p+olen] += np.sin(2 * np.pi * 240 * tl) * env * 0.10
+        leaves = pink(600, 5000) * am(rng.uniform(0.05, 0.12), 0.30, 0.70) * 0.10
+        sig = crk + owl + leaves + pink(25, 250) * 0.05
+
+    elif preset == "underwater":
+        deep = pink(30, 1200) * am(rng.uniform(0.05, 0.12), 0.40, 0.60) * 0.28
+        bubbles = np.zeros(n)
+        for _ in range(int(rng.integers(6, 14))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.05, 0.15) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(600, 2500))
+                tl = np.linspace(0, blen / sr, blen)
+                env = np.sin(np.pi * np.linspace(0, 1, blen))
+                bubbles[p:p+blen] += np.sin(2 * np.pi * freq * tl) * env * float(rng.uniform(0.06, 0.14))
+        echo = fband(pink(100, 3000), 200, 2500) * 0.04
+        sig = deep + bubbles + echo
+
+    elif preset == "space":
+        drone = sine(48, 0.03) + sine(72, 0.02) + sine(110, 0.012)
+        swells = np.zeros(n)
+        for _ in range(int(rng.integers(2, 4))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(3, 8) * sr), n - p)
+            if slen > 0:
+                tl = np.linspace(0, slen / sr, slen)
+                env = np.sin(np.pi * np.linspace(0, 1, slen)) ** 0.7
+                swells[p:p+slen] += pink(200, 3000, slen) * env * float(rng.uniform(0.06, 0.14))
+        twinkle = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            tlen = min(int(0.02 * sr), n - p)
+            if tlen > 0:
+                twinkle[p:p+tlen] += sine(float(rng.uniform(800, 2500)), 0.06)[:tlen] * np.exp(-np.linspace(0, 30, tlen))
+        sig = drone + swells + twinkle * 0.5
+
+    elif preset == "cyberpunk":
+        base = fband(pink(45, 1500), 50, 1200) * am(rng.uniform(0.04, 0.10), 0.25, 0.75) * 0.35
+        hum = sine(50, 0.02) + sine(100, 0.012) + sine(200, 0.008)
+        bleeps = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.03, 0.12) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(600, 2400))
+                env = np.exp(-np.linspace(0, 18, blen))
+                bleeps[p:p+blen] += np.sin(2 * np.pi * freq * np.linspace(0, blen / sr, blen)) * env * float(rng.uniform(0.10, 0.22))
+        sig = base + hum + bleeps
+
+    elif preset == "casino":
+        murmur = fband(pink(150, 3000), 170, 2500) * am(rng.uniform(0.04, 0.10), 0.20, 0.80) * 0.22
+        jingles = np.zeros(n)
+        for _ in range(int(rng.integers(8, 18))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.02, 0.08) * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                freq = float(rng.uniform(1800, 4000))
+                jingles[p:p+blen] += (np.sin(2 * np.pi * freq * tl) + 0.5 * np.sin(2 * np.pi * freq * 1.5 * tl)) * np.exp(-np.linspace(0, 20, blen)) * 0.10
+        sig = murmur + jingles
+
+    elif preset == "market":
+        murmur = fband(pink(150, 3200), 180, 2600) * am(rng.uniform(0.05, 0.14), 0.25, 0.75) * 0.32
+        calls = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.4, 1.2) * sr), n - p)
+            if clen > 0:
+                freq = float(rng.uniform(300, 900))
+                tl = np.linspace(0, clen / sr, clen)
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.3
+                calls[p:p+clen] += np.sin(2 * np.pi * freq * tl) * env * float(rng.uniform(0.12, 0.25))
+        rustle = footsteps(float(rng.uniform(3, 8)), lo=2000, hi=8000, amp=0.12)
+        sig = murmur + calls + rustle
+
+    elif preset == "typewriter":
+        clicks = np.zeros(n)
+        step_n = max(1, int(sr / float(rng.uniform(5, 11))))
+        pos = int(rng.integers(0, step_n))
+        while pos < n:
+            clen = min(int(rng.uniform(0.01, 0.03) * sr), n - pos)
+            if clen > 0:
+                click = fband(rng.uniform(-1, 1, clen), 800, 4500)
+                clicks[pos:pos+clen] += click * np.exp(-np.linspace(0, 22, clen)) * float(rng.uniform(0.35, 0.7))
+            pos += step_n + int(rng.integers(-2, 3))
+        ding = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.2 * n), int(0.8 * n)))
+            dlen = min(int(0.6 * sr), n - p)
+            if dlen > 0:
+                tl = np.linspace(0, dlen / sr, dlen)
+                ding[p:p+dlen] += (np.sin(2 * np.pi * 2000 * tl) + 0.4 * np.sin(2 * np.pi * 3000 * tl)) * np.exp(-np.linspace(0, 5, dlen)) * 0.12
+        sig = clicks * 0.6 + ding
+
+    elif preset == "printer":
+        motor = pink(60, 2000) * am(rng.uniform(3, 7), 0.30, 0.70) * 0.25
+        feed = footsteps(float(rng.uniform(6, 12)), lo=800, hi=4000, amp=0.15)
+        hum = sine(60, 0.008) + sine(120, 0.005)
+        sig = motor + feed + hum
+
+    elif preset == "fan":
+        hum = sine(60, 0.015) + sine(120, 0.010) + sine(180, 0.006)
+        whir = pink(150, 4000) * am(float(rng.uniform(8, 14)), 0.20, 0.80) * 0.15
+        sig = hum + whir
+
+    elif preset == "air_conditioning":
+        base = pink(90, 1800) * am(rng.uniform(0.2, 0.5), 0.10, 0.90) * 0.16
+        hiss = fband(pink(2000, 7000), 2500, 6000) * 0.06
+        hum = sine(60, 0.012) + sine(120, 0.008)
+        sig = base + hiss + hum
+
+    elif preset == "cash_register":
+        base = murmur = fband(pink(150, 2500), 180, 2000) * 0.15
+        dings = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            dlen = min(int(0.15 * sr), n - p)
+            if dlen > 0:
+                tl = np.linspace(0, dlen / sr, dlen)
+                dings[p:p+dlen] += (np.sin(2 * np.pi * 2600 * tl) + 0.3 * np.sin(2 * np.pi * 3900 * tl)) * np.exp(-np.linspace(0, 12, dlen)) * 0.16
+        sig = base + dings
+
+    elif preset == "dishwasher":
+        water = pink(300, 5000) * am(rng.uniform(1, 3), 0.20, 0.80) * 0.25
+        spray = footsteps(float(rng.uniform(4, 8)), lo=1200, hi=6000, amp=0.12)
+        motor = pink(50, 500) * am(rng.uniform(0.3, 0.7), 0.10, 0.90) * 0.12
+        sig = water + spray + motor
+
+    elif preset == "shower":
+        water = pink(800, 8000) * am(rng.uniform(0.2, 0.5), 0.20, 0.80) * 0.42
+        splash = footsteps(float(rng.uniform(5, 10)), lo=1500, hi=6000, amp=0.12)
+        echo = pink(100, 2000) * 0.06
+        sig = water + splash + echo
+
+    elif preset == "snore":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 8))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(1.5, 3.5) * sr), n - p)
+            if slen > 0:
+                tl = np.linspace(0, slen / sr, slen)
+                freq = float(rng.uniform(90, 180))
+                env = np.sin(np.pi * np.linspace(0, 1, slen)) ** 0.4
+                snore = np.sin(2 * np.pi * freq * tl) * env * 0.22
+                rattle = fband(rng.uniform(-1, 1, slen), 300, 1500) * env * 0.06
+                sig[p:p+slen] += snore + rattle
+        sig += pink(40, 400) * 0.05
+
+    elif preset == "applause":
+        claps = np.zeros(n)
+        for _ in range(int(rng.integers(40, 80))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.01, 0.04) * sr), n - p)
+            if clen > 0:
+                claps[p:p+clen] += fband(rng.uniform(-1, 1, clen), 900, 6000) * np.exp(-np.linspace(0, 25, clen)) * float(rng.uniform(0.08, 0.18))
+        murmur = fband(pink(140, 3000), 160, 2500) * am(rng.uniform(0.1, 0.3), 0.30, 0.70) * 0.12
+        sig = claps + murmur
+
+    elif preset == "cheering":
+        murmur = fband(pink(150, 3000), 180, 2600) * am(rng.uniform(0.05, 0.15), 0.30, 0.70) * 0.25
+        hoorays = np.zeros(n)
+        for _ in range(int(rng.integers(4, 9))):
+            p = int(rng.integers(0, n))
+            hlen = min(int(rng.uniform(0.5, 1.5) * sr), n - p)
+            if hlen > 0:
+                freq = float(rng.uniform(300, 600))
+                tl = np.linspace(0, hlen / sr, hlen)
+                env = np.sin(np.pi * np.linspace(0, 1, hlen)) ** 0.4
+                hoorays[p:p+hlen] += np.sin(2 * np.pi * freq * tl) * env * float(rng.uniform(0.15, 0.30))
+        claps = np.zeros(n)
+        for _ in range(int(rng.integers(20, 50))):
+            p = int(rng.integers(0, n))
+            clen = min(int(0.03 * sr), n - p)
+            if clen > 0:
+                claps[p:p+clen] += fband(rng.uniform(-1, 1, clen), 900, 5500) * np.exp(-np.linspace(0, 20, clen)) * 0.08
+        sig = murmur + hoorays + claps
+
+    elif preset == "motorcycle":
+        engine = pink(30, 500) * am(float(rng.uniform(8, 18)), 0.40, 0.60) * 0.50
+        whine = sine(float(rng.uniform(1200, 2500)), 0.015)
+        passby = np.zeros(n)
+        for _ in range(int(rng.integers(1, 4))):
+            p = int(rng.integers(0, n))
+            plen = min(int(rng.uniform(1, 3) * sr), n - p)
+            if plen > 0:
+                whoosh = pink(60, 2000, plen)
+                env = np.sin(np.pi * np.linspace(0, 1, plen)) ** 0.5
+                passby[p:p+plen] += whoosh * env * float(rng.uniform(0.15, 0.35))
+        sig = engine * 0.7 + whine + passby
+
+    elif preset == "bicycle":
+        base = pink(60, 1500) * 0.05
+        bells = np.zeros(n)
+        for _ in range(int(rng.integers(1, 4))):
+            p = int(rng.integers(0, n))
+            blen = min(int(0.3 * sr), n - p)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                env = np.exp(-np.linspace(0, 6, blen))
+                bells[p:p+blen] += (np.sin(2 * np.pi * 2500 * tl) + 0.4 * np.sin(2 * np.pi * 3200 * tl)) * env * 0.20
+        creak = np.zeros(n)
+        for _ in range(int(rng.integers(2, 6))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.1, 0.3) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                freq = float(rng.uniform(300, 700))
+                creak[p:p+clen] += np.sin(2 * np.pi * freq * tl) * np.exp(-np.linspace(0, 8, clen)) * 0.08
+        sig = base + bells + creak
+
+    elif preset == "organ":
+        drone = sine(65, 0.06) + sine(98, 0.05) + sine(130, 0.04) + sine(196, 0.02)
+        chord = np.zeros(n)
+        notes_freq = [130.8, 164.8, 196.0, 261.6]
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(int(0.1 * n), int(0.7 * n)))
+            clen = min(int(rng.uniform(3, 7) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                f = float(rng.choice(notes_freq))
+                tone = (np.sin(2 * np.pi * f * tl) + 0.5 * np.sin(2 * np.pi * f * 2 * tl)
+                        + 0.25 * np.sin(2 * np.pi * f * 3 * tl))
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.5
+                chord[p:p+clen] += tone * env * 0.08
+        reverb = fband(pink(50, 1500), 80, 1200) * 0.03
+        sig = drone + chord + reverb
+
+    elif preset == "gong":
+        gongs = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            glen = min(int(rng.uniform(2, 5) * sr), n - p)
+            if glen > 0:
+                tl = np.linspace(0, glen / sr, glen)
+                freq = float(rng.uniform(160, 260))
+                tone = (np.sin(2 * np.pi * freq * tl) + 0.6 * np.sin(2 * np.pi * freq * 2.7 * tl)
+                        + 0.4 * np.sin(2 * np.pi * freq * 5.3 * tl))
+                env = np.exp(-np.linspace(0, 1.2, glen))
+                gongs[p:p+glen] += tone * env * float(rng.uniform(0.12, 0.22))
+        silence = pink(40, 400) * 0.02
+        sig = gongs + silence
+
     else:  # "room" și orice preset necunoscut
         sig = pink(70, 3200) * 0.052 + sine(50, 0.016) + sine(100, 0.009)
 
@@ -1844,6 +2199,35 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         ("snow_walk",            ("pași zăpadă", "walking snow", "snow crunch", "footsteps snow",
                                   "snow underfoot", "zăpadă pași", "schi", "snowboard", "sanie")),
         ("snow",                 ("ninso", "zăpad", "snow", "iarnă liniș", "fulgi")),
+        ("desert",               ("deșert", "desert", "nisi", "sand dune", "dună")),
+        ("waterfall",            ("cascadă mare", "waterfall", "cădere apă", "niagară")),
+        ("stream",               ("pârâu", "stream", "râu mic", "brooks", "apă lină")),
+        ("rain_roof",            ("ploaie acoperiș", "rain roof", "ploaie tinichea", "ploaie tablă")),
+        ("thunder_roll",         ("tunet depărtat", "thunder roll", "distant thunder", "bubuitură")),
+        ("wind_chimes",          ("clopoței vânt", "wind chimes", "clopoței")),
+        ("church_bells",         ("clopote biserică", "church bells", "clopot bisericesc")),
+        ("temple_gong",          ("templu gong", "temple gong", "gong templu", "rugăciune")),
+        ("meadow",               ("pajiște", "meadow", "câmp verde", "livadă flori", "prerie")),
+        ("night_forest",         ("pădure noapte", "night forest", "forest night", "pădure întunecat")),
+        ("underwater",           ("subacvatic", "underwater", "sub apă", "scufundare", "acvariu")),
+        ("space",                ("spațiu cosmic", "deep space", "cosmos", "stele", "orbita")),
+        ("cyberpunk",            ("cyberpunk", "futuristic city", "oraș futurist")),
+        ("casino",               ("cazino", "casino", "slot machine", "păcănele")),
+        ("market",               ("târg", "market", "piață", "bazar", "piața legume")),
+        ("typewriter",           ("mașină scris", "typewriter", "tastare mecanic")),
+        ("printer",              ("imprimantă", "printer", "printare")),
+        ("fan",                  ("ventilator", "fan", "ventilație")),
+        ("air_conditioning",     ("aer condiționat", "air conditioning", "ac unit", "climatizare")),
+        ("cash_register",        ("casă ban", "cash register", "bancnot", "monede")),
+        ("dishwasher",           ("mașină vase", "dishwasher", "spălat vase")),
+        ("shower",               ("duș", "shower", "apă duș")),
+        ("snore",                ("sforăit", "snore", "sforăi")),
+        ("applause",             ("aplauze", "applause", "ovation")),
+        ("cheering",             ("ovații", "cheering", "urare", "hooray", "urale")),
+        ("motorcycle",           ("motociclet", "motorcycle", "motoreta")),
+        ("bicycle",              ("biciclet", "bicycle", "clopoțel bicicletă", "velo")),
+        ("organ",                ("orgă", "organ", "orgă biserică")),
+        ("gong",                 ("gong", "tam-tam", "gong meditație")),
     )
     preset = next(
         (name for name, words in presets if any(word in text for word in words)),
