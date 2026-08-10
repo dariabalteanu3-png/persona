@@ -2141,11 +2141,30 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         base = foley_rush(2500, 9500, float(rng.uniform(3, 8)), 0.10)
         sig = metal_ring(float(rng.uniform(2500, 6500)), 0.03, 0.15, 0.28, int(rng.integers(4, 10))) + base
 
+    elif preset == "keys_rummage":
+        base = foley_rush(1500, 8000, float(rng.uniform(4, 9)), 0.16)
+        sig = metal_ring(float(rng.uniform(2000, 6000)), 0.02, 0.12, 0.22, int(rng.integers(8, 16))) + base
+
+    elif preset == "keys_drop":
+        sig = clicks(int(rng.integers(4, 9)), 1800, 8500, 0.008, 0.035, 0.45)
+        sig += metal_ring(float(rng.uniform(2200, 6500)), 0.03, 0.2, 0.3, int(rng.integers(3, 6)))
+        sig += fband(pink(50, 800), 60, 700) * np.exp(-np.linspace(0, 9, n)) * 0.2
+
     elif preset == "keys_put":
         sig = clicks(int(rng.integers(3, 7)), 2000, 9000, 0.01, 0.04, 0.4) + metal_ring(float(rng.uniform(3000, 7000)), 0.05, 0.2, 0.18, 3)
 
     elif preset == "door_handle":
         sig = clicks(2, 800, 4000, 0.01, 0.04, 0.5) + fband(pink(200, 2500), 300, 2000) * np.exp(-np.linspace(0, 15, n)) * 0.2
+
+    elif preset == "door_balcony":
+        sig = foley_rush(300, 3500, float(rng.uniform(2.5, 5)), 0.3)
+        sig += metal_ring(float(rng.uniform(1500, 3500)), 0.04, 0.25, 0.18, 3)
+        sig += creak_sound(150, 600, 1, 0.3, 0.8, 0.2)
+
+    elif preset == "door_room":
+        sig = creak_sound(120, 550, int(rng.integers(1, 3)), 0.25, 0.8, 0.3)
+        sig += fband(pink(70, 1400), 80, 1200) * np.exp(-np.linspace(0, 9, n)) * 0.4
+        sig += clicks(1, 500, 3000, 0.01, 0.04, 0.35)
 
     elif preset == "door_creak_open":
         sig = creak_sound(120, 500, int(rng.integers(2, 5)), 0.4, 1.2, 0.35)
@@ -3369,6 +3388,30 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
     """Returnează un sunet ambient sintetizat local; nu apelează niciun API extern."""
     text = str(prompt or "").lower()
     presets = (
+        # ── Forme exacte Casă/obiecte: câștigă înaintea legacy-ului (stairs/train/heels/balcony) ──
+        ("keys_rummage",     ("chei răscolite", "răscolește cheile", "caută cheile", "scoate cheile din geantă",
+                              "răscolește prin geantă după chei", "caută cheile în geantă",
+                              "rummage keys", "keys rummaged", "fumble keys")),
+        ("keys_drop",        ("chei scăpate", "scapă cheile", "cheile cad", "chei cad pe jos", "chei căzute",
+                              "drop the keys", "keys dropped")),
+        ("keys_put",         ("chei puse pe masă", "pune cheile pe masă", "așază cheile pe masă")),
+        ("keys_bag",         ("pune cheile în geantă", "pune cheile în buzunar")),
+        ("door_handle",      ("clanță apăsată", "apasă clanța", "apasă pe clanță")),
+        ("door_balcony",     ("ușă de balcon", "ușa de balcon", "balcony door", "ușă glisantă")),
+        ("door_cabinet",     ("ușă de dulap", "ușa de dulap", "cabinet door opens")),
+        ("door_fridge",      ("ușă de frigider", "ușa frigiderului", "deschide frigiderul")),
+        ("door_oven",        ("ușă de cuptor", "ușa cuptorului", "deschide cuptorul")),
+        ("door_lift",        ("ușă de lift", "ușa liftului", "elevator door")),
+        ("door_train",       ("ușă de tren", "ușa trenului", "train door")),
+        ("door_plane",       ("ușă de avion", "ușa avionului", "airplane door")),
+        ("door_room",        ("ușă de cameră", "ușa camerei", "room door", "ușă de la cameră")),
+        ("floor_creak",      ("podea care scârțâie", "podeaua scârțâie", "floor creaking")),
+        ("furniture_move",   ("mobilier mutat", "muta mobilierul", "mută mobilierul", "moving furniture")),
+        ("chair_pull",       ("scaun tras", "scaunul tras", "chair pulled")),
+        ("chair_push",       ("scaun împins", "scaunul împins", "chair pushed")),
+        ("table_touch",      ("masă atinsă", "atinge masa", "bate ușor în masă", "tapping the table")),
+        ("object_fall",      ("obiect căzut", "obiectul a căzut", "obiect căzut pe jos", "ceva a căzut",
+                              "something fell", "something dropped")),
         # ── Sunete contextuale suplimentare: casă și obiecte ──────────────────
         ("door_slam",          ("ușă trântit", "door slam", "trântește ușa", "ușa se trântește")),
         ("door_train",         ("ușa trenului", "train door opens")),
@@ -3807,6 +3850,7 @@ def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
         # ── Aliasuri pentru forme flexionate / articulate în română ──────────
         ("door_cabinet",         ("ușa de la dulap", "ușa dulapului")),
         ("door_plane",           ("ușa avionului", "ușa de la avion")),
+        ("door_handle",          ("clanța", "clanței")),
         ("clinic_door",          ("ușa de la clinică", "ușa clinicii")),
         ("furniture_move",       ("muta mobila", "mută mobila", "mobila")),
         ("glass_put",            ("paharul pe masă", "pune paharul")),
