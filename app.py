@@ -3011,8 +3011,43 @@ def absence_fragment():
             st.rerun(scope="app")
 
 
+def _is_db_conn_error(e):
+    """True dacă excepția e o eroare de conexiune la baza de date."""
+    name = type(e).__name__
+    mod = type(e).__module__ or ""
+    return ("psycopg2" in mod) or name in ("OperationalError", "DatabaseError", "InterfaceError")
+
+
+def _show_db_unavailable():
+    """Mesaj prietenos când baza de date nu e disponibilă (nu crash pe tot ecranul)."""
+    try:
+        st.session_state.pop("auth_user", None)
+    except Exception:  # noqa
+        pass
+    st.markdown(
+        '<div style="background:#1a1013;border:1px solid #5a2b2b;border-radius:14px;'
+        'padding:1.4rem 1.5rem;text-align:center;margin-top:1.5rem">'
+        '<div style="font-size:2rem;margin-bottom:.4rem">🗄️</div>'
+        '<div style="font-family:Sora;font-weight:700;font-size:1.15rem;color:#ECECEC;margin-bottom:.3rem">'
+        "Baza de date nu este disponibilă momentan</div>"
+        '<div style="color:#c98a8a;font-size:.9rem">'
+        "Nu am putut accesa datele. Te rugăm să încerci din nou în scurt timp.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ------------------------- sidebar -------------------------
-_restore_session()
+try:
+    _restore_session()
+except Exception as _e:  # noqa: DB indisponibilă — nu trebuie să doboare aplicația
+    if _is_db_conn_error(_e):
+        try:
+            _log.warning("DB unavailable during session restore: %s", _e)
+        except Exception:  # noqa
+            pass
+    else:
+        raise
 _restore_theme()
 _restore_tz()
 _restore_sound()
@@ -3038,11 +3073,29 @@ with st.sidebar:
             st.session_state.nav = "personaje"
             st.rerun()
     elif st.session_state.get("pending_verify_email"):
-        _render_verify()
+        try:
+            _render_verify()
+        except Exception as _e:  # noqa
+            if _is_db_conn_error(_e):
+                _show_db_unavailable()
+            else:
+                raise
     elif st.session_state.get("pending_reset_email"):
-        _render_reset()
+        try:
+            _render_reset()
+        except Exception as _e:  # noqa
+            if _is_db_conn_error(_e):
+                _show_db_unavailable()
+            else:
+                raise
     else:
-        _render_login_register()
+        try:
+            _render_login_register()
+        except Exception as _e:  # noqa
+            if _is_db_conn_error(_e):
+                _show_db_unavailable()
+            else:
+                raise
 
 
 if st.session_state.get("theme_light"):
@@ -5928,7 +5981,11 @@ def render_profil():
 
 
 # ------------------------- router -------------------------
-_handle_share_param()
+try:
+    _handle_share_param()
+except Exception as _e:  # noqa: DB indisponibilă la link-uri share
+    if not _is_db_conn_error(_e):
+        raise
 # fire a pending browser notification (proactive/absence message arrived)
 if st.session_state.get("notify_on") and st.session_state.get("_pending_notify"):
     _pn = st.session_state.pop("_pending_notify")

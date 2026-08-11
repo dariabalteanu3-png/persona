@@ -6,6 +6,7 @@ care stochează documentul complet, păstrând API-ul identic cu versiunea Mongo
 """
 
 import os
+import time
 import uuid
 import json
 from pathlib import Path
@@ -33,11 +34,30 @@ def _clean_tok(raw):
 def _conn():
     """Deschide o conexiune Postgres, commit la succes / rollback la eroare,
     și O ÎNCHIDE ÎNTOTDEAUNA (fix scurgere de conexiuni — psycopg2 `with conn`
-    NU închide conexiunea, doar tranzacția, ceea ce epuiza limita Neon)."""
-    conn = psycopg2.connect(
-        os.environ["DATABASE_URL"],
-        cursor_factory=psycopg2.extras.RealDictCursor,
-    )
+    NU închide conexiunea, doar tranzacția, ceea ce epuiza limita Neon).
+
+    Neon (free tier) își suspendă baza după ~5 min de inactivitate; prima
+    conexiune după trezire poate eșua. De aceea: `connect_timeout` (eșuăm
+    rapid, nu atârnăm minute) + reîncercare scurtă (lasă baza să se trezească)."""
+    dsn = os.environ.get("DATABASE_URL", "")
+    if not dsn:
+        raise RuntimeError(
+            "DATABASE_URL nu este setat — verifică secretele aplicației (Streamlit) sau .env"
+        )
+    last_err = None
+    for attempt in range(3):
+        try:
+            conn = psycopg2.connect(
+                dsn,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+            )
+            break
+        except psycopg2.OperationalError as e:
+            last_err = e
+            time.sleep(1.0 * (attempt + 1))
+    else:
+        raise last_err
     try:
         yield conn
         conn.commit()
