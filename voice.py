@@ -3364,6 +3364,373 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig = footsteps(float(rng.uniform(1.0, 1.8)), lo=200, hi=4000, amp=0.45)
         sig += foley_rush(300, 3500, 3, 0.1)
 
+    # ── Natură și mediu: mare, pădure, grădină, parc, lac, munte, plajă, vreme, atmosfere ──
+    elif preset == "splash":
+        base = pink(100, 5000) * am(rng.uniform(0.08, 0.18), 0.25, 0.75) * 0.25
+        spl = np.zeros(n)
+        for _ in range(int(rng.integers(3, 8))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(0.1, 0.35) * sr), n - p)
+            if slen > 0:
+                body = fband(rng.uniform(-1, 1, slen), 300, 4000)
+                env = np.exp(-np.linspace(0, 6, slen)) * np.sin(np.pi * np.linspace(0, 1, slen))
+                spl[p:p + slen] += body * env * float(rng.uniform(0.25, 0.5))
+        sig = base + spl + water_bubble(int(rng.integers(2, 6)), 0.05, 0.12, 500, 2200, 0.10)
+
+    elif preset == "breeze":
+        sig = pink(120, 3500) * am(rng.uniform(0.06, 0.14), 0.35, 0.65) * 0.30
+
+    elif preset == "shells":
+        sig = clicks(int(rng.integers(8, 20)), 1200, 7000, 0.01, 0.05, 0.22)
+        sig += foley_rush(800, 5000, float(rng.uniform(2, 4)), 0.12)
+
+    elif preset == "waves_rocks":
+        base = pink(50, 4500) * am(rng.uniform(0.08, 0.16), 0.45, 0.55) * 0.55
+        w1 = np.abs(np.sin(2 * np.pi * float(rng.uniform(0.06, 0.12)) * t)) ** 0.5
+        crash = np.zeros(n)
+        for _ in range(int(rng.integers(3, 8))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.15, 0.5) * sr), n - p)
+            if clen > 0:
+                body = fband(rng.uniform(-1, 1, clen), 200, 3500)
+                env = np.exp(-np.linspace(0, 4, clen))
+                crash[p:p + clen] += body * env * float(rng.uniform(0.3, 0.55))
+        sig = base * (0.6 + 0.5 * w1) + crash
+
+    elif preset == "sea_cave":
+        water = pink(40, 2500) * am(rng.uniform(0.05, 0.10), 0.30, 0.70) * 0.30
+        echo = fband(pink(60, 1500), 80, 1400) * am(rng.uniform(0.08, 0.2), 0.4, 0.6) * 0.12
+        drip = clicks(int(rng.integers(2, 6)), 800, 4000, 0.04, 0.12, 0.10)
+        sig = water + echo + drip
+
+    elif preset == "lighthouse":
+        water = pink(55, 2500) * am(rng.uniform(0.05, 0.10), 0.25, 0.75) * 0.22
+        horn = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.2 * n), int(0.7 * n)))
+            hlen = min(int(rng.uniform(1.5, 3.5) * sr), n - p)
+            if hlen > 0:
+                tl = np.linspace(0, hlen / sr, hlen)
+                env = np.sin(np.pi * np.linspace(0, 1, hlen)) ** 0.4
+                horn[p:p + hlen] += np.sin(2 * np.pi * 130 * tl) * env * 0.18
+        sig = water + horn
+
+    elif preset == "boat_idle":
+        engine = pink(30, 200) * am(rng.uniform(0.5, 0.9), 0.25, 0.75) * 0.42
+        sputter = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(0.05, 0.15) * sr), n - p)
+            if slen > 0:
+                sputter[p:p + slen] += fband(rng.uniform(-1, 1, slen), 100, 900) * np.exp(-np.linspace(0, 10, slen)) * 0.2
+        sig = engine + sputter
+
+    elif preset == "boat_accel":
+        tl = np.linspace(0, dur, n, endpoint=False)
+        freq = 40 + 220 * np.clip(tl / dur, 0, 1)
+        engine = np.sin(2 * np.pi * np.cumsum(freq) / sr) * 0.35
+        rumble = pink(30, 300) * 0.30
+        sig = engine * (0.5 + 0.5 * np.clip(tl / dur, 0, 1)) + rumble
+
+    elif preset == "oars":
+        spl = footsteps(float(rng.uniform(0.7, 1.2)), lo=400, hi=3000, amp=0.22)
+        creak = creak_sound(250, 700, 4, 0.25, 0.7, 0.16)
+        sig = spl * 0.6 + creak
+
+    elif preset == "anchor_chain":
+        sig = metal_ring(float(rng.uniform(900, 2000)), 0.08, 0.3, 0.22, 6)
+        sig += clicks(int(rng.integers(4, 10)), 1500, 7000, 0.01, 0.04, 0.15)
+
+    elif preset == "pontoon":
+        water = pink(70, 2500) * am(rng.uniform(0.05, 0.12), 0.25, 0.75) * 0.22
+        creak = creak_sound(150, 500, 3, 0.3, 1.0, 0.18)
+        lap = footsteps(float(rng.uniform(0.8, 1.6)), lo=300, hi=2000, amp=0.14)
+        sig = water + creak + lap * 0.5
+
+    elif preset == "water_step":
+        base = pink(80, 3000) * am(rng.uniform(0.06, 0.14), 0.2, 0.8) * 0.16
+        steps = footsteps(float(rng.uniform(0.9, 1.5)), lo=300, hi=3000, amp=0.30)
+        sig = base + steps * 0.7
+
+    elif preset == "water_lap":
+        base = pink(60, 2200) * am(rng.uniform(0.05, 0.12), 0.20, 0.80) * 0.24
+        lap = footsteps(float(rng.uniform(0.6, 1.2)), lo=250, hi=1800, amp=0.18)
+        sig = base + lap * 0.55
+
+    elif preset == "insects":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            freq = float(rng.uniform(1200, 4500))
+            sig += sine(freq, 0.05) * am(float(rng.uniform(3, 8)), 0.5, 0.5)
+        sig += pink(60, 1500) * 0.05
+
+    elif preset == "owl":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(1, 3))):
+            p = int(rng.integers(int(0.1 * n), int(0.7 * n)))
+            hlen = min(int(rng.uniform(0.6, 1.2) * sr), n - p)
+            if hlen > 0:
+                tl = np.linspace(0, hlen / sr, hlen)
+                env = np.sin(np.pi * np.linspace(0, 1, hlen)) ** 0.5
+                f = 240 + 90 * tl / (hlen / sr)
+                sig[p:p + hlen] += np.sin(2 * np.pi * f * tl) * env * 0.22
+        sig += pink(40, 600) * 0.06
+
+    elif preset == "ravens":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.1, 0.25) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                f = float(rng.uniform(500, 1100)) * (1 + 0.3 * np.sin(2 * np.pi * float(rng.uniform(8, 16)) * tl))
+                sig[p:p + clen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 6, clen)) * float(rng.uniform(0.12, 0.22))
+
+    elif preset == "fox":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            ylen = min(int(rng.uniform(0.08, 0.2) * sr), n - p)
+            if ylen > 0:
+                tl = np.linspace(0, ylen / sr, ylen)
+                f = float(rng.uniform(600, 1400)) * (1 + 0.5 * np.sin(2 * np.pi * float(rng.uniform(15, 25)) * tl))
+                sig[p:p + ylen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 10, ylen)) * float(rng.uniform(0.08, 0.16))
+
+    elif preset == "deer":
+        steps = footsteps(float(rng.uniform(1.0, 1.6)), lo=120, hi=2500, amp=0.16)
+        snort = np.zeros(n)
+        p = int(rng.integers(0, int(0.5 * n)))
+        snl = min(int(rng.uniform(0.1, 0.2) * sr), n - p)
+        if snl > 0:
+            snort[p:p + snl] += fband(rng.uniform(-1, 1, snl), 300, 2500) * np.exp(-np.linspace(0, 8, snl)) * 0.14
+        sig = steps + snort
+
+    elif preset == "animals_far":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.15, 0.4) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                f = float(rng.uniform(300, 1500)) * (1 + 0.2 * np.sin(2 * np.pi * float(rng.uniform(3, 8)) * tl))
+                sig[p:p + clen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 4, clen)) * float(rng.uniform(0.04, 0.09))
+        sig += pink(50, 800) * 0.04
+
+    elif preset == "fog":
+        sig = pink(50, 1500) * am(rng.uniform(0.03, 0.08), 0.30, 0.70) * 0.10
+        sig += fband(pink(200, 3000), 200, 2800) * 0.03
+
+    elif preset == "gate_wood":
+        sig = creak_sound(150, 600, int(rng.integers(2, 5)), 0.3, 1.0, 0.28)
+        sig += fband(pink(70, 1200), 80, 1000) * np.exp(-np.linspace(0, 6, n)) * 0.2
+
+    elif preset == "flies":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(4, 8))):
+            freq = float(rng.uniform(250, 900))
+            on = np.abs(np.sin(2 * np.pi * float(rng.uniform(8, 20)) * t + rng.uniform(0, np.pi))) ** 8
+            sig += on * sine(freq, 0.08)
+
+    elif preset == "mosquitoes":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 6))):
+            freq = float(rng.uniform(1500, 4000))
+            on = np.abs(np.sin(2 * np.pi * float(rng.uniform(5, 12)) * t + rng.uniform(0, np.pi))) ** 12
+            sig += on * sine(freq, 0.07)
+
+    elif preset == "sprinkler":
+        rot = np.maximum(0.0, np.sin(2 * np.pi * float(rng.uniform(0.4, 0.7)) * t)) ** 4
+        sig = fband(pink(1200, 7000), 1300, 6800) * (0.3 + 0.7 * rot) * 0.30
+
+    elif preset == "watering":
+        sig = fband(pink(800, 6000), 900, 5800) * am(float(rng.uniform(1.5, 3)), 0.3, 0.7) * 0.16
+
+    elif preset == "lawnmower":
+        engine = pink(40, 350) * am(rng.uniform(0.8, 1.4), 0.15, 0.85) * 0.4
+        blade = pink(900, 4000) * am(rng.uniform(3, 6), 0.3, 0.7) * 0.16
+        sig = engine + blade
+
+    elif preset == "rake":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 7))):
+            p = int(rng.integers(0, n))
+            rlen = min(int(rng.uniform(0.3, 0.9) * sr), n - p)
+            if rlen > 0:
+                drag = foley_rush(400, 4000, float(rng.uniform(3, 7)), 0.28)
+                env = np.sin(np.pi * np.linspace(0, 1, rlen)) ** 0.4
+                sig[p:p + rlen] += drag[:rlen] * env
+
+    elif preset == "shovel":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(3, 6))):
+            p = int(rng.integers(0, n))
+            dlen = min(int(rng.uniform(0.1, 0.3) * sr), n - p)
+            if dlen > 0:
+                thud = fband(rng.uniform(-1, 1, dlen), 150, 2000) * np.exp(-np.linspace(0, 8, dlen)) * float(rng.uniform(0.2, 0.4))
+                sig[p:p + dlen] += thud
+                if p + dlen < n:
+                    slen = min(int(0.15 * sr), n - p - dlen)
+                    if slen > 0:
+                        sig[p + dlen:p + dlen + slen] += foley_rush(500, 3000, 3, 0.12)[:slen]
+
+    elif preset == "wheelbarrow":
+        rattle = footsteps(float(rng.uniform(1.2, 2)), lo=250, hi=2500, amp=0.26)
+        rumble = pink(60, 500) * am(rng.uniform(0.5, 0.9), 0.2, 0.8) * 0.16
+        sig = rattle + rumble
+
+    elif preset == "swing":
+        creak = creak_sound(180, 600, 3, 0.2, 0.6, 0.18)
+        whoosh = foley_rush(300, 2500, float(rng.uniform(1, 2)), 0.12) * am(float(rng.uniform(0.3, 0.5)), 0.8, 0.2)
+        sig = creak + whoosh
+
+    elif preset == "rocking_chair":
+        rock = float(rng.uniform(0.4, 0.7))
+        env = np.maximum(0.0, np.sin(2 * np.pi * rock * t + rng.uniform(0, np.pi))) ** 6
+        sig = creak_sound(150, 500, 3, 0.15, 0.4, 0.2) * 0.6 + foley_rush(200, 2000, 2, 0.08) * env
+
+    elif preset == "slide":
+        whoosh = foley_rush(500, 4000, float(rng.uniform(2, 4)), 0.22)
+        thud = np.zeros(n)
+        p = int(rng.integers(int(0.5 * n), n))
+        tlen = min(int(0.12 * sr), n - p)
+        if tlen > 0:
+            thud[p:p + tlen] += fband(rng.uniform(-1, 1, tlen), 120, 1800) * np.exp(-np.linspace(0, 10, tlen)) * 0.35
+        sig = whoosh + thud
+
+    elif preset == "barbecue":
+        sizzle = np.zeros(n)
+        for _ in range(int(rng.integers(10, 20))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(0.03, 0.12) * sr), n - p)
+            if slen > 0:
+                sizzle[p:p + slen] += fband(rng.uniform(-1, 1, slen), 2500, 9000) * np.exp(-np.linspace(0, 12, slen)) * float(rng.uniform(0.08, 0.2))
+        crackle = footsteps(float(rng.uniform(5, 10)), lo=400, hi=4000, amp=0.2)
+        sig = sizzle * 0.5 + crackle * 0.3
+
+    elif preset == "stand_up":
+        sig = foley_rush(300, 3500, float(rng.uniform(2, 4)), 0.16)
+        sig += creak_sound(150, 450, 2, 0.2, 0.5, 0.12)
+        sig += fband(pink(60, 800), 70, 700) * np.exp(-np.linspace(0, 10, n)) * 0.14
+
+    elif preset == "children":
+        murmur = fband(pink(300, 4500), 350, 4200) * am(rng.uniform(0.2, 0.5), 0.5, 0.5) * 0.10
+        gl = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            glen = min(int(rng.uniform(0.1, 0.3) * sr), n - p)
+            if glen > 0:
+                tl = np.linspace(0, glen / sr, glen)
+                f = float(rng.uniform(600, 2000)) * (1 + 0.6 * np.sin(2 * np.pi * float(rng.uniform(10, 20)) * tl))
+                gl[p:p + glen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 5, glen)) * float(rng.uniform(0.05, 0.12))
+        sig = murmur + gl
+
+    elif preset == "ball_bounce":
+        sig = footsteps(float(rng.uniform(1.5, 3)), lo=300, hi=3000, amp=0.30)
+        sig += fband(pink(60, 1200), 70, 1100) * np.exp(-np.linspace(0, 8, n)) * 0.2
+
+    elif preset == "pigeons":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.3, 0.7) * sr), n - p)
+            if clen > 0:
+                tl = np.linspace(0, clen / sr, clen)
+                f = 300 + 150 * np.sin(2 * np.pi * float(rng.uniform(2, 4)) * tl)
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.5
+                sig[p:p + clen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * env * float(rng.uniform(0.08, 0.16))
+        sig += pink(50, 1000) * 0.04
+
+    elif preset == "ducks":
+        sig = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            qlen = min(int(rng.uniform(0.08, 0.2) * sr), n - p)
+            if qlen > 0:
+                tl = np.linspace(0, qlen / sr, qlen)
+                f = float(rng.uniform(300, 700)) * (1 + 0.8 * np.sin(2 * np.pi * float(rng.uniform(20, 40)) * tl))
+                sig[p:p + qlen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 8, qlen)) * float(rng.uniform(0.10, 0.2))
+        sig += pink(60, 1500) * 0.05
+
+    elif preset == "fishing":
+        whir = fband(pink(800, 3000), 900, 2800) * am(rng.uniform(2, 4), 0.3, 0.7) * 0.12
+        splash = footsteps(float(rng.uniform(0.8, 1.4)), lo=400, hi=3000, amp=0.16)
+        sig = whir + splash * 0.4
+
+    elif preset == "rock_roll":
+        rumble = pink(25, 400) * am(rng.uniform(0.3, 0.6), 0.3, 0.7) * 0.42
+        rolls = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            rlen = min(int(rng.uniform(0.2, 0.6) * sr), n - p)
+            if rlen > 0:
+                tl = np.linspace(0, rlen / sr, rlen)
+                f = float(rng.uniform(150, 700)) * (1 + 0.4 * np.sin(2 * np.pi * float(rng.uniform(5, 12)) * tl))
+                rolls[p:p + rlen] += np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-np.linspace(0, 5, rlen)) * float(rng.uniform(0.15, 0.3))
+        sig = rumble + rolls
+
+    elif preset == "cabin":
+        fire = pink(60, 2800) * am(rng.uniform(1.5, 3), 0.3, 0.7) * 0.22
+        crackle = footsteps(float(rng.uniform(12, 20)), lo=500, hi=5000, amp=0.3)
+        creak = creak_sound(140, 450, 2, 0.3, 0.8, 0.12)
+        wind = pink(80, 1500) * am(rng.uniform(0.03, 0.07), 0.3, 0.7) * 0.08
+        sig = fire + crackle * 0.3 + creak + wind
+
+    elif preset == "foam":
+        hiss = pink(1500, 9000) * am(rng.uniform(0.08, 0.16), 0.4, 0.6) * 0.16
+        swell = np.abs(np.sin(2 * np.pi * float(rng.uniform(0.07, 0.13)) * t)) ** 0.6
+        sig = hiss * (0.3 + 0.7 * swell) + pink(50, 2000) * 0.08 * swell
+
+    elif preset == "umbrella":
+        flap = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            flen = min(int(rng.uniform(0.05, 0.15) * sr), n - p)
+            if flen > 0:
+                flap[p:p + flen] += foley_rush(300, 3500, float(rng.uniform(4, 8)), 0.2)[:flen]
+        sig = flap + pink(120, 2500) * am(rng.uniform(0.05, 0.1), 0.3, 0.7) * 0.06
+
+    elif preset == "lounger":
+        sig = creak_sound(200, 700, 3, 0.15, 0.5, 0.18)
+        sig += clicks(int(rng.integers(2, 5)), 1500, 6000, 0.01, 0.04, 0.12)
+        sig += fband(pink(100, 2000), 120, 1800) * np.exp(-np.linspace(0, 8, n)) * 0.15
+
+    elif preset == "jet_ski":
+        two_stroke = np.zeros(n)
+        for _ in range(int(rng.integers(3, 6))):
+            freq = float(rng.uniform(300, 700))
+            on = np.abs(np.sin(2 * np.pi * float(rng.uniform(10, 20)) * t + rng.uniform(0, np.pi))) ** 3
+            two_stroke += on * sine(freq, 0.12)
+        whine = fband(pink(1500, 5000), 1600, 4800) * am(rng.uniform(3, 5), 0.3, 0.7) * 0.12
+        water = pink(80, 3000) * am(rng.uniform(0.08, 0.16), 0.3, 0.7) * 0.2
+        sig = two_stroke + whine + water
+
+    elif preset == "drizzle":
+        base = pink(400, 7000) * am(rng.uniform(0.05, 0.12), 0.15, 0.85) * 0.30
+        drops = footsteps(float(rng.uniform(6, 10)), lo=2000, hi=7000, amp=0.12)
+        sig = base + drops * 0.5
+
+    elif preset == "sleet":
+        rain = pink(200, 6000) * am(rng.uniform(0.06, 0.14), 0.2, 0.8) * 0.3
+        pellet = clicks(int(rng.integers(6, 12)), 3000, 8000, 0.01, 0.03, 0.12)
+        sig = rain + pellet
+
+    elif preset == "hail":
+        rain = pink(150, 6000) * am(rng.uniform(0.1, 0.2), 0.25, 0.75) * 0.42
+        pellets = footsteps(float(rng.uniform(20, 32)), lo=2500, hi=8000, amp=0.3)
+        sig = rain + pellets * 0.6
+
+    elif preset == "mysterious":
+        drone = pink(40, 400) * am(rng.uniform(0.05, 0.1), 0.3, 0.7) * 0.16
+        tone = np.zeros(n)
+        for _ in range(int(rng.integers(1, 4))):
+            p = int(rng.integers(0, n))
+            tlen = min(int(rng.uniform(0.5, 1.5) * sr), n - p)
+            if tlen > 0:
+                tl = np.linspace(0, tlen / sr, tlen)
+                f = float(rng.uniform(80, 300))
+                tone[p:p + tlen] += np.sin(2 * np.pi * f * tl) * np.sin(np.pi * np.linspace(0, 1, tlen)) * float(rng.uniform(0.05, 0.12))
+        sig = drone + tone
+
     else:  # "room" și orice preset necunoscut
         sig = pink(70, 3200) * 0.052 + sine(50, 0.016) + sine(100, 0.009)
 
