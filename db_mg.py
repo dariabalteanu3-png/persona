@@ -641,9 +641,9 @@ def search_ambients(query, category=None):
 
 def seed_ambient_library():
     """Populează biblioteca de sunete ambientale (Mongo) cu presetări sintetice."""
-    from db_pg import seed_ambient_library as _pg_seed  # noqa: F401 (reutilizăm lista)
-    # Nu putem importa simplu lista din db_pg (depinde de _conn PG).
-    # Definim lista local pentru backend-ul Mongo.
+    # Reutilizăm lista de presetări din db_pg (import lazy, fără schema init la import).
+    # Notă: nu se mai importă db_pg la nivel de modul — evita erorile de schema init
+    # când PostgreSQL nu este configurat sau este indisponibil.
     ambients = [
         {"name": "Tren în mers", "category": "transport", "description": "Sunet de tren care circulă pe șine", "tags": ["tren", "transport", "călătorie"]},
         {"name": "Metrou", "category": "transport", "description": "Sunet de metrou care circulă", "tags": ["metrou", "transport", "urban"]},

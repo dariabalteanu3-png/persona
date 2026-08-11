@@ -37,10 +37,16 @@ from provider import (
     USE_GROQ,
     HAS_GEMINI,
     HAS_GROQ,
+    HAS_CEREBRAS,
+    HAS_OPENROUTER,
     GEMINI_TEXT_MODEL,
     GROQ_TEXT_MODEL,
+    CEREBRAS_TEXT_MODEL,
+    OPENROUTER_TEXT_MODEL,
     gemini_client,
     groq_client,
+    cerebras_client,
+    openrouter_client,
 )
 
 load_dotenv(Path(__file__).parent / ".env")
@@ -123,9 +129,47 @@ def _emergent_text(system, text):
     return content
 
 
+def _cerebras_text(system, text):
+    """Cerebras — fallback automat #1 (după Groq). API compatibil OpenAI."""
+    resp = cerebras_client().chat.completions.create(
+        model=CEREBRAS_TEXT_MODEL,
+        messages=_groq_messages(system, text),
+    )
+    content = (resp.choices[0].message.content or "").strip()
+    if not content:
+        raise RuntimeError("empty cerebras response")
+    return content
+
+
+def _openrouter_text(system, text):
+    """OpenRouter — fallback automat #2 (după Cerebras). API compatibil OpenAI."""
+    resp = openrouter_client().chat.completions.create(
+        model=OPENROUTER_TEXT_MODEL,
+        messages=_groq_messages(system, text),
+        extra_headers={"HTTP-Referer": "https://persona.app", "X-Title": "Persona"},
+    )
+    content = (resp.choices[0].message.content or "").strip()
+    if not content:
+        raise RuntimeError("empty openrouter response")
+    return content
+
+
 def _reliable_fallback(system, text):
-    """Când providerul principal eșuează: încearcă celălalt provider configurat,
-    apoi rezerva Emergent (dacă e configurată). Așa chatul nu mai dă „probleme tehnice"."""
+    """Când providerul principal eșuează: lanț automat de rezervă, în ordine:
+        Grok → Cerebras → OpenRouter → (Gemini dacă e configurat) → Emergent.
+    Așa chatul nu mai dă „probleme tehnice" când Groq își atinge limita."""
+    # Dacă Groq e principal și a picat -> încearcă Cerebras
+    if HAS_CEREBRAS:
+        try:
+            return _cerebras_text(system, text)
+        except Exception:  # noqa
+            _log.exception("cerebras fallback failed")
+    # Cerebras indisponibil -> OpenRouter
+    if HAS_OPENROUTER:
+        try:
+            return _openrouter_text(system, text)
+        except Exception:  # noqa
+            _log.exception("openrouter fallback failed")
     # Dacă Groq e principal și a picat -> încearcă Gemini (dacă e configurat)
     if HAS_GEMINI and not USE_GEMINI:
         try:
@@ -330,7 +374,7 @@ async def _reply(system, text, sid, smart=False):
             return _reliable_fallback(system, text)
     if _emergent_key():
         return _emergent_text(system, text)
-    raise RuntimeError("niciun provider LLM configurat — adaugă GROQ_API_KEY sau GEMINI_API_KEY în secrets")
+    raise RuntimeError("niciun provider LLM configurat — adaugă GROQ_API_KEY, CEREBRAS_API_KEY sau OPENROUTER_API_KEY în secrets")
 
 
 def provider_configuration_error():
@@ -338,11 +382,12 @@ def provider_configuration_error():
 
     Nu include valorile secretelor, ci doar numele configurațiilor necesare.
     """
-    if USE_GROQ or USE_GEMINI or _emergent_key():
+    if USE_GROQ or USE_GEMINI or HAS_CEREBRAS or HAS_OPENROUTER or _emergent_key():
         return ""
     return (
         "Chatul AI nu este configurat. Adaugă în Streamlit Secrets unul dintre "
-        "secretele GROQ_API_KEY sau GEMINI_API_KEY, apoi repornește aplicația."
+        "secretele GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY sau GEMINI_API_KEY, "
+        "apoi repornește aplicația."
     )
 
 
