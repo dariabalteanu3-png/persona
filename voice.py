@@ -1602,6 +1602,32 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
                 sig[pos:pos+clen] += fband(rng.uniform(-1, 1, clen), 3000, 8000) * np.exp(-np.linspace(0, 30, clen)) * 0.20
             pos += tick_int
 
+    elif preset == "bell":
+        sig = np.zeros(n)
+        chime_int = int(rng.uniform(3.0, 4.0) * sr)
+        pos = 0
+        while pos < n:
+            for freq, amp, decay in [(660, 0.35, 1.2), (880, 0.20, 1.0), (1320, 0.12, 0.8)]:
+                blen = min(int(2.5 * sr), n - pos)
+                if blen > 0:
+                    tl = np.linspace(0, blen / sr, blen)
+                    sig[pos:pos+blen] += np.sin(2 * np.pi * freq * tl) * np.exp(-decay * tl) * amp
+            pos += chime_int
+
+    elif preset == "breath":
+        sig = np.zeros(n)
+        breath_int = int(rng.uniform(3.5, 4.5) * sr)
+        pos = 0
+        while pos < n:
+            blen = min(int(1.6 * sr), n - pos)
+            if blen > 0:
+                tl = np.linspace(0, blen / sr, blen)
+                env = np.sin(np.pi * np.clip(tl / 1.6, 0, 1)) ** 1.5
+                breath = pink(400, 1500, size=blen) * env * 0.55
+                air = fband(rng.uniform(-1, 1, blen), 400, 1500) * env * 0.20
+                sig[pos:pos+blen] += breath + air
+            pos += breath_int
+
     elif preset == "helicopter":
         rotor = sine(20, 0.50) * am(float(rng.uniform(8, 14)), 0.70, 0.30)
         engine = pink(50, 500) * 0.15

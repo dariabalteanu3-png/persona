@@ -1026,6 +1026,7 @@ AMBIENT_LIBRARY = {
     "⛈️ Furtună cu tunete": "storm",
     "⛈️💨 Furtună puternică": "blizzard",
     "🌧️🔔 Ploaie pe geam": "rain_window",
+    "🌧️🪟 Ploaie pe fereastră": "rain_window",
     "❄️ Ninsoare liniștită": "snow",
     "❄️👣 Pași prin zăpadă": "snow_walk",
     "🌬️ Vânt liniștit": "wind",
@@ -1146,6 +1147,8 @@ AMBIENT_LIBRARY = {
     "🔥 Foc de tabără": "fire",
     "🕯️ Șemineu": "fire",
     "❤️ Bătăi de inimă": "heartbeat",
+    "🫀 Inimă care bate": "heartbeat",
+    "🌬️ Respirație lentă": "breath",
     "⏰ Ceas": "clock",
     "🚁 Elicopter": "helicopter",
     
@@ -1199,6 +1202,7 @@ AMBIENT_LIBRARY = {
     # ⛪ Biserici și ceremonii
     "⛪ Biserică": "library",
     "🔔 Clopote de biserică": "clock",
+    "🔔🔔 Clopot de biserică": "bell",
     "💒 Nuntă": "party",
     "🕯️ Parastas": "library",
 

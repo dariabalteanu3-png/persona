@@ -172,11 +172,7 @@ def turso_ready():
     try:
         _fetch("SELECT 1 AS ok")
         _init_schema()
-        if _count("ambient_library") == 0:
-            try:
-                seed_ambient_library()
-            except Exception as _seed_err:
-                print(f"[db] Ambient seed warning: {_seed_err}")
+        seed_ambient_library()
         return True
     except Exception as _e:
         import sys
@@ -927,41 +923,154 @@ def search_ambients(query, category=None):
 
 def seed_ambient_library():
     ambients = [
+        # Transport și călătorii
         {"name": "Tren în mers", "category": "transport", "description": "Sunet de tren care circulă pe șine", "tags": ["tren", "transport", "călătorie"]},
+        {"name": "Tren în gară", "category": "transport", "description": "Tren care ajunge în gară", "tags": ["tren", "gară", "transport"]},
         {"name": "Metrou", "category": "transport", "description": "Sunet de metrou care circulă", "tags": ["metrou", "transport", "urban"]},
+        {"name": "Tramvai", "category": "transport", "description": "Sunet de tramvai electric", "tags": ["tramvai", "transport", "urban"]},
         {"name": "Autobuz", "category": "transport", "description": "Sunet de autobuz care circulă", "tags": ["autobuz", "transport", "urban"]},
+        {"name": "Camion", "category": "transport", "description": "Sunet de camion care trece", "tags": ["camion", "transport", "șosea"]},
         {"name": "Stradă cu trafic", "category": "transport", "description": "Sunet de stradă cu mașini și trafic", "tags": ["stradă", "trafic", "mașini", "urban"]},
-        {"name": "Ploaie ușoară", "category": "natură", "description": "Sunet de ploaie ușoară", "tags": ["ploaie", "natură", "vreme"]},
-        {"name": "Ploaie puternică", "category": "natură", "description": "Sunet de ploaie puternică", "tags": ["ploaie", "furtună", "vreme"]},
-        {"name": "Furtună cu tunete", "category": "natură", "description": "Sunet de furtună cu tunete", "tags": ["furtună", "tunete", "vreme"]},
-        {"name": "Vânt puternic", "category": "natură", "description": "Sunet de vânt puternic", "tags": ["vânt", "natură", "vreme"]},
-        {"name": "Pădure", "category": "natură", "description": "Sunet de pădure cu păsări", "tags": ["pădure", "natură", "păsări"]},
-        {"name": "Râu care curge", "category": "natură", "description": "Sunet de apă care curge", "tags": ["râu", "apă", "natură"]},
-        {"name": "Valuri de mare", "category": "natură", "description": "Sunet de valuri la mare", "tags": ["mare", "valuri", "plajă"]},
-        {"name": "Șemineu", "category": "natură", "description": "Sunet de foc în șemineu", "tags": ["foc", "șemineu", "casă"]},
-        {"name": "Zăpadă", "category": "natură", "description": "Sunet de ninsoare", "tags": ["zăpadă", "iarnă", "natură"]},
-        {"name": "Câine care latră", "category": "animale", "description": "Sunet de câine care latră", "tags": ["câine", "lătrat", "animal"]},
-        {"name": "Pisică care toarce", "category": "animale", "description": "Sunet de pisică care toarce", "tags": ["pisică", "tors", "animal"]},
-        {"name": "Păsări în natură", "category": "animale", "description": "Sunet de păsări în natură", "tags": ["păsări", "natură", "cânt"]},
-        {"name": "Greieri noaptea", "category": "animale", "description": "Sunet de greieri noaptea", "tags": ["greieri", "noapte", "natură"]},
-        {"name": "Conversație în cafenea", "category": "oameni", "description": "Sunet de conversații într-o cafenea", "tags": ["cafenea", "conversație", "oameni"]},
-        {"name": "Copii care se joacă", "category": "oameni", "description": "Sunet de copii care se joacă", "tags": ["copii", "joacă", "oameni"]},
-        {"name": "Restaurant aglomerat", "category": "oameni", "description": "Sunet de restaurant cu mulți oameni", "tags": ["restaurant", "oameni", "aglomerat"]},
-        {"name": "Televizor în fundal", "category": "tehnologie", "description": "Sunet de televizor care merge în fundal", "tags": ["televizor", "tehnologie", "fundal"]},
-        {"name": "Calculator", "category": "tehnologie", "description": "Sunet de calculator care funcționează", "tags": ["calculator", "tehnologie", "birou"]},
-        {"name": "Notificări telefon", "category": "tehnologie", "description": "Sunet de notificări de telefon", "tags": ["telefon", "notificări", "tehnologie"]},
-        {"name": "Supermarket", "category": "public", "description": "Sunet de supermarket cu oameni", "tags": ["supermarket", "public", "magazin"]},
-        {"name": "Gara", "category": "public", "description": "Sunet de gară cu anunțuri", "tags": ["gară", "public", "transport"]},
-        {"name": "Bibliotecă", "category": "public", "description": "Sunet de bibliotecă liniștită", "tags": ["bibliotecă", "public", "liniște"]},
+        {"name": "Trafic intens", "category": "transport", "description": "Trafic aglomerat cu claxoane", "tags": ["trafic", "aglomerat", "ambuteiaj"]},
+        {"name": "Mașini care trec", "category": "transport", "description": "Mașini care trec pe lângă tine", "tags": ["mașini", "trafic", "stradă"]},
+        {"name": "Taxi", "category": "transport", "description": "Sunet de taxi în oraș", "tags": ["taxi", "mașini", "oraș"]},
+        {"name": "Aeroport", "category": "transport", "description": "Aeroport cu anunțuri și avioane", "tags": ["aeroport", "avion", "terminal"]},
+        {"name": "Gara", "category": "transport", "description": "Sunet de gară cu anunțuri", "tags": ["gară", "public", "transport"]},
+        {"name": "Elicopter", "category": "transport", "description": "Sunet de elicopter care zboară", "tags": ["elicopter", "zbor", "motor"]},
+        {"name": "Barcă cu motor", "category": "transport", "description": "Sunet de barcă cu motor pe apă", "tags": ["barcă", "motor", "apă"]},
+        {"name": "Vapor", "category": "transport", "description": "Sunet de vapor care navighează", "tags": ["vapor", "navă", "mare"]},
+        {"name": "Port", "category": "transport", "description": "Sunet de port cu vaporul care fluieră", "tags": ["port", "harbor", "vapor"]},
+        {"name": "Sirene", "category": "transport", "description": "Sirene de ambulanță sau poliție", "tags": ["sirene", "ambulanță", "poliție"]},
+        {"name": "Căruțe cu cai", "category": "transport", "description": "Sunet de căruțe și copite", "tags": ["căruțe", "cai", "copite"]},
+        {"name": "Tractor", "category": "transport", "description": "Sunet de tractor la lucru", "tags": ["tractor", "agricultură", "motor"]},
+        {"name": "Navă spațială", "category": "transport", "description": "Sunet de navă spațială", "tags": ["navă", "spațiu", "futuristic"]},
+
+        # Bucătărie și cafea
         {"name": "Cafea la espressor", "category": "cafea", "description": "Sunet de preparare a cafelei la espressor", "tags": ["cafea", "espressor", "bucătărie"]},
         {"name": "Apă care fierbe", "category": "cafea", "description": "Sunet de apă care fierbe", "tags": ["apă", "fierbere", "bucătărie"]},
         {"name": "Farfurii și tacâmuri", "category": "cafea", "description": "Sunet de vase și tacâmuri", "tags": ["farfurii", "tacâmuri", "bucătărie"]},
         {"name": "Frigider", "category": "cafea", "description": "Sunet de frigider care funcționează", "tags": ["frigider", "bucătărie", "electrocasnice"]},
+        {"name": "Gătit", "category": "cafea", "description": "Sunet de gătit și prăjit", "tags": ["gătit", "cooking", "prăjit"]},
+        {"name": "Brutărie", "category": "cafea", "description": "Sunet de brutărie cu pâine caldă", "tags": ["brutărie", "pâine", "cuptor"]},
+        {"name": "Restaurant", "category": "cafea", "description": "Restaurant cu tacâmuri și murmur", "tags": ["restaurant", "tacâmuri", "oameni"]},
+        {"name": "Cafenea", "category": "cafea", "description": "Cafenea cu conversații liniștite", "tags": ["cafenea", "conversație", "oameni"]},
+        {"name": "Băut cafea", "category": "cafea", "description": "Sunet de sorbit dintr-o cană", "tags": ["băut", "cafea", "sorbit"]},
+
+        # Camere și case
         {"name": "Ușă care se deschide", "category": "cameră", "description": "Sunet de ușă care se deschide", "tags": ["ușă", "cameră", "casă"]},
         {"name": "Parchet - pași", "category": "cameră", "description": "Sunet de pași pe parchet", "tags": ["pași", "parchet", "cameră"]},
         {"name": "Lift", "category": "cameră", "description": "Sunet de lift care urcă și coboară", "tags": ["lift", "clădire", "cameră"]},
+        {"name": "Cameră liniștită", "category": "cameră", "description": "Liniște de cameră, ideală pentru relaxare", "tags": ["cameră", "liniște", "relaxare"]},
+        {"name": "Bucătărie", "category": "cameră", "description": "Bucătărie cu electrocasnice", "tags": ["bucătărie", "casă", "electrocasnice"]},
+        {"name": "Baie", "category": "cameră", "description": "Baie cu duș și robinet", "tags": ["baie", "duș", "robinet"]},
+        {"name": "Robinet cu apă", "category": "cameră", "description": "Apă care curge din robinet", "tags": ["robinet", "apă", "curgere"]},
+        {"name": "Televizor", "category": "cameră", "description": "Televizor care merge în fundal", "tags": ["televizor", "fundal", "film"]},
+        {"name": "Radio", "category": "cameră", "description": "Radio cu voce în fundal", "tags": ["radio", "muzică", "voce"]},
+        {"name": "Aspirator", "category": "cameră", "description": "Sunet de aspirator la lucru", "tags": ["aspirator", "curățenie", "motor"]},
+        {"name": "Mașină de spălat", "category": "cameră", "description": "Mașină de spălat în funcțiune", "tags": ["spălat", "rufe", "electrocasnice"]},
+        {"name": "Machiaj", "category": "cameră", "description": "Sunete de machiaj și periuțe", "tags": ["machiaj", "makeup", "frue"]},
+        {"name": "Ceas", "category": "cameră", "description": "Ticăit de ceas", "tags": ["ceas", "ticăit", "timp"]},
+        {"name": "Tastatură", "category": "cameră", "description": "Tastatură și calculator", "tags": ["tastatură", "calculator", "birou"]},
+        {"name": "Ronțăit chipsuri", "category": "cameră", "description": "Ronțăit de chipsuri și alune", "tags": ["chips", "ronțăit", "snacks"]},
+        {"name": "Mâncare", "category": "cameră", "description": "Sunet de mâncat și mestecat", "tags": ["mâncare", "mestecat", "mâncat"]},
+        {"name": "Băut", "category": "cameră", "description": "Sunet de băut și sorbit", "tags": ["băut", "sorbit", "băutură"]},
+
+        # Natură și vreme
+        {"name": "Ploaie ușoară", "category": "natură", "description": "Sunet de ploaie ușoară", "tags": ["ploaie", "natură", "vreme"]},
+        {"name": "Ploaie puternică", "category": "natură", "description": "Sunet de ploaie puternică", "tags": ["ploaie", "furtună", "vreme"]},
+        {"name": "Ploaie pe geam", "category": "natură", "description": "Picături de ploaie pe geam", "tags": ["ploaie", "geam", "picături"]},
+        {"name": "Furtună cu tunete", "category": "natură", "description": "Sunet de furtună cu tunete", "tags": ["furtună", "tunete", "vreme"]},
+        {"name": "Vânt puternic", "category": "natură", "description": "Sunet de vânt puternic", "tags": ["vânt", "natură", "vreme"]},
+        {"name": "Crivăț / Viscol", "category": "natură", "description": "Sunet de viscol cu vânt și zăpadă", "tags": ["viscol", "crivăț", "iarnă"]},
+        {"name": "Pădure", "category": "natură", "description": "Sunet de pădure cu păsări", "tags": ["pădure", "natură", "păsări"]},
+        {"name": "Mers prin pădure", "category": "natură", "description": "Pași prin frunze în pădure", "tags": ["pădure", "pași", "frunze"]},
+        {"name": "Pădure tropicală", "category": "natură", "description": "Pădure tropicală cu ploaie și păsări", "tags": ["tropical", "junglă", "ploaie"]},
+        {"name": "Râu care curge", "category": "natură", "description": "Sunet de apă care curge", "tags": ["râu", "apă", "natură"]},
+        {"name": "Izvor / Cascadă", "category": "natură", "description": "Sunet de izvor și cascadă", "tags": ["izvor", "cascadă", "apă"]},
+        {"name": "Fântână arteziană", "category": "natură", "description": "Sunet de fântână arteziană", "tags": ["fântână", "apă", "stropit"]},
+        {"name": "Lac cu lebede", "category": "natură", "description": "Lac liniștit cu lebede și păsări", "tags": ["lac", "lebede", "păsări"]},
+        {"name": "Valuri de mare", "category": "natură", "description": "Sunet de valuri la mare", "tags": ["mare", "valuri", "plajă"]},
+        {"name": "Mare agitată", "category": "natură", "description": "Mare agitată cu furtună", "tags": ["mare", "agitat", "valuri"]},
+        {"name": "Plajă", "category": "natură", "description": "Sunet de plajă cu valuri", "tags": ["plajă", "mare", "litoral"]},
+        {"name": "Piscină", "category": "natură", "description": "Piscină cu stropit de apă", "tags": ["piscină", "apă", "stropit"]},
+        {"name": "Șemineu", "category": "natură", "description": "Sunet de foc în șemineu", "tags": ["foc", "șemineu", "casă"]},
+        {"name": "Foc de tabără", "category": "natură", "description": "Foc de tabără care trosnește", "tags": ["foc", "tabără", "trosnit"]},
+        {"name": "Zăpadă", "category": "natură", "description": "Sunet de ninsoare", "tags": ["zăpadă", "iarnă", "natură"]},
+        {"name": "Pași prin zăpadă", "category": "natură", "description": "Pași care scârțâie în zăpadă", "tags": ["zăpadă", "pași", "iarnă"]},
+        {"name": "Dimineață cu păsări", "category": "natură", "description": "Păsări cântând dimineața", "tags": ["păsări", "dimineață", "cânt"]},
+        {"name": "Noapte cu greieri", "category": "natură", "description": "Greieri cântând noaptea", "tags": ["greieri", "noapte", "natură"]},
+        {"name": "Noapte liniștită", "category": "natură", "description": "Noapte liniștită cu greieri", "tags": ["noapte", "liniște", "greieri"]},
+        {"name": "Noapte în natură", "category": "natură", "description": "Noapte cu bufniță și greieri", "tags": ["noapte", "bufniță", "natură"]},
+        {"name": "Toamnă în pădure", "category": "natură", "description": "Frunze căzute de toamnă", "tags": ["toamnă", "frunze", "pădure"]},
+        {"name": "Primăvară", "category": "natură", "description": "Sunet de primăvară cu păsări", "tags": ["primăvară", "păsări", "înflorire"]},
+        {"name": "Vară", "category": "natură", "description": "Sunet de vară cu greieri", "tags": ["vară", "greieri", "soare"]},
+        {"name": "Iarnă", "category": "natură", "description": "Sunet de iarnă cu vânt", "tags": ["iarnă", "vânt", "frig"]},
+        {"name": "Dimineață la țară", "category": "natură", "description": "Dimineață la țară cu cocoș", "tags": ["țară", "dimineață", "cocoș"]},
+        {"name": "Noapte la țară", "category": "natură", "description": "Noapte la țară cu broaște", "tags": ["țară", "noapte", "broaște"]},
+        {"name": "Sat liniștit", "category": "natură", "description": "Sat liniștit cu păsări", "tags": ["sat", "liniște", "păsări"]},
+        {"name": "Fermă cu vaci", "category": "natură", "description": "Fermă cu vaci și păsări", "tags": ["fermă", "vaci", "animale"]},
+        {"name": "Curte cu găini", "category": "natură", "description": "Curte de fermă cu găini", "tags": ["găini", "curte", "fermă"]},
+        {"name": "Pajiște cu broaște", "category": "natură", "description": "Broaște cântând pe pajiște", "tags": ["broaște", "pajiște", "baltă"]},
+        {"name": "Grădină cu flori", "category": "natură", "description": "Grădină cu flori și păsări", "tags": ["grădină", "flori", "păsări"]},
+        {"name": "Albine la flori", "category": "natură", "description": "Albine bâzâind la flori", "tags": ["albine", "bâzâit", "flori"]},
+        {"name": "Munte", "category": "natură", "description": "Vânt pe munte", "tags": ["munte", "vânt", "înălțime"]},
+
+        # Animale
+        {"name": "Câine care latră", "category": "animale", "description": "Sunet de câine care latră", "tags": ["câine", "lătrat", "animal"]},
+        {"name": "Mai mulți câini", "category": "animale", "description": "Mai mulți câini care latră", "tags": ["câini", "lătrat", "animal"]},
+        {"name": "Pisică care toarce", "category": "animale", "description": "Sunet de pisică care toarce", "tags": ["pisică", "tors", "animal"]},
+        {"name": "Mai multe pisici", "category": "animale", "description": "Mai multe pisici care toarce", "tags": ["pisici", "tors", "animal"]},
+        {"name": "Păsări în natură", "category": "animale", "description": "Sunet de păsări în natură", "tags": ["păsări", "natură", "cânt"]},
+        {"name": "Greieri noaptea", "category": "animale", "description": "Sunet de greieri noaptea", "tags": ["greieri", "noapte", "natură"]},
+        {"name": "Veverițe", "category": "animale", "description": "Veverițe care ciripesc", "tags": ["veverițe", "ciripit", "animale"]},
+        {"name": "Lac cu rațe", "category": "animale", "description": "Rațe pe lac cu păsări", "tags": ["rațe", "lac", "păsări"]},
+        {"name": "Bebeluș", "category": "animale", "description": "Bebeluș care plânge", "tags": ["bebeluș", "plânge", "copil"]},
+
+        # Oameni și activități
+        {"name": "Conversație în cafenea", "category": "oameni", "description": "Sunet de conversații într-o cafenea", "tags": ["cafenea", "conversație", "oameni"]},
+        {"name": "Copii care se joacă", "category": "oameni", "description": "Sunet de copii care se joacă", "tags": ["copii", "joacă", "oameni"]},
+        {"name": "Restaurant aglomerat", "category": "oameni", "description": "Sunet de restaurant cu mulți oameni", "tags": ["restaurant", "oameni", "aglomerat"]},
+        {"name": "Mulțime", "category": "oameni", "description": "Mulțime care aplaudă", "tags": ["mulțime", "aplauze", "oameni"]},
+        {"name": "Petrecere", "category": "oameni", "description": "Petrecere cu muzică și oameni", "tags": ["petrecere", "muzică", "oameni"]},
+        {"name": "Copii la joacă", "category": "oameni", "description": "Copii care se joacă afară", "tags": ["copii", "joacă", "afară"]},
+        {"name": "Stadion", "category": "oameni", "description": "Stadion cu mulțime la meci", "tags": ["stadion", "meci", "mulțime"]},
+
+        # Tehnologie
+        {"name": "Televizor în fundal", "category": "tehnologie", "description": "Sunet de televizor care merge în fundal", "tags": ["televizor", "tehnologie", "fundal"]},
+        {"name": "Calculator", "category": "tehnologie", "description": "Sunet de calculator care funcționează", "tags": ["calculator", "tehnologie", "birou"]},
+        {"name": "Notificări telefon", "category": "tehnologie", "description": "Sunet de notificări de telefon", "tags": ["telefon", "notificări", "tehnologie"]},
+        {"name": "Telefon care sună", "category": "tehnologie", "description": "Telefon care sună", "tags": ["telefon", "suna", "apel"]},
+
+        # Spații publice
+        {"name": "Supermarket", "category": "public", "description": "Sunet de supermarket cu oameni", "tags": ["supermarket", "public", "magazin"]},
+        {"name": "Gara", "category": "public", "description": "Sunet de gară cu anunțuri", "tags": ["gară", "public", "transport"]},
+        {"name": "Bibliotecă", "category": "public", "description": "Sunet de bibliotecă liniștită", "tags": ["bibliotecă", "public", "liniște"]},
+        {"name": "Birou", "category": "public", "description": "Birou cu tastaturi și voce", "tags": ["birou", "office", "tastaturi"]},
+        {"name": "Spital", "category": "public", "description": "Spital cu monitoare și beep", "tags": ["spital", "medical", "beep"]},
+        {"name": "Școală", "category": "public", "description": "Școală cu elevi și clopoțel", "tags": ["școală", "elevi", "clopoțel"]},
+        {"name": "Centru comercial", "category": "public", "description": "Centru comercial aglomerat", "tags": ["centru", "comercial", "mall"]},
+        {"name": "Casă de marcat", "category": "public", "description": "Beep la casa de marcat", "tags": ["casa", "marcat", "checkout"]},
+        {"name": "Pungi de cumpărături", "category": "public", "description": "Foșnet de pungi de cumpărături", "tags": ["pungi", "cumpărături", "foșnet"]},
+        {"name": "Sala de sport", "category": "public", "description": "Sală de sport cu greutăți", "tags": ["sport", "gym", "greutăți"]},
+        {"name": "Sala de jocuri", "category": "public", "description": "Sala de jocuri arcade", "tags": ["arcade", "jocuri", "retro"]},
+        {"name": "Laborator", "category": "public", "description": "Laborator cu aparate", "tags": ["laborator", "lab", "experimente"]},
+        {"name": "Fabrică", "category": "public", "description": "Fabrică cu mașini", "tags": ["fabrică", "mașini", "uzină"]},
+        {"name": "Construcții", "category": "public", "description": "Șantier de construcții", "tags": ["construcții", "șantier", "ciocane"]},
+        {"name": "Tir", "category": "public", "description": "Sunet de focuri de armă la tir", "tags": ["tir", "arma", "focuri"]},
+        {"name": "Biserică", "category": "public", "description": "Biserică liniștită", "tags": ["biserică", "liniște", "rugăciune"]},
+        {"name": "Sala de curs", "category": "public", "description": "Sală de curs cu studenți", "tags": ["curs", "școală", "studenți"]},
+
+        # Sunete clare noi (fără muzică de fundal)
+        {"name": "Clopot de biserică", "category": "public", "description": "Clopot de biserică limpede care bate", "tags": ["clopot", "biserică", "curat"]},
+        {"name": "Ploaie pe fereastră", "category": "natură", "description": "Picături clare de ploaie pe fereastră", "tags": ["ploaie", "fereastră", "clar"]},
+        {"name": "Inimă care bate", "category": "cameră", "description": "Bătăi clare de inimă, ritm constant", "tags": ["inimă", "bătăi", "ritm"]},
+        {"name": "Respirație lentă", "category": "cameră", "description": "Respirație lentă și adâncă, pentru relaxare", "tags": ["respirație", "relaxare", "liniște"]},
     ]
+    existing = {a["name"] for a in _find("ambient_library", {"visibility": "public"})}
+    added = 0
     for amb in ambients:
+        if amb["name"] in existing:
+            continue
         try:
             create_ambient(
                 owner_id="system",
@@ -972,6 +1081,9 @@ def seed_ambient_library():
                 visibility="public",
                 is_synthetic=True,
             )
+            added += 1
             print(f"Adăugat: {amb['name']}")
         except Exception as e:
             print(f"Avertisment {amb['name']}: {e}")
+    if added == 0:
+        print("[db] Biblioteca ambientală e deja completă.")
