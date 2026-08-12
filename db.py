@@ -1,9 +1,10 @@
 """
 db.py — router automat între backends:
+  - TURSO_URL setat     →  Turso (libSQL) — baza de date nouă, fără limită Neon
   - DATABASE_URL setat  →  PostgreSQL (Replit built-in sau Neon)
-  - DATABASE_URL absent →  memorie temporară via mongomock (HF Spaces fără DB extern)
+  - niciunul            →  memorie temporară via mongomock (HF Spaces fără DB extern)
 
-Fallback de siguranță: dacă PostgreSQL este configurat dar INACCESIBIL la pornire
+Fallback de siguranță: dacă backend-ul configurat este INACCESIBIL la pornire
 (ex: limita de transfer Neon depășită, serverul oprit), aplicația NU se prăbușește:
 cade automat pe backend-ul în memorie, cu un avertisment clar în loguri.
 """
@@ -40,7 +41,19 @@ def _pg_reachable():
         return False
 
 
-if os.environ.get("DATABASE_URL") and _pg_reachable():
+# Prioritate: Turso (baza nouă) → PostgreSQL (Neon) → memorie (mongomock).
+if os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"):
+    import db_turso
+    if db_turso.turso_ready():
+        from db_turso import *            # noqa: F401, F403
+        from db_turso import get_config, _now  # noqa: F401
+    elif os.environ.get("DATABASE_URL") and _pg_reachable():
+        from db_pg import *               # noqa: F401, F403
+        from db_pg import get_config, _now  # noqa: F401
+    else:
+        from db_mg import *               # noqa: F401, F403
+        from db_mg import get_config, _now  # noqa: F401
+elif os.environ.get("DATABASE_URL") and _pg_reachable():
     from db_pg import *          # noqa: F401, F403
     from db_pg import get_config, _now  # noqa: F401
 else:
