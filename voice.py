@@ -668,6 +668,55 @@ def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_n
     return _generate_preview(expressify(text), sample_bytes, sample_name, reference_text=reference_text)
 
 
+
+def _movavg(a, k):
+    """Medie mobilă rapidă O(n) (numpy) pentru netezirea spectrului."""
+    import numpy as np
+    k = max(1, int(k) | 1)  # impar
+    if k <= 1 or a.size <= k:
+        return a.copy()
+    pad = k // 2
+    ap = np.pad(a, pad, mode="edge")
+    c = np.cumsum(np.insert(ap, 0, 0.0))
+    out = (c[k:] - c[:-k]) / k
+    return out[: a.size]
+
+
+def _naturalize(sig, sr):
+    """Înmuiere globală a sunetelor sintetizate ca să NU mai sune „electronic"/bip:
+    1) plafonează vârfurile spectrale înguste (tonuri pure) la un multiplu al mediei locale;
+    2) rulou blând peste ~2.6 kHz (scoate stridența digitală din înalte);
+    3) o unduire lentă de amplitudine (LFO) ca fundalul să pară „viu", nu un ton electronic fix.
+    Zgomotele late (ploaie, foc, vânt) rămân aproape neatinse."""
+    import numpy as np
+    n = int(sig.size)
+    if n < 128 or not np.any(sig):
+        return sig
+    X = np.fft.rfft(sig)
+    mag = np.abs(X)
+    f = np.fft.rfftfreq(n, 1.0 / sr)
+    # 1) de-tonalizare: limitează vârfurile înguste la ~3.5x media locală (~110 Hz fereastră)
+    win = max(5, int(round(110.0 / (sr / n))) | 1)
+    env = _movavg(mag, win) + 1e-9
+    cap = env * 3.5
+    over = mag > cap
+    if np.any(over):
+        scale = np.ones_like(mag)
+        scale[over] = cap[over] / mag[over]
+        X = X * scale
+    # 2) rulou blând în înalte (peste 2.6 kHz)
+    roll = np.ones_like(f)
+    hi = f > 2600.0
+    roll[hi] = np.maximum(0.20, (2600.0 / f[hi]) ** 1.1)
+    X = X * roll
+    sig = np.fft.irfft(X, n)
+    # 3) unduire lentă de amplitudine → mai organic, mai puțin „electronic fix"
+    t = np.arange(n) / sr
+    lfo = 1.0 + 0.12 * np.sin(2 * np.pi * 0.4 * t + 1.3) + 0.06 * np.sin(2 * np.pi * 0.13 * t)
+    sig = sig * lfo
+    return sig
+
+
 # ── Sinteza ambientală DSP (neschimbată) ─────────────────────────────────────
 
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
@@ -3760,6 +3809,8 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     else:  # "room" și orice preset necunoscut
         sig = pink(70, 3200) * 0.052 + sine(50, 0.016) + sine(100, 0.009)
 
+    # Înmuiere globală: reduce tonurile pure/ascuțite ca să nu sune „electronic"/bip
+    sig = _naturalize(sig, sr)
     # Normalizare + fade in/out pentru a evita clicuri la început/sfârșit
     sig = norm(sig)
     fade = int(0.04 * sr)

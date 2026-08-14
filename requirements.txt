@@ -18,3 +18,4 @@ fish-audio-sdk
 ormsgpack
 # rebuild-marker: 2026-08-07 (voce: Fish Audio metoda principală pentru clonare zero-shot)
 # rebuild-marker-b: 2026-08-06f (parola min 4 caractere + restaurare munca Turso/sunete dupa suprascriere accidentala)
+# rebuild-marker-c: 2026-08-06g (sunete ambientale mai naturale: _naturalize reduce tonurile pure/bipurile + inmoaie inaltele)
