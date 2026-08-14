@@ -40,8 +40,8 @@ def register(username, password, name="", question=None, answer=None):
     username = (username or "").strip().lower()
     if len(username) < 3:
         raise ValueError("Numele de utilizator trebuie să aibă minim 3 caractere.")
-    if not password or len(password) < 6:
-        raise ValueError("Parola trebuie să aibă minim 6 caractere.")
+    if not password or len(password) < 4:
+        raise ValueError("Parola trebuie să aibă minim 4 caractere.")
     if db.get_user_by_email(username):
         raise ValueError("Există deja un cont cu acest nume de utilizator.")
     q = (question or "").strip() or None
@@ -101,8 +101,8 @@ def set_verified(email):
 
 def reset_password(email, new_password):
     email = (email or "").strip().lower()
-    if not new_password or len(new_password) < 6:
-        raise ValueError("Parola trebuie să aibă minim 6 caractere.")
+    if not new_password or len(new_password) < 4:
+        raise ValueError("Parola trebuie să aibă minim 4 caractere.")
     db.set_user_password(email, hash_password(new_password))
 
 

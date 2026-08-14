@@ -791,71 +791,15 @@ def _render_verify():
         st.rerun()
 
 
-def _pw_field(label, key, min_len=6, confirm=False, confirm_label=None):
-    """Câmp de parolă îmbunătățit.
-
-    - comutator „👁️ Arată parola" (verifici ce ai tastat, util pe telefon),
-    - contor live de caractere (✅ verde când atinge minimul cerut),
-    - opțional câmp de confirmare cu verificare live a potrivirii.
-
-    Returnează (parola, confirmarea sau None).
-    """
-    pw = st.text_input(
-        label,
-        type="password" if not st.session_state.get(f"show_{key}", False) else "default",
-        key=key,
-    )
-    st.checkbox(
-        "👁️ Arată parola",
-        key=f"show_{key}",
-        help="Afișează parola ca să poți verifica ce ai tastat.",
-    )
-    typed = st.session_state.get(key, "") or ""
-    n = len(typed)
-    if not typed:
-        st.caption(f"🔒 Minim {min_len} caractere.")
-    elif n > 72:
-        st.caption("⚠️ Parola e prea lungă (maxim 72 de caractere).")
-    elif n >= min_len:
-        st.caption(f"✅ Parolă ok — {n} caractere (minim {min_len}).")
-    else:
-        _rest = min_len - n
-        st.caption(
-            f"⚠️ Mai trebuie {_rest} {'caracter' if _rest == 1 else 'caractere'} — "
-            f"ai {n} din {min_len}."
-        )
-    pw2 = None
-    if confirm:
-        pw2 = st.text_input(
-            confirm_label or "Confirmă parola",
-            type="password" if st.session_state.get(f"show_{key}", False) else "default",
-            key=f"{key}_2",
-        )
-        t2 = st.session_state.get(f"{key}_2", "") or ""
-        if t2:
-            if t2 == typed:
-                st.caption("✅ Parolele coincid.")
-            else:
-                st.caption("❌ Parolele nu coincid încă.")
-    return pw, pw2
-
-
 def _render_reset():
     email = st.session_state["pending_reset_email"]
     st.markdown("🔑 **Resetează parola**")
     st.caption(f"Am trimis un cod de 6 cifre la {email}.")
     code = st.text_input("Cod din email", key="reset_code", max_chars=6)
-    newpw, newpw2 = _pw_field(
-        "Parolă nouă (min. 6)", "reset_newpw",
-        confirm=True, confirm_label="Confirmă parola nouă",
-    )
+    newpw = st.text_input("Parolă nouă (min. 6)", type="password", key="reset_newpw")
     if st.button("Resetează parola", key="do_reset", type="primary", use_container_width=True):
-        if not newpw or len(newpw) < 6:
-            st.error("Parola trebuie să aibă minim 6 caractere.")
-        elif len(newpw) > 72:
-            st.error("Parola e prea lungă (maxim 72 de caractere).")
-        elif newpw2 != newpw:
-            st.error("Parolele nu se potrivesc.")
+        if not newpw or len(newpw) < 4:
+            st.error("Parola trebuie să aibă minim 4 caractere.")
         elif not auth.check_code(email, code, "reset"):
             st.error("Cod invalid sau expirat.")
         else:
@@ -903,16 +847,7 @@ def _render_login_register():
         )
         if _mode == "Intră în cont":
             le = st.text_input("Nume utilizator", key="login_email", placeholder="ex: daria")
-            lp = st.text_input(
-                "Parolă",
-                type="password" if not st.session_state.get("show_login_pw", False) else "default",
-                key="login_pw",
-            )
-            st.checkbox(
-                "👁️ Arată parola",
-                key="show_login_pw",
-                help="Afișează parola ca să poți verifica ce ai tastat.",
-            )
+            lp = st.text_input("Parolă", type="password", key="login_pw")
             if st.button("Intră în cont", key="do_login", use_container_width=True, type="primary"):
                 u = auth.authenticate(le, lp)
                 if not u:
@@ -936,19 +871,12 @@ def _render_login_register():
                 if st.session_state.get("fp_question"):
                     st.info(f"Întrebare secretă: **{st.session_state.fp_question}**")
                     fa = st.text_input("Răspunsul tău", key="fp_answer")
-                    fnew, fnew2 = _pw_field(
-                        "Parolă nouă (min. 6 caractere)", "fp_newpw",
-                        confirm=True, confirm_label="Confirmă parola nouă",
-                    )
+                    fnew = st.text_input("Parolă nouă (min. 4 caractere)", type="password", key="fp_newpw")
                     if st.button("Resetează parola", key="fp_reset", use_container_width=True, type="primary"):
                         if not auth.verify_security_answer(st.session_state.fp_user_val, fa):
                             st.error("Răspuns greșit. Mai încearcă.")
-                        elif not fnew or len(fnew) < 6:
-                            st.error("Parola trebuie să aibă minim 6 caractere.")
-                        elif len(fnew) > 72:
-                            st.error("Parola e prea lungă (maxim 72 de caractere).")
-                        elif fnew2 != fnew:
-                            st.error("Parolele nu se potrivesc.")
+                        elif not fnew or len(fnew) < 4:
+                            st.error("Parola trebuie să aibă minim 4 caractere.")
                         else:
                             auth.reset_password(st.session_state.fp_user_val, fnew)
                             _login_user(auth.public_by_email(st.session_state.fp_user_val))
@@ -958,28 +886,18 @@ def _render_login_register():
                             st.rerun()
         else:
             rge = st.text_input("Nume utilizator", key="reg_email", placeholder="ex: daria")
-            rgp, rgp2 = _pw_field(
-                "Parolă (min. 6 caractere)", "reg_pw",
-                confirm=True, confirm_label="Confirmă parola",
-            )
+            rgp = st.text_input("Parolă (min. 4 caractere)", type="password", key="reg_pw")
             st.caption("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
             rq = st.selectbox("Alege o întrebare", SECURITY_QUESTIONS, key="reg_q")
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
-                if not rgp or len(rgp) < 6:
-                    st.error("Parola trebuie să aibă minim 6 caractere.")
-                elif len(rgp) > 72:
-                    st.error("Parola e prea lungă (maxim 72 de caractere).")
-                elif rgp2 != rgp:
-                    st.error("Parolele nu se potrivesc.")
-                else:
-                    try:
-                        uname = auth.register(rge, rgp, question=rq, answer=ra)
-                        _login_user(auth.public_by_email(uname))
-                        st.rerun()
-                    except ValueError as e:
-                        st.error(str(e))
+                try:
+                    uname = auth.register(rge, rgp, question=rq, answer=ra)
+                    _login_user(auth.public_by_email(uname))
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
         st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
         _fix_autofill_js()
 
@@ -1026,7 +944,6 @@ AMBIENT_LIBRARY = {
     "⛈️ Furtună cu tunete": "storm",
     "⛈️💨 Furtună puternică": "blizzard",
     "🌧️🔔 Ploaie pe geam": "rain_window",
-    "🌧️🪟 Ploaie pe fereastră": "rain_window",
     "❄️ Ninsoare liniștită": "snow",
     "❄️👣 Pași prin zăpadă": "snow_walk",
     "🌬️ Vânt liniștit": "wind",
@@ -1147,8 +1064,6 @@ AMBIENT_LIBRARY = {
     "🔥 Foc de tabără": "fire",
     "🕯️ Șemineu": "fire",
     "❤️ Bătăi de inimă": "heartbeat",
-    "🫀 Inimă care bate": "heartbeat",
-    "🌬️ Respirație lentă": "breath",
     "⏰ Ceas": "clock",
     "🚁 Elicopter": "helicopter",
     
@@ -1202,7 +1117,6 @@ AMBIENT_LIBRARY = {
     # ⛪ Biserici și ceremonii
     "⛪ Biserică": "library",
     "🔔 Clopote de biserică": "clock",
-    "🔔🔔 Clopot de biserică": "bell",
     "💒 Nuntă": "party",
     "🕯️ Parastas": "library",
 
@@ -1364,58 +1278,6 @@ AMBIENT_LIBRARY = {
     "🐷 Porci": "farm",
     "🦆 Gâște": "birds",
     "🦚 Păun": "birds",
-
-    # 🏜️ Deșert și peisaje noi
-    "🏜️ Deșert": "desert",
-    "🏜️🌪️ Furtună de nisip": "desert",
-    "🏜️ Dună de nisip": "desert",
-    "💦 Cascadă mare": "waterfall",
-    "🏞️ Pârâu de munte": "stream",
-    "🏞️ Apă lină": "stream",
-    "🌧️ Ploaie pe acoperiș": "rain_roof",
-    "🌧️ Ploaie pe tinichea": "rain_roof",
-    "🌩️ Tunet depărtat": "thunder_roll",
-    "🔔 Clopoței de vânt": "wind_chimes",
-    "⛪ Clopote de biserică": "church_bells",
-    "🛕 Gong de templu": "temple_gong",
-    "🛕 Rugăciune la templu": "temple_gong",
-    "🌼 Pajiște cu flori": "meadow",
-    "🌾 Prerie": "meadow",
-    "🌲 Pădure noaptea": "night_forest",
-    "🌲🌙 Pădure întunecată": "night_forest",
-    "🤿 Subacvatic": "underwater",
-    "🐠 Sub apă cu pești": "underwater",
-    "🪸 Acvariu": "underwater",
-    "🌌 Spațiu cosmic": "space",
-    "🚀 Deep space": "space",
-    "💫 Orbita Pământului": "space",
-    "🌆 Oraș futurist": "cyberpunk",
-    "🎰 Cazino": "casino",
-    "🎰 Păcănele": "casino",
-    "🏪 Târg": "market",
-    "🥕 Piață de legume": "market",
-    "🛒 Bazar": "market",
-    "🖨️ Mașină de scris": "typewriter",
-    "🖨️ Tastare mecanică": "typewriter",
-    "🖨️ Imprimantă": "printer",
-    "🖨️ Printare documente": "printer",
-    "🌀 Ventilator": "fan",
-    "🌬️ Aer condiționat": "air_conditioning",
-    "💵 Casă de bani": "cash_register",
-    "🪙 Monede": "cash_register",
-    "🍽️ Mașină de spălat vase": "dishwasher",
-    "🚿 Duș": "shower",
-    "😴 Sforăit": "snore",
-    "👏 Aplauze": "applause",
-    "🎉 Ovații": "cheering",
-    "🏆 Urare": "cheering",
-    "🏍️ Motocicletă": "motorcycle",
-    "🛵 Motoretă": "motorcycle",
-    "🚲 Bicicletă": "bicycle",
-    "🔔 Clopoțel de bicicletă": "bicycle",
-    "⛪ Orgă de biserică": "organ",
-    "🛎️ Gong": "gong",
-    "🧘 Gong de meditație": "gong",
 }
 
 
@@ -1735,7 +1597,7 @@ def _tts_kwargs(char):
 
 
 def _any_voice_id():
-    """Return the first saved voice (Fish Audio / cloned) for the current user."""
+    """Return the first saved Chatterbox voice for the current user."""
     try:
         for c in db.list_characters(owner_id=_identity_id()):
             if c.get("voice_id"):
@@ -3015,43 +2877,8 @@ def absence_fragment():
             st.rerun(scope="app")
 
 
-def _is_db_conn_error(e):
-    """True dacă excepția e o eroare de conexiune la baza de date."""
-    name = type(e).__name__
-    mod = type(e).__module__ or ""
-    return ("psycopg2" in mod) or name in ("OperationalError", "DatabaseError", "InterfaceError")
-
-
-def _show_db_unavailable():
-    """Mesaj prietenos când baza de date nu e disponibilă (nu crash pe tot ecranul)."""
-    try:
-        st.session_state.pop("auth_user", None)
-    except Exception:  # noqa
-        pass
-    st.markdown(
-        '<div style="background:#1a1013;border:1px solid #5a2b2b;border-radius:14px;'
-        'padding:1.4rem 1.5rem;text-align:center;margin-top:1.5rem">'
-        '<div style="font-size:2rem;margin-bottom:.4rem">🗄️</div>'
-        '<div style="font-family:Sora;font-weight:700;font-size:1.15rem;color:#ECECEC;margin-bottom:.3rem">'
-        "Baza de date nu este disponibilă momentan</div>"
-        '<div style="color:#c98a8a;font-size:.9rem">'
-        "Nu am putut accesa datele. Te rugăm să încerci din nou în scurt timp.</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-
 # ------------------------- sidebar -------------------------
-try:
-    _restore_session()
-except Exception as _e:  # noqa: DB indisponibilă — nu trebuie să doboare aplicația
-    if _is_db_conn_error(_e):
-        try:
-            _log.warning("DB unavailable during session restore: %s", _e)
-        except Exception:  # noqa
-            pass
-    else:
-        raise
+_restore_session()
 _restore_theme()
 _restore_tz()
 _restore_sound()
@@ -3077,29 +2904,11 @@ with st.sidebar:
             st.session_state.nav = "personaje"
             st.rerun()
     elif st.session_state.get("pending_verify_email"):
-        try:
-            _render_verify()
-        except Exception as _e:  # noqa
-            if _is_db_conn_error(_e):
-                _show_db_unavailable()
-            else:
-                raise
+        _render_verify()
     elif st.session_state.get("pending_reset_email"):
-        try:
-            _render_reset()
-        except Exception as _e:  # noqa
-            if _is_db_conn_error(_e):
-                _show_db_unavailable()
-            else:
-                raise
+        _render_reset()
     else:
-        try:
-            _render_login_register()
-        except Exception as _e:  # noqa
-            if _is_db_conn_error(_e):
-                _show_db_unavailable()
-            else:
-                raise
+        _render_login_register()
 
 
 if st.session_state.get("theme_light"):
@@ -3145,7 +2954,7 @@ def render_create():
         st.markdown(
             '<div class="hero"><h1>Creează un <span class="accent">personaj</span></h1>'
             "<p>Dă-i un nume, o personalitate și un scenariu. Încarcă o mostră audio "
-            "pentru a-i clona vocea în română cu Fish Audio.</p></div>",
+            "pentru a-i clona vocea gratuit cu Chatterbox.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -3319,8 +3128,7 @@ def render_create():
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     st.error(f"Nu am putut genera exemplul acum: {_e}")
-        st.caption("Fish Audio — clonare vocală în română (metoda principală). "
-                   "Chatterbox rămâne ca rezervă automată.")
+        st.caption("Chatterbox TTS — clonare vocală gratuită și open-source, fără text de referință.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -3362,7 +3170,7 @@ def render_create():
                 voice_name = clone_name.strip()
                 # Testăm mostra — dar reutilizăm preview-ul dacă userul a apăsat deja „Ascultă vocea”.
                 try:
-                    with st.spinner("Testez mostra cu Fish Audio (prima generare poate dura 1-2 minute)..."):
+                    with st.spinner("Testez mostra cu Chatterbox (prima generare poate dura 1-2 minute)..."):
                         preview = _voice_preview_cached(
                             sample_bytes,
                             "Salut! Aceasta este vocea personajului meu.",
@@ -3887,11 +3695,7 @@ def render_chat(char):
     # 🔄 „Încearcă din nou" — dacă ultimul mesaj e al utilizatorului și n-a primit răspuns
     # (generarea a eșuat), oferă un buton care regenerează răspunsul, fără a rescrie mesajul.
     if history and history[-1]["role"] == "user":
-        _chat_config_error = st.session_state.get("_chat_config_error")
-        if _chat_config_error:
-            st.error(_chat_config_error)
-        else:
-            st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
+        st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
         if st.button("🔄 Încearcă din nou", key=f"regen_{active_conv}",
                      use_container_width=True, type="primary"):
             _last = history[-1]
@@ -3913,11 +3717,7 @@ def render_chat(char):
                     st.session_state["_last_chat_error"] = f"retry: {e!r}\n{_tb.format_exc()}"
                     _parts = []
             if not _parts:
-                st.session_state["_chat_config_error"] = llm.provider_configuration_error()
-                st.error(
-                    st.session_state.get("_chat_config_error")
-                    or "Tot nu a mers. Mai încearcă în câteva secunde. 💛"
-                )
+                st.error("Tot nu a mers. Mai încearcă în câteva secunde. 💛")
             else:
                 _reply = " ".join(_parts)
                 _new = [db.add_message(active_conv, "assistant", p) for p in _parts]
@@ -4599,11 +4399,9 @@ def render_chat(char):
         if not parts:
             # generarea a eșuat: mesajul userului rămâne salvat → reîncărcăm ca să apară
             # butonul „🔄 Încearcă din nou" (de sub mesaje), în loc de o eroare trecătoare.
-            st.session_state["_chat_config_error"] = llm.provider_configuration_error()
             st.rerun()
         else:
             reply = " ".join(parts)
-            st.session_state.pop("_chat_config_error", None)
 
             # ── AMBIANȚĂ CA PRIM MESAJ ─────────────────────────────────────────
             # Generăm rapid ambianța din cuvintele-cheie din răspuns (fără LLM),
@@ -5189,7 +4987,7 @@ def render_gallery():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată în română prin Fish Audio. Alege un șablon de mai jos sau apasă "
+            "răspunsul cu vocea clonată gratuit prin Chatterbox. Alege un șablon de mai jos sau apasă "
             "<b>＋ Personaj nou</b>.</p></div>",
             unsafe_allow_html=True,
         )
@@ -5666,7 +5464,7 @@ def render_personaje():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată în română prin Fish Audio. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
+            "răspunsul cu vocea clonată gratuit prin Chatterbox. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -5985,11 +5783,7 @@ def render_profil():
 
 
 # ------------------------- router -------------------------
-try:
-    _handle_share_param()
-except Exception as _e:  # noqa: DB indisponibilă la link-uri share
-    if not _is_db_conn_error(_e):
-        raise
+_handle_share_param()
 # fire a pending browser notification (proactive/absence message arrived)
 if st.session_state.get("notify_on") and st.session_state.get("_pending_notify"):
     _pn = st.session_state.pop("_pending_notify")
