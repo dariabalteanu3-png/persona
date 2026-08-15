@@ -9,11 +9,11 @@ Pillow
 ddgs
 gradio_client
 resend
-openai
+openai==1.99.9
 requests
-numpy
-soundfile
-google-genai
+numpy==2.4.6
+soundfile==0.14.0
+google-genai==2.11.0
 # voice generation: Fish Audio (principal) + Chatterbox/F5-TTS (fallback)
 fish-audio-sdk
 ormsgpack
@@ -21,3 +21,4 @@ ormsgpack
 # rebuild-marker-b: 2026-08-06f (parola min 4 caractere + restaurare munca Turso/sunete dupa suprascriere accidentala)
 # rebuild-marker-c: 2026-08-06g (sunete ambientale mai naturale: _naturalize reduce tonurile pure/bipurile + inmoaie inaltele)
 # rebuild-marker-d: 2026-08-06h (contor parola: min_len 4 + gate inregistrare < 4 - erau ratate)
+# rebuild-marker-e: 2026-08-08 (pin openai/numpy/soundfile/google-genai la versiunile care merg local — repara LLM+fallback dupa reinstalarea completa declansata de soundfile)
