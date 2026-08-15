@@ -12,6 +12,7 @@ resend
 openai
 requests
 numpy
+soundfile
 google-genai
 # voice generation: Fish Audio (principal) + Chatterbox/F5-TTS (fallback)
 fish-audio-sdk

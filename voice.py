@@ -719,8 +719,117 @@ def _naturalize(sig, sr):
 
 # ── Sinteza ambientală DSP (neschimbată) ─────────────────────────────────────
 
+# ══════════════════════════════════════════════════════════════════════════
+# Sunete REALE (Google Sound Library, CC-BY 4.0) — au prioritate față de sinteză
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from real_sounds import REAL_SOUND_MAP as _REAL_SOUND_MAP
+except Exception:  # noqa
+    try:
+        from streamlit_app.real_sounds import REAL_SOUND_MAP as _REAL_SOUND_MAP
+    except Exception:  # noqa
+        _REAL_SOUND_MAP = {}
+
+_REAL_WAV_CACHE = {}
+
+
+def _fetch_real_ogg(url):
+    """Descarcă .ogg-ul real (cu cache pe disc în /tmp). Returnează bytes sau None."""
+    import os as _os
+    import hashlib as _hl
+    d = "/tmp/persona_real_ogg"
+    try:
+        _os.makedirs(d, exist_ok=True)
+    except Exception:  # noqa
+        pass
+    fp = _os.path.join(d, _hl.md5(url.encode()).hexdigest() + ".ogg")
+    try:
+        if _os.path.exists(fp) and _os.path.getsize(fp) > 500:
+            with open(fp, "rb") as f:
+                return f.read()
+    except Exception:  # noqa
+        pass
+    try:
+        import requests
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200 and len(r.content) > 500:
+            try:
+                with open(fp, "wb") as f:
+                    f.write(r.content)
+            except Exception:  # noqa
+                pass
+            return r.content
+    except Exception:  # noqa
+        pass
+    return None
+
+
+def _real_sound_wav(preset, duration=10.0, sample_rate=22050):
+    """Returnează bytes WAV cu o înregistrare REALĂ pentru preset, sau None (fallback la sinteză)."""
+    import os as _os
+    if _os.environ.get("AMBIENT_REAL", "1") != "1":
+        return None
+    url = _REAL_SOUND_MAP.get(preset)
+    if not url:
+        return None
+    try:
+        import numpy as np
+        import soundfile as sf
+    except Exception:  # noqa
+        return None
+    dur = max(2.0, min(float(duration), 20.0))
+    key = "%s|%d|%d" % (preset, int(dur), int(sample_rate))
+    if key in _REAL_WAV_CACHE:
+        return _REAL_WAV_CACHE[key]
+    try:
+        raw = _fetch_real_ogg(url)
+        if not raw:
+            return None
+        data, srate = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+        if getattr(data, "ndim", 1) > 1:
+            data = data.mean(axis=1)
+        data = np.asarray(data, dtype=np.float32)
+        if len(data) < 8:
+            return None
+        # resample liniar la sample_rate
+        if int(srate) != int(sample_rate):
+            tgt = int(round(len(data) * float(sample_rate) / float(srate)))
+            if tgt > 8:
+                xp = np.linspace(0.0, 1.0, len(data), endpoint=False)
+                xq = np.linspace(0.0, 1.0, tgt, endpoint=False)
+                data = np.interp(xq, xp, data).astype(np.float32)
+        need = int(sample_rate * dur)
+        if len(data) < need:
+            reps = int(np.ceil(need / float(len(data))))
+            data = np.tile(data, reps)
+        data = data[:need]
+        peak = float(np.max(np.abs(data))) or 1.0
+        data = data / peak * 0.92
+        fade = min(int(sample_rate * 0.08), max(1, need // 12))
+        if fade > 0 and len(data) > 2 * fade:
+            data[:fade] *= np.linspace(0.0, 1.0, fade)
+            data[-fade:] *= np.linspace(1.0, 0.0, fade)
+        pcm = np.int16(np.clip(data, -1.0, 1.0) * 32767)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(pcm.tobytes())
+        out = buf.getvalue()
+        _REAL_WAV_CACHE[key] = out
+        return out
+    except Exception:  # noqa
+        return None
+
+
+
 def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     """DSP-based ambient synthesis using numpy. Fiecare apel sună ușor diferit (seed aleatoriu)."""
+    # Prioritate: dacă avem o înregistrare REALĂ pentru acest preset, o folosim.
+    _rb = _real_sound_wav(preset, duration, sample_rate)
+    if _rb is not None:
+        return _rb
     try:
         import numpy as np
     except ImportError:
