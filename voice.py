@@ -3828,9 +3828,27 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
     return output.getvalue()
 
 
+
+# Toate numele de preseturi definite în _ambient_wav (extrase din codul acestui fișier),
+# ca să putem expune orice preset direct din bibliotecă prin numele lui exact.
+try:
+    import re as _re_presets
+    with open(__file__, encoding="utf-8") as _pf:
+        AMBIENT_PRESET_NAMES = frozenset(
+            _re_presets.findall(r'preset == "([a-z0-9_]+)"', _pf.read())
+        )
+except Exception:  # noqa
+    AMBIENT_PRESET_NAMES = frozenset()
+
+
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
     """Returnează un sunet ambient sintetizat local; nu apelează niciun API extern."""
     text = str(prompt or "").lower()
+    # Cale rapidă: dacă primim EXACT numele unui preset, îl folosim direct
+    # (permite expunerea oricărui preset în bibliotecă fără să depindem de potrivirea pe cuvinte-cheie).
+    _exact = text.strip()
+    if _exact in AMBIENT_PRESET_NAMES:
+        return _ambient_wav(_exact, duration=duration)
     presets = (
         # ── Forme exacte Casă/obiecte: câștigă înaintea legacy-ului (stairs/train/heels/balcony) ──
         ("keys_rummage",     ("chei răscolite", "răscolește cheile", "caută cheile", "scoate cheile din geantă",
