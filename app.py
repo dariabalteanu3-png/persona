@@ -791,7 +791,7 @@ def _render_verify():
         st.rerun()
 
 
-def _pw_field(label, key, min_len=6, confirm=False, confirm_label=None):
+def _pw_field(label, key, min_len=4, confirm=False, confirm_label=None):
     """Câmp de parolă îmbunătățit.
 
     - comutator „👁️ Arată parola" (verifici ce ai tastat, util pe telefon),
@@ -967,7 +967,7 @@ def _render_login_register():
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
             if st.button("Creează cont", key="do_reg", use_container_width=True, type="primary"):
-                if not rgp or len(rgp) < 6:
+                if not rgp or len(rgp) < 4:
                     st.error("Parola trebuie să aibă minim 4 caractere.")
                 elif len(rgp) > 72:
                     st.error("Parola e prea lungă (maxim 72 de caractere).")
