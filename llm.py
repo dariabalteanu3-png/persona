@@ -154,7 +154,7 @@ def _openrouter_text(system, text):
     return content
 
 
-def _reliable_fallback(system, text):
+def _reliable_fallback(system, text, _original_error=None):
     """Când providerul principal eșuează: lanț automat de rezervă, în ordine:
         Grok → Cerebras → OpenRouter → (Gemini dacă e configurat) → Emergent.
     Așa chatul nu mai dă „probleme tehnice" când Groq își atinge limita."""
@@ -188,7 +188,8 @@ def _reliable_fallback(system, text):
             return _emergent_text(system, text)
         except Exception:  # noqa
             _log.exception("emergent fallback failed")
-    raise RuntimeError("toți providerii LLM au eșuat")
+    _detail = f" ({_original_error})" if _original_error else ""
+    raise RuntimeError(f"toți providerii LLM au eșuat{_detail}")
 
 
 def _groq_text_simple(system, text):
@@ -205,6 +206,7 @@ def _groq_text_simple(system, text):
 
 def _groq_text(system, text):
     # retry scurt pe limita per-minut (429) înainte de a cădea pe rezervă
+    last_err = None
     for attempt in range(2):
         try:
             resp = groq_client().chat.completions.create(
@@ -216,10 +218,11 @@ def _groq_text(system, text):
                 raise RuntimeError("empty groq response")
             return content
         except Exception as e:  # noqa - Groq failed (bad key/model/quota)
+            last_err = e
             if _is_rate_limit(e) and attempt == 0:
                 time.sleep(3)
                 continue
-            return _reliable_fallback(system, text)
+            return _reliable_fallback(system, text, _original_error=e)
 
 
 def _groq_stream(system, text):
