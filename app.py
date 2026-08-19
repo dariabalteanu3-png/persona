@@ -4257,6 +4257,30 @@ def render_chat(char):
             st.error(_chat_config_error)
         else:
             st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
+        # Afișează detalii despre eroare (vizibil mereu când chatul eșuează)
+        _last_err = st.session_state.get("_last_chat_error", "")
+        if _last_err:
+            with st.expander("🐛 Detalii eroare (utile pentru depanare)", expanded=False):
+                st.code(_last_err[:1500])
+                try:
+                    _ps = llm.provider_status()
+                    _groq_info = f"✅ (prefix: {_ps['GROQ_KEY_PREFIX']})" if _ps['HAS_GROQ'] else "❌ (nu e setat)"
+                    _gemi_info = "✅" if _ps['HAS_GEMINI'] else "❌"
+                    _cere_info = "✅" if _ps['HAS_CEREBRAS'] else "❌"
+                    _open_info = "✅" if _ps['HAS_OPENROUTER'] else "❌"
+                    st.markdown(
+                        f"**Status provideri:** Groq: {_groq_info}, "
+                        f"Gemini: {_gemi_info}, Cerebras: {_cere_info}, OpenRouter: {_open_info}"
+                    )
+                    if st.button("🧪 Test rapid provider", key=f"test_prov_{active_conv}"):
+                        with st.spinner("Testez conexiunea..."):
+                            ok, msg = llm.test_provider()
+                        if ok:
+                            st.success(f"Providerul răspunde: {msg}")
+                        else:
+                            st.error(f"Providerul NU răspunde: {msg}")
+                except Exception:
+                    pass
         if st.button("🔄 Încearcă din nou", key=f"regen_{active_conv}",
                      use_container_width=True, type="primary"):
             _last = history[-1]
@@ -4275,7 +4299,12 @@ def render_chat(char):
                 except Exception as e:  # noqa
                     _log.exception("burst_reply failed (retry button)")
                     import traceback as _tb
-                    st.session_state["_last_chat_error"] = f"retry: {e!r}\n{_tb.format_exc()}"
+                    try:
+                        _ps = llm.provider_status()
+                        _ps_str = f"\nProvider: Groq={_ps['HAS_GROQ']}(len={_ps['GROQ_KEY_LEN']}), Gemini={_ps['HAS_GEMINI']}"
+                    except Exception:
+                        _ps_str = ""
+                    st.session_state["_last_chat_error"] = f"retry: {e!r}{_ps_str}\n{_tb.format_exc()}"
                     _parts = []
             if not _parts:
                 st.session_state["_chat_config_error"] = llm.provider_configuration_error()
@@ -4975,7 +5004,12 @@ def render_chat(char):
         except Exception as e:  # noqa
             _log.exception("burst_reply failed (chat send)")
             import traceback as _tb
-            st.session_state["_last_chat_error"] = f"send: {e!r}\n{_tb.format_exc()}"
+            try:
+                _ps = llm.provider_status()
+                _ps_str = f"\nProvider: Groq={_ps['HAS_GROQ']}(len={_ps['GROQ_KEY_LEN']}), Gemini={_ps['HAS_GEMINI']}, Cerebras={_ps['HAS_CEREBRAS']}, OpenRouter={_ps['HAS_OPENROUTER']}"
+            except Exception:
+                _ps_str = ""
+            st.session_state["_last_chat_error"] = f"send: {e!r}{_ps_str}\n{_tb.format_exc()}"
             parts = []
         gen_ph.empty()
         if not parts:

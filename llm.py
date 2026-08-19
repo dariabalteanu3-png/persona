@@ -391,6 +391,32 @@ def provider_configuration_error():
     )
 
 
+def provider_status():
+    """Returnează un dict cu statusul providerilor LLM (pentru diagnosticare)."""
+    from provider import GROQ_API_KEY as _gk, GEMINI_API_KEY as _mk
+    return {
+        "HAS_GROQ": HAS_GROQ,
+        "HAS_GEMINI": HAS_GEMINI,
+        "HAS_CEREBRAS": HAS_CEREBRAS,
+        "HAS_OPENROUTER": HAS_OPENROUTER,
+        "HAS_EMERGENT": _emergent_key() is not None,
+        "USE_GROQ": USE_GROQ,
+        "GROQ_KEY_LEN": len(_gk) if _gk else 0,
+        "GROQ_KEY_PREFIX": (_gk[:6] + "...") if _gk and len(_gk) > 6 else (_gk or "(lipsa)"),
+        "GEMINI_KEY_LEN": len(_mk) if _mk else 0,
+    }
+
+
+def test_provider():
+    """Testează rapid providerul curent. Returnează (ok: bool, mesaj: str)."""
+    try:
+        r = get_reply({"name": "test", "id": "test", "personality": "", "scenario": ""},
+                       [], "Spune doar: merge", tries=1)
+        return True, (r or "(raspuns gol)").strip()[:100]
+    except Exception as e:
+        return False, repr(e)[:200]
+
+
 def _run_reply(system, text, sid, tries=2, smart=False):
     """Run a one-shot reply with a light automatic retry on transient failures."""
     last = None
