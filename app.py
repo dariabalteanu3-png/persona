@@ -19,6 +19,10 @@ try:
     for _k, _v in st.secrets.items():
         if isinstance(_v, str):
             os.environ.setdefault(_k, _v)
+        elif hasattr(_v, "items"):
+            for _sk, _sv in _v.items():
+                if isinstance(_sv, str):
+                    os.environ.setdefault(_sk, _sv)
 except Exception:  # noqa
     pass
 
