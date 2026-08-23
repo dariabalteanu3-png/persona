@@ -6387,6 +6387,157 @@ def render_profil():
                 st.success("✅ Setările au fost salvate. Vor rămâne așa și data viitoare când intri.")
                 st.toast("✅ Setări salvate!")
             st.markdown("---")
+            st.markdown("---")
+            # -- Configuratie avansata (accesibila cu cititor de ecran) ----------
+            with st.expander("Configurare avansata (secrete si baza de date)", expanded=False):
+                st.markdown(
+                    "**Aceste campuri te ajuta sa configurezi aplicatia. "
+                    "Introdu informatiile mai jos, iar aplicatia iti va arata "
+                    "configuratia exacta pe care sa o copiezi in Streamlit Secrets.**"
+                )
+                # -- Campul 1: Secretul pentru LLM --------------------------------
+                st.markdown("#### Campul 1: Cheia API pentru chat-ul AI")
+                st.caption(
+                    "Introdu cheia API Groq, Cerebras sau OpenRouter. "
+                    "Aceasta este cheia pe care o folosesti in Streamlit."
+                )
+                _user_llm_key = st.text_input(
+                    "Cheie API (GROQ_API_KEY, CEREBRAS_API_KEY sau OPENROUTER_API_KEY)",
+                    value="",
+                    type="password",
+                    key="cfg_llm_key",
+                    help="Introdu cheia API pe care o ai de la Groq, Cerebras sau OpenRouter.",
+                    label_visibility="visible",
+                )
+                _user_llm_provider = st.radio(
+                    "Ce furnizor AI folosesti?",
+                    ["Groq", "Cerebras", "OpenRouter"],
+                    key="cfg_llm_provider",
+                    help="Alege furnizorul AI corespunzator cheii introduse mai sus.",
+                    horizontal=True,
+                )
+
+                # -- Campul 2: Configuratia Turso ---------------------------------
+                st.markdown("#### Campul 2: Configuratia bazei de date Turso")
+                st.caption(
+                    "Introdu URL-ul si tokenul Turso impreuna, separate printr-un spatiu. "
+                    "Poti lipi direct secventa completa: libsql://... urmata de token."
+                )
+                _user_turso = st.text_input(
+                    "URL Turso + Token (unul dupa altul, separate prin spatiu)",
+                    value="",
+                    type="password",
+                    key="cfg_turso_combined",
+                    help="Lipeste aici URL-ul bazei de date Turso si tokenul, "
+                         "separate printr-un spatiu.",
+                    label_visibility="visible",
+                )
+
+                # -- Campul 3: Token GitHub (optional) -----------------------------
+                st.markdown("#### Campul 3: Token GitHub (optional)")
+                st.caption(
+                    "Daca vrei sa salvezi si sa aplici modificarile in codul sursa."
+                )
+                _user_gh_token = st.text_input(
+                    "Token GitHub",
+                    value="",
+                    type="password",
+                    key="cfg_github_token",
+                    help="Tokenul GitHub personal pentru a salva modificarile in repository.",
+                    label_visibility="visible",
+                )
+
+                # -- Genereaza configuratia ----------------------------------------
+                if st.button(
+                    "Genereaza configuratia pentru Streamlit Secrets",
+                    key="cfg_generate_btn",
+                    use_container_width=True,
+                    type="primary",
+                    help="Apasa aici ca sa vezi configuratia completa pe care sa o copiezi in Streamlit Cloud.",
+                ):
+                    _turso_url = ""
+                    _turso_token = ""
+                    if _user_turso.strip():
+                        _parts = _user_turso.strip().split(None, 1)
+                        if len(_parts) >= 1:
+                            _turso_url = _parts[0]
+                        if len(_parts) >= 2:
+                            _turso_token = _parts[1]
+
+                    _toml_lines = []
+                    _toml_lines.append("# === CHEIE API AI ===")
+                    if _user_llm_key.strip():
+                        if _user_llm_provider == "Groq":
+                            _toml_lines.append('GROQ_API_KEY = "%s"' % _user_llm_key.strip())
+                        elif _user_llm_provider == "Cerebras":
+                            _toml_lines.append('CEREBRAS_API_KEY = "%s"' % _user_llm_key.strip())
+                        elif _user_llm_provider == "OpenRouter":
+                            _toml_lines.append('OPENROUTER_API_KEY = "%s"' % _user_llm_key.strip())
+                    else:
+                        _toml_lines.append('# GROQ_API_KEY = "gsk_..."')
+                    _toml_lines.append("")
+                    _toml_lines.append("# === FISH AUDIO (optional) ===")
+                    _toml_lines.append('# FISH_API_KEY = "sk-fish-..."')
+                    _toml_lines.append("")
+                    _toml_lines.append("# === HUGGING FACE (optional) ===")
+                    _toml_lines.append('# HF_TOKEN = "hf_..."')
+                    _toml_lines.append("")
+                    _toml_lines.append("# === TTS ===")
+                    _toml_lines.append('USE_EDGE_TTS = "1"')
+                    _toml_lines.append("")
+                    _toml_lines.append("# === BAZA DE DATE (Turso) ===")
+                    if _turso_url:
+                        _toml_lines.append('TURSO_URL = "%s"' % _turso_url)
+                    if _turso_token:
+                        _toml_lines.append('TURSO_TOKEN = "%s"' % _turso_token)
+                    if not _turso_url and not _turso_token:
+                        _toml_lines.append('# TURSO_URL = "libsql://nume-db.turso.io"')
+                        _toml_lines.append('# TURSO_TOKEN = "eyJ..."')
+
+                    _toml_output = "\n".join(_toml_lines)
+
+                    st.markdown("#### Configuratia completa (copiaza in Streamlit Secrets)")
+                    st.code(_toml_output, language="toml")
+                    st.success(
+                        "Configuratia a fost generata! Copiaza textul de mai sus "
+                        "si lipeste-l in Streamlit > Settings > Secrets. "
+                        "Sterge tot ce e acolo inainte sa lipesti."
+                    )
+
+                    st.markdown("#### Status curent")
+                    try:
+                        from llm import provider_status as _ps
+                        _status = _ps()
+                        _groq_st = "activ" if _status.get("HAS_GROQ") else "nu e setat"
+                        _cerebras_st = "activ" if _status.get("HAS_CEREBRAS") else "nu e setat"
+                        _openrouter_st = "activ" if _status.get("HAS_OPENROUTER") else "nu e setat"
+                        _turso_st = "activ" if os.environ.get("TURSO_URL") else "nu e setat"
+                        _fish_st = "activ" if os.environ.get("FISH_API_KEY") or os.environ.get("FISH_AUDIO_API_KEY") else "nu e setat"
+                        st.markdown(
+                            "- **Groq (chat AI):** %s\n"
+                            "- **Cerebras (fallback):** %s\n"
+                            "- **OpenRouter (fallback):** %s\n"
+                            "- **Baza de date Turso:** %s\n"
+                            "- **Fish Audio (voce):** %s" % (
+                                _groq_st, _cerebras_st, _openrouter_st, _turso_st, _fish_st
+                            )
+                        )
+                    except Exception:
+                        st.info("Nu pot verifica statusul providerilor acum.")
+
+                # -- Instructiuni accesibile ---------------------------------------
+                st.markdown("---")
+                st.markdown("#### Instructiuni")
+                st.markdown(
+                    "1. Introdu cheia API in Campul 1 si alege furnizorul.\n"
+                    "2. Introdu URL-ul si tokenul Turso in Campul 2, separate prin spatiu.\n"
+                    "3. Apasa butonul **Genereaza configuratia**.\n"
+                    "4. Copiaza tot textul din caseta de cod.\n"
+                    "5. Mergi pe Streamlit Cloud > aplicatia ta > **Settings** > **Secrets**.\n"
+                    "6. Sterge tot ce e acolo si lipesteste textul copiat.\n"
+                    "7. Apasa **Save** apoi **Rerun** sau **Reboot** aplicatia."
+                )
+
             if st.checkbox("Vreau să-mi șterg contul", key="del_confirm"):
                 st.warning("Se șterg definitiv contul și toate personajele tale. Acțiunea e ireversibilă.")
                 typed = st.text_input("Scrie ȘTERGE pentru a confirma", key="del_typed")

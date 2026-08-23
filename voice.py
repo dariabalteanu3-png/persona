@@ -615,26 +615,75 @@ def extract_actions(text):
 
 
 def expressify(text):
-    """Curăță markup-ul și normalizează textul românesc pentru TTS."""
+    """Curată markup-ul şi normalizează textul românesc pentru TTS.
+    Îmbunățiri pentru voce naturală:
+    - Pauze naturale la semne de punctuație
+    - Transformarea emoticoanelor în descrieri vocale
+    - Normalizarea numerelor şi simbolurilor
+    - Păstrarea diacriticelor româneşti corecte
+    """
     text = str(text or "")
     # Elimină formatarea markdown (păstrează cuvintele)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)   # **bold** → text
     text = re.sub(r"\*([^*]+)\*", " ", text)           # *acțiune* → spațiu
     text = re.sub(r"__([^_]+)__", r"\1", text)         # __subliniat__ → text
     text = re.sub(r"_([^_]+)_", r"\1", text)           # _italic_ → text
-    text = re.sub(r"#+\s*", "", text)                   # # titluri
+    text = re.sub(r"#\s*", "", text)                   # # titluri
     text = re.sub(r"`[^`]+`", "", text)                 # `cod`
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [link](url) → text
-    # Simboluri → cuvinte românești
+
+    # ── Emoticoane → descrieri vocale (pentru expresivitate) ────────────────
+    _emoticon_map = [
+        (r":\)", " zâmbind"),
+        (r":D", " râzând"),
+        (r";\)", " fac cu ochiul"),
+        (r":\(", " trist"),
+        (r":O", " uimit"),
+        (r":P", " jucăuș"),
+        (r"<3", " cu inimă"),
+        (r":\*", " pupând"),
+        (r"B\)", " cu ochelari"),
+        (r"xD", " râzând cu lacrimi"),
+    ]
+    for pattern, replacement in _emoticon_map:
+        text = re.sub(pattern, replacement, text)
+
+    # Simboluri → cuvinte româneşti
     text = text.replace("&", " și ")
     text = text.replace("%", " la sută")
-    text = re.sub(r"\.{3}", "… ", text)                # ... → pauză
+    text = re.sub(r"\.{3}", " … ", text)               # ... → pauză lungă
+    text = text.replace("…", " … ")                # … → pauză lungă
+
+    # ── Pauze naturale la punctuație (Îmbunățețtește intonația) ───────────
+    text = re.sub(r",\s*", ", ", text)                  # Normalizează virgulele
+    text = re.sub(r"\.\s+", ". ", text)                # Punct + spațiu
+    text = re.sub(r"\?\s+", "? ", text)
+    text = re.sub(r"!\s+", "! ", text)
+    # Două spații după punct/virgulă/interogație/exclamație = pauză naturală
+    text = re.sub(r"([.!?])\s+(?=[A-ZĂÂÎȘȚa-zăâîșț])", "\1  ", text)
+
+    # ── Normalizare numere şi simboluri ───────────────────
+    text = text.replace("+", " plus ")
+    text = text.replace("=", " egal ")
+    text = text.replace("@", " la ")
+    text = text.replace("#", " diez ")
+    text = text.replace("$", " dolari ")
+    text = text.replace("€", " euro ")
+    text = text.replace("£", " lire ")
+    text = text.replace("°", " grade ")
+
+    # ── Curățire conversațională ──────────────────
+    text = re.sub(r"^\s*[-–—]\s*", "", text, flags=re.MULTILINE)
+
     # Elimină emoji
     text = _EMOJI_RE.sub("", text)
-    # Curăță spații multiple
-    text = re.sub(r"\s{2,}", " ", text).strip()
-    return text or "..."
 
+    # Curăță spații multiple şi linii goale
+    text = re.sub(r"\n\s*\n", "  ", text)             # linii goale → spațiu dublu (pauză)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = text.strip()
+
+    return text or "..."
 
 # ── API public TTS ───────────────────────────────────────────────────────────
 
@@ -1047,10 +1096,38 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig = base + gurgle * 0.28
 
     elif preset == "train":
-        rumble = pink(28, 320) * am(rng.uniform(0.7, 1.3), 0.15, 0.85) * 0.44
-        joints = footsteps(float(rng.uniform(3.5, 5.5)), lo=55, hi=420, amp=0.72)
-        hiss = pink(1100, 8500) * 0.14
-        sig = rumble + joints * 0.50 + hiss
+        # Layer 1: deep engine rumble with slow modulation
+        rumble = pink(28, 280) * am(rng.uniform(0.6, 1.2), 0.15, 0.85) * 0.38
+        # Layer 2: rhythmic rail joints (tac-tac pattern)
+        joints = np.zeros(n)
+        step = max(1, int(sr / float(rng.uniform(3.5, 5.5))))
+        pos = int(rng.integers(0, step))
+        while pos < n:
+            # Double-hit pattern: tac-tac
+            for j in range(2):
+                offset = pos + int(j * 0.08 * sr)
+                if offset < n:
+                    blen = min(int(rng.uniform(0.008, 0.025) * sr), n - offset)
+                    if blen > 0:
+                        imp = fband(rng.uniform(-1, 1, blen), 40, 350)
+                        joints[offset:offset+blen] += imp * np.exp(-np.linspace(0, 10, blen)) * float(rng.uniform(0.5, 0.85))
+            pos += step + int(rng.integers(-step//10, step//10))
+        # Layer 3: wind hiss from movement
+        hiss = pink(800, 6000) * am(rng.uniform(0.08, 0.20), 0.25, 0.75) * 0.10
+        # Layer 4: carriage creak/rock
+        creak = np.zeros(n)
+        for _ in range(int(rng.integers(1, 4))):
+            p = int(rng.integers(0, n))
+            clen = min(int(rng.uniform(0.3, 1.0) * sr), n - p)
+            if clen > 0:
+                freq = float(rng.uniform(80, 300))
+                tl = np.linspace(0, clen / sr, clen)
+                tone = np.sin(2 * np.pi * freq * tl)
+                env = np.sin(np.pi * np.linspace(0, 1, clen)) ** 0.3
+                creak[p:p+clen] += tone * env * float(rng.uniform(0.02, 0.06))
+        # Layer 5: subtle high whine (rail friction)
+        whine = sine(float(rng.uniform(1200, 2800)), 0.006) * am(rng.uniform(0.3, 0.7), 0.2, 0.8)
+        sig = rumble + joints * 0.45 + hiss + creak * 0.15 + whine * 0.05
 
     elif preset == "forest":
         leaves = pink(650, 6500) * am(rng.uniform(0.08, 0.22), 0.40, 0.60) * 0.30
@@ -1515,10 +1592,36 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig = rustle + crinkle * 0.30
 
     elif preset == "kitchen":
+        # Layer 1: fridge hum with subtle modulation
         hum = sine(60, 0.010) + sine(120, 0.006)
-        fridge = pink(100, 800) * am(rng.uniform(0.3, 0.6), 0.10, 0.90) * 0.08
-        clatter = footsteps(float(rng.uniform(0.3, 0.8)), lo=1500, hi=7000, amp=0.18)
-        sig = hum + fridge + clatter * 0.15
+        fridge = pink(60, 600) * am(rng.uniform(0.15, 0.35), 0.08, 0.92) * 0.06
+        fridge_rattle = pink(200, 1200) * am(rng.uniform(0.5, 1.2), 0.15, 0.85) * 0.025
+        # Layer 2: dishes and ceramic clinks (irregular intervals)
+        clinks = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.01, 0.04) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(2000, 5500))
+                tl = np.linspace(0, blen / sr, blen)
+                tone = np.sin(2 * np.pi * freq * tl)
+                tone += 0.3 * np.sin(2 * np.pi * freq * 2.3 * tl)  # harmonic
+                clinks[p:p+blen] += tone * np.exp(-np.linspace(0, 18, blen)) * float(rng.uniform(0.08, 0.22))
+        # Layer 3: water from faucet
+        water = pink(800, 6000) * am(rng.uniform(0.3, 0.8), 0.12, 0.88) * 0.10
+        # Layer 4: cutting board / chopping sounds
+        chopping = np.zeros(n)
+        step = max(1, int(sr / float(rng.uniform(1.5, 3.0))))
+        pos = int(rng.integers(0, step))
+        while pos < n:
+            blen = min(int(rng.uniform(0.005, 0.025) * sr), n - pos)
+            if blen > 0:
+                imp = fband(rng.uniform(-1, 1, blen), 300, 3500)
+                chopping[pos:pos+blen] += imp * np.exp(-np.linspace(0, 15, blen)) * float(rng.uniform(0.12, 0.30))
+            pos += step + int(rng.integers(-step//8, step//8))
+        # Layer 5: ambient room tone (subtle)
+        room = pink(40, 300) * 0.015
+        sig = hum + fridge + fridge_rattle + clinks * 0.35 + water * 0.25 + chopping * 0.20 + room
 
     elif preset == "coffee_machine":
         hum = sine(60, 0.008)
@@ -1572,10 +1675,33 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig = motor + water + thump * 0.15
 
     elif preset == "bathroom":
-        fan = pink(200, 4000) * am(rng.uniform(0.5, 1.0), 0.10, 0.90) * 0.12
-        drip = footsteps(float(rng.uniform(0.3, 0.8)), lo=2000, hi=6000, amp=0.15)
-        echo = pink(100, 2000) * 0.04
-        sig = fan + drip * 0.18 + echo
+        # Layer 1: ventilation fan with resonant whine
+        fan_base = pink(150, 3500) * am(rng.uniform(0.3, 0.7), 0.08, 0.92) * 0.10
+        fan_whine = sine(float(rng.uniform(1800, 2400)), 0.008) * am(0.5, 0.3, 0.7)
+        # Layer 2: water drips with realistic pitch variation and echo
+        drips = np.zeros(n)
+        for _ in range(int(rng.integers(5, 15))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.015, 0.06) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(1800, 4500))
+                tl = np.linspace(0, blen / sr, blen)
+                drip_tone = np.sin(2 * np.pi * freq * (1 + 0.3 * tl / (blen / sr)))  # rising pitch
+                drips[p:p+blen] += drip_tone * np.sin(np.pi * tl / (blen / sr)) * float(rng.uniform(0.06, 0.18))
+        # Layer 3: ceramic echo/reverb tail (simulates tiled room)
+        reverb_tail = pink(200, 3000) * 0.025
+        # Layer 4: occasional pipe clank
+        clank = np.zeros(n)
+        for _ in range(int(rng.integers(0, 3))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.02, 0.08) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(150, 400))
+                tl = np.linspace(0, blen / sr, blen)
+                tone = np.sin(2 * np.pi * freq * tl)
+                tone += 0.5 * np.sin(2 * np.pi * freq * 3.1 * tl)  # inharmonic partial
+                clank[p:p+blen] += tone * np.exp(-np.linspace(0, 10, blen)) * float(rng.uniform(0.04, 0.12))
+        sig = fan_base + fan_whine + drips * 0.30 + reverb_tail + clank
 
     elif preset == "water_faucet":
         flow = pink(1000, 8000) * am(rng.uniform(0.15, 0.30), 0.15, 0.85) * 0.35
@@ -1583,27 +1709,67 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig = flow + hiss
 
     elif preset == "makeup":
-        sig = np.zeros(n)
-        for _ in range(int(rng.integers(10, 25))):
+        # Layer 1: soft brush strokes (powder, blush)
+        brush = np.zeros(n)
+        for _ in range(int(rng.integers(6, 14))):
             p = int(rng.integers(0, n))
-            blen = min(int(rng.uniform(0.02, 0.08) * sr), n - p)
+            blen = min(int(rng.uniform(0.03, 0.12) * sr), n - p)
             if blen > 0:
-                brush = fband(rng.uniform(-1, 1, blen), 2000, 7000)
-                sig[p:p+blen] += brush * np.exp(-np.linspace(0, 15, blen)) * float(rng.uniform(0.08, 0.18))
+                b = fband(rng.uniform(-1, 1, blen), 1500, 6000)
+                env = np.sin(np.pi * np.linspace(0, 1, blen)) ** 0.3
+                brush[p:p+blen] += b * env * float(rng.uniform(0.06, 0.14))
+        # Layer 2: mascara/brow pencil tiny strokes
+        pencil = np.zeros(n)
+        for _ in range(int(rng.integers(4, 10))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.01, 0.04) * sr), n - p)
+            if blen > 0:
+                pen = fband(rng.uniform(-1, 1, blen), 3000, 8000)
+                pencil[p:p+blen] += pen * np.exp(-np.linspace(0, 20, blen)) * float(rng.uniform(0.05, 0.12))
+        # Layer 3: cosmetic lid cap / container clicks
+        clicks_mk = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            blen = min(int(rng.uniform(0.005, 0.02) * sr), n - p)
+            if blen > 0:
+                freq = float(rng.uniform(1500, 4000))
+                tl = np.linspace(0, blen / sr, blen)
+                tone = np.sin(2 * np.pi * freq * tl)
+                clicks_mk[p:p+blen] += tone * np.exp(-np.linspace(0, 25, blen)) * float(rng.uniform(0.04, 0.10))
+        # Layer 4: sponge/tissue soft noise
+        sponge = foley_rush(600, 5000, float(rng.uniform(2, 4)), 0.08)
+        sig = brush * 0.35 + pencil * 0.25 + clicks_mk * 0.15 + sponge
 
     elif preset == "heels":
-        base = pink(90, 2000) * 0.040
-        clicks = np.zeros(n)
-        step_n = max(1, int(sr / float(rng.uniform(1.5, 2.2))))
+        # Layer 1: room ambience (subtle floor resonance)
+        base = pink(60, 1500) * 0.025
+        # Layer 2: heel strikes with dual components (heel + toe)
+        steps = np.zeros(n)
+        step_n = max(1, int(sr / float(rng.uniform(1.4, 2.0))))
         spread = max(1, step_n // 6)
         pos = int(rng.integers(0, step_n // 2))
         while pos < n:
-            clen = min(int(rng.uniform(0.008, 0.03) * sr), n - pos)
+            # Main heel click (sharp high frequency)
+            clen = min(int(rng.uniform(0.005, 0.018) * sr), n - pos)
             if clen > 0:
-                click = fband(rng.uniform(-1, 1, clen), 1200, 9000)
-                clicks[pos:pos+clen] += click * np.exp(-np.linspace(0, 20, clen)) * float(rng.uniform(0.5, 1.0))
+                freq_h = float(rng.uniform(3000, 7000))
+                tl = np.linspace(0, clen / sr, clen)
+                tone_h = np.sin(2 * np.pi * freq_h * tl) * 0.4
+                tone_h += fband(rng.uniform(-1, 1, clen), 1500, 8000) * 0.6
+                steps[pos:pos+clen] += tone_h * np.exp(-np.linspace(0, 22, clen)) * float(rng.uniform(0.5, 1.0))
+            # Secondary toe tap (lower, softer, slightly delayed)
+            toe_pos = pos + int(0.06 * sr)
+            if toe_pos < n:
+                tlen = min(int(rng.uniform(0.004, 0.012) * sr), n - toe_pos)
+                if tlen > 0:
+                    freq_t = float(rng.uniform(1500, 4000))
+                    tl2 = np.linspace(0, tlen / sr, tlen)
+                    tone_t = np.sin(2 * np.pi * freq_t * tl2)
+                    steps[toe_pos:toe_pos+tlen] += tone_t * np.exp(-np.linspace(0, 18, tlen)) * float(rng.uniform(0.15, 0.35))
             pos += step_n + int(rng.integers(-spread, spread + 1))
-        sig = base + clicks * 0.72
+        # Layer 3: floor resonance (low thud per step)
+        floor = footsteps(float(rng.uniform(1.4, 2.0)), lo=40, hi=200, amp=0.10)
+        sig = base + steps * 0.55 + floor * 0.25
 
     elif preset == "heely":
         base = pink(80, 3000) * 0.030
@@ -2482,8 +2648,24 @@ def _ambient_wav(preset, duration=12.0, sample_rate=22050):
         sig += foley_rush(400, 4000, float(rng.uniform(2, 5)), 0.15)
 
     elif preset == "closet":
-        sig = creak_sound(150, 600, int(rng.integers(2, 4)), 0.3, 1.0, 0.28)
-        sig += foley_rush(400, 4500, float(rng.uniform(2, 4)), 0.2) + clicks(2, 600, 3500, 0.01, 0.05, 0.3)
+        # Layer 1: door creak (hinge squeak with frequency glide)
+        door = creak_sound(150, 600, int(rng.integers(1, 3)), 0.3, 0.8, 0.22)
+        # Layer 2: hangers sliding on metal rail
+        hangers = np.zeros(n)
+        for _ in range(int(rng.integers(2, 5))):
+            p = int(rng.integers(0, n))
+            slen = min(int(rng.uniform(0.15, 0.6) * sr), n - p)
+            if slen > 0:
+                freq = float(rng.uniform(2500, 5000))
+                tl = np.linspace(0, slen / sr, slen)
+                squeak = np.sin(2 * np.pi * freq * tl + float(rng.uniform(0, 2 * np.pi)))
+                env = np.sin(np.pi * np.linspace(0, 1, slen)) ** 0.5
+                hangers[p:p+slen] += squeak * env * float(rng.uniform(0.04, 0.12))
+        # Layer 3: clothes rustling (soft fabric movement)
+        rustle = foley_rush(400, 5000, float(rng.uniform(2, 4)), 0.18)
+        # Layer 4: occasional wooden thud (hitting back wall)
+        thud = clicks(1, 80, 600, 0.01, 0.04, 0.15)
+        sig = door + hangers * 0.25 + rustle * 0.30 + thud
 
     elif preset == "clothes_fold":
         sig = foley_rush(300, 4000, float(rng.uniform(2, 5)), 0.3) + clicks(2, 700, 3500, 0.01, 0.05, 0.25)
