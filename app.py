@@ -6485,6 +6485,9 @@ def render_profil():
                     _toml_lines.append("# === TTS ===")
                     _toml_lines.append('USE_EDGE_TTS = "1"')
                     _toml_lines.append("")
+                    _toml_lines.append("# === FREESOUND (sunete reale) ===")
+                    _toml_lines.append('# FREESOUND_API_KEY = "o6PS..."')
+                    _toml_lines.append("")
                     _toml_lines.append("# === BAZA DE DATE (Turso) ===")
                     if _turso_url:
                         _toml_lines.append('TURSO_URL = "%s"' % _turso_url)

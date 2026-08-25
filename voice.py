@@ -4132,13 +4132,168 @@ except Exception:  # noqa
     AMBIENT_PRESET_NAMES = frozenset()
 
 
+
+
+# ── Freesound: sunete reale din API ca sursă principală ─────────────────────
+
+def _freesound_for_prompt(preset_name, duration=6.0):
+    """Încearcă să găsească un sunet real pe Freesound pentru un preset dat.
+
+    Returns WAV bytes sau None (fallback la DSP local).
+    """
+    try:
+        import freesound as _fs
+    except ImportError:
+        return None
+    if not _fs.is_available():
+        return None
+
+    # Mapare preset → query Freesound
+    _PRESET_TO_QUERY = {
+        "rain": "rain drops",
+        "rain_heavy": "heavy rain",
+        "rain_light": "light rain",
+        "rain_window": "rain on window glass",
+        "rain_roof": "rain on roof tin",
+        "rain_tent": "camping rain tent",
+        "storm": "thunderstorm rain",
+        "thunder": "distant thunder rumble",
+        "ocean": "ocean waves",
+        "ocean_storm": "stormy ocean waves",
+        "river": "flowing river stream",
+        "fire": "crackling fire campfire",
+        "wind": "wind blowing",
+        "blizzard": "blizzard howling wind",
+        "crickets": "crickets chirping night",
+        "crickets_night": "night crickets chirping",
+        "night": "night ambience insects",
+        "birds": "birds singing forest",
+        "birds_morning": "morning birds dawn chorus",
+        "birds_lake": "birds near lake water",
+        "forest": "forest ambience nature",
+        "forest_walk": "walking through forest leaves",
+        "cafe": "coffee shop ambience chatter",
+        "city": "city street ambience traffic",
+        "night_city": "city night ambience",
+        "countryside": "countryside ambience nature",
+        "countryside_morning": "farm morning rooster birds",
+        "countryside_night": "countryside night crickets frogs",
+        "train": "train ride inside",
+        "bus": "bus interior ambience",
+        "station": "train station ambience",
+        "park": "park ambience children playing",
+        "beach": "beach ocean waves",
+        "fountain": "fountain water splashing",
+        "kitchen": "kitchen cooking sounds",
+        "bathroom": "bathroom water shower",
+        "library": "library quiet ambience",
+        "office": "office ambience typing",
+        "snow": "snow crunching walking",
+        "snow_walk": "walking in snow crunching",
+        "clinic": "hospital clinic ambience",
+        "classroom": "classroom school ambience",
+        "farm": "farm ambience animals",
+        "bar": "bar pub ambience",
+        "restaurant": "restaurant dining ambience",
+        "gym": "gym workout ambience",
+        "spa": "spa relaxing ambience",
+        "mall": "shopping mall ambience",
+        "playground": "playground children playing",
+        "church": "church ambient bells",
+        "clock": "clock ticking",
+        "summer": "summer ambience insects",
+        "spring": "spring birds nature",
+        "autumn": "autumn wind leaves",
+        "winter": "winter cold wind",
+        "heels_parquet": "high heels walking on floor",
+    }
+
+    query = _PRESET_TO_QUERY.get(preset_name)
+    if not query:
+        return None
+
+    try:
+        sound = _fs.search_for_context(query, max_duration=max(30, int(duration) + 10))
+    except Exception:
+        return None
+
+    if not sound:
+        return None
+
+    path = _fs.download_preview(sound["preview_url"], sound["id"])
+    if not path:
+        return None
+
+    # Converteste MP3 la WAV și ajustează durata
+    try:
+        import numpy as np
+        import soundfile as sf
+    except ImportError:
+        # fără soundfile, returnează fișierul brut
+        with open(path, "rb") as f:
+            return f.read()
+
+    try:
+        data, sr = sf.read(path, dtype="float32", always_2d=False)
+        if getattr(data, "ndim", 1) > 1:
+            data = data.mean(axis=1)
+        data = np.asarray(data, dtype=np.float32)
+
+        # Resample la 22050 Hz
+        target_sr = 22050
+        if int(sr) != target_sr:
+            tgt_len = int(round(len(data) * target_sr / sr))
+            xp = np.linspace(0, 1, len(data), endpoint=False)
+            xq = np.linspace(0, 1, tgt_len, endpoint=False)
+            data = np.interp(xq, xp, data).astype(np.float32)
+            sr = target_sr
+
+        # Ajustează durata
+        need = int(sr * duration)
+        if len(data) < need:
+            reps = int(np.ceil(need / len(data)))
+            data = np.tile(data, reps)
+        data = data[:need]
+
+        # Fade in/out pentru tranziție lină
+        fade = min(int(sr * 0.1), max(1, need // 10))
+        if fade > 0 and len(data) > 2 * fade:
+            data[:fade] *= np.linspace(0, 1, fade)
+            data[-fade:] *= np.linspace(1, 0, fade)
+
+        # Normalizare
+        peak = float(np.max(np.abs(data))) or 1.0
+        data = data / peak * 0.85
+
+        # Encode WAV
+        pcm = np.int16(np.clip(data, -1, 1) * 32767)
+        buf = io.BytesIO()
+        import wave
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(pcm.tobytes())
+        return buf.getvalue()
+    except Exception:
+        # Fallback: returnează fișierul brut MP3
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+
+
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Returnează un sunet ambient sintetizat local; nu apelează niciun API extern."""
+    """Returnează un sunet ambient — Freesound (real) cu fallback la DSP local."""
     text = str(prompt or "").lower()
     # Cale rapidă: dacă primim EXACT numele unui preset, îl folosim direct
-    # (permite expunerea oricărui preset în bibliotecă fără să depindem de potrivirea pe cuvinte-cheie).
     _exact = text.strip()
     if _exact in AMBIENT_PRESET_NAMES:
+        # Încearcă Freesound pentru contextul promptului
+        _fs = _freesound_for_prompt(_exact, duration)
+        if _fs is not None:
+            return _fs
         return _ambient_wav(_exact, duration=duration)
     presets = (
         # ── Forme exacte Casă/obiecte: câștigă înaintea legacy-ului (stairs/train/heels/balcony) ──
