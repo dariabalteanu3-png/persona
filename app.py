@@ -824,11 +824,11 @@ def _pw_field(label, key, min_len=4, confirm=False, confirm_label=None):
     typed = st.session_state.get(key, "") or ""
     n = len(typed)
     if not typed:
-        st.caption(f"🔒 Minim {min_len} caractere.")
+        st.markdown(f"🔒 Minim {min_len} caractere.")
     elif n > 72:
-        st.caption("⚠️ Parola e prea lungă (maxim 72 de caractere).")
+        st.markdown("⚠️ Parola e prea lungă (maxim 72 de caractere).")
     elif n >= min_len:
-        st.caption(f"✅ Parolă ok — {n} caractere (minim {min_len}).")
+        st.markdown(f"✅ Parolă ok — {n} caractere (minim {min_len}).")
     else:
         _rest = min_len - n
         st.caption(
@@ -845,9 +845,9 @@ def _pw_field(label, key, min_len=4, confirm=False, confirm_label=None):
         t2 = st.session_state.get(f"{key}_2", "") or ""
         if t2:
             if t2 == typed:
-                st.caption("✅ Parolele coincid.")
+                st.markdown("✅ Parolele coincid.")
             else:
-                st.caption("❌ Parolele nu coincid încă.")
+                st.markdown("❌ Parolele nu coincid încă.")
     return pw, pw2
 
 
@@ -900,7 +900,7 @@ def _render_login_register():
     with st.expander("🔐 Autentificare", expanded=_exp):
         # --- Status DB accesibil cu screen reader ---
         if "Turso" in _db_backend_name:
-            st.caption("🟢 Baza de date: Turso — conturile sunt salvate permanent")
+            st.markdown("🟢 Baza de date: Turso — conturile sunt salvate permanent")
         else:
             st.warning(
                 "🔴 Atentie: Baza de date NU este Turso! "
@@ -1002,7 +1002,7 @@ def _render_login_register():
                 "Parolă (min. 4 caractere)", "reg_pw",
                 confirm=True, confirm_label="Confirmă parola",
             )
-            st.caption("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
+            st.markdown("🔑 Întrebare secretă (ca să-ți poți recupera parola dacă o uiți)")
             rq = st.selectbox("Alege o întrebare", SECURITY_QUESTIONS, key="reg_q")
             ra = st.text_input("Răspunsul tău", key="reg_a",
                                help="Ține-l minte — îți va cere acest răspuns dacă uiți parola")
@@ -1020,7 +1020,7 @@ def _render_login_register():
                         st.rerun()
                     except ValueError as e:
                         st.error(str(e))
-        st.caption("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
+        st.markdown("Contul e opțional — poți folosi aplicația și fără el. Cu cont, personajele se salvează pe profilul tău.")
         _fix_autofill_js()
 
 
@@ -2288,7 +2288,7 @@ def _render_playlist(char, key_prefix="", readonly=False):
     """«Playlist-ul nostru» — toate melodiile trimise personajului, de ascultat oricând."""
     songs = db.list_songs(char["id"]) if hasattr(db, "list_songs") else []
     if not songs:
-        st.caption(f"🎵 Încă nu i-ai trimis nicio melodie lui {char['name']}. Trimite-i una din chat "
+        st.markdown(f"🎵 Încă nu i-ai trimis nicio melodie lui {char['name']}. Trimite-i una din chat "
                    "și va apărea aici, în „Playlist-ul nostru”.")
         return
     # playlist cover art in the character's style
@@ -2372,7 +2372,7 @@ def _render_playlist(char, key_prefix="", readonly=False):
             ''',
             height=270,
         )
-    st.caption(f"🎵 Toate melodiile ({len(songs)})")
+    st.markdown(f"🎵 Toate melodiile ({len(songs)})")
     for i, s in enumerate(songs):
         sid = s.get("id")
         confirm_key = f"confdel_{key_prefix}{sid}"
@@ -2392,7 +2392,7 @@ def _render_playlist(char, key_prefix="", readonly=False):
         if s.get("song_b64"):
             st.audio(base64.b64decode(s["song_b64"]), format="audio/mp3")
         else:
-            st.caption("_(fișierul audio nu a fost salvat — a rămas doar numele melodiei)_")
+            st.markdown("_(fișierul audio nu a fost salvat — a rămas doar numele melodiei)_")
         if st.session_state.get(edit_key):
             new_nm = st.text_input("Nume nou pentru melodie", value=s.get("song_name", ""),
                                    key=f"newname_{key_prefix}{sid}")
@@ -2492,7 +2492,7 @@ def _render_playlist(char, key_prefix="", readonly=False):
         with st.expander("🔗 Partajează playlist-ul cu un prieten"):
             from urllib.parse import quote
             url = _playlist_share_url(char["id"])
-            st.caption("Trimite acest link — prietenul poate asculta playlist-ul fără cont:")
+            st.markdown("Trimite acest link — prietenul poate asculta playlist-ul fără cont:")
             st.code(url, language=None)
             _copy_button(url, f"plshare_{key_prefix}{char['id']}")
             msg = quote(f"Ascultă playlist-ul lui {char['name']} pe Persona: {url}")
@@ -3471,9 +3471,9 @@ with st.sidebar:
     
     # --- DB backend indicator ---
     if "Turso" in _db_backend_name:
-        st.caption("\ud83d\udfe2 DB: Turso (persistent)")
+        st.markdown(":green[**DB:** Turso (persistent)]")
     else:
-        st.caption("\ud83d\udd34 DB: in-memory (datele NU persist\u0103)")
+        st.markdown(":red[**DB:** in-memory (datele NU persista)]")
 
     if user:
         st.markdown(
@@ -3727,11 +3727,11 @@ def render_create():
                             "Salut! Aceasta este vocea mea. Îți place cum sună?",
                             clone_file.name)
                     st.audio(_prev, format="audio/wav")
-                    st.caption("Dacă îți place cum sună, apasă „Salvează personajul”. "
+                    st.markdown("Dacă îți place cum sună, apasă „Salvează personajul”. "
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     st.error(f"Nu am putut genera exemplul acum: {_e}")
-        st.caption("Fish Audio — clonare vocală în română (metoda principală). "
+        st.markdown("Fish Audio — clonare vocală în română (metoda principală). "
                    "Chatterbox rămâne ca rezervă automată.")
 
     st.session_state.setdefault("cf_stab", 0.5)
@@ -3866,7 +3866,7 @@ def render_chat(char):
     if not current_user():
         mcol = st.columns([5, 2])
         with mcol[0]:
-            st.caption("💾 Ești fără cont — personajele se salvează doar pe acest telefon. "
+            st.markdown("💾 Ești fără cont — personajele se salvează doar pe acest telefon. "
                        "Fă-ți un cont gratuit ca să nu le pierzi.")
         with mcol[1]:
             if st.button("✨ Fă-ți cont", key="chat_save_reminder", use_container_width=True):
@@ -4164,22 +4164,22 @@ def render_chat(char):
                 # Determină tipul audio
                 _media_kind = m.get("media_kind", "")
                 if _media_kind == "ambient":
-                    st.caption(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
+                    st.markdown(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
                     st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
                 elif _media_kind == "ambient_pure":
-                    st.caption(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
+                    st.markdown(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
                     st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
                 elif _media_kind == "audio_file":
-                    st.caption(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
+                    st.markdown(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
                     st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
                 elif _media_kind == "song":
                     # Păstrează comportamentul existent pentru melodii
                     pass
                 else:
-                    st.caption("🎤 Mesaj vocal")
+                    st.markdown("🎤 Mesaj vocal")
                     st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
             if m.get("media_kind") == "song" and m.get("song_b64"):
-                st.caption(f"🎵 {m.get('song_name', 'melodie')}")
+                st.markdown(f"🎵 {m.get('song_name', 'melodie')}")
                 st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
             if m.get("media_kind") == "photo" and m.get("image_b64"):
                 st.image(base64.b64decode(m["image_b64"]), width=280)
@@ -4275,7 +4275,7 @@ def render_chat(char):
                     )
             if m["role"] == "assistant" and st.session_state.get(f"sfx_{m['id']}"):
                 cue = st.session_state.get(f"sfxcue_{m['id']}", "ambianță")
-                st.caption(f"🎧 {cue}")
+                st.markdown(f"🎧 {cue}")
                 ap = st.session_state.get("ambient_play_mid") == m["id"]
                 st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/wav", autoplay=ap)
                 if ap:
@@ -4401,10 +4401,10 @@ def render_chat(char):
 
     prompt = st.chat_input(f"Scrie-i lui {char['name']}...")
     proactive_fragment(char["id"], active_conv)
-    st.caption("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
+    st.markdown("💬 Fără limită de cuvinte — vorbește oricât vrei, despre orice, chiar și despre durerile și necazurile tale. Personajul e mereu aici pentru tine.")
 
     # 🎭 dispoziția de azi + 🎨 tonul vocii + 🗓️ recap + 😴 adoarme cu mine
-    st.caption(f"🎭 Azi {char['name']} e {char.get('_mood_today', '')}.")
+    st.markdown(f"🎭 Azi {char['name']} e {char.get('_mood_today', '')}.")
     with st.expander("🎨 Vocea, 🗓️ ce am vorbit & 😴 adormit"):
         _tone_opts = ["Normal", "Voce blândă", "Șoaptă", "Voce de somn", "Voce veselă"]
         _cur_tone = char.get("voice_tone") or "Normal"
@@ -4483,7 +4483,7 @@ def render_chat(char):
             st.caption(f"{char['name']} îți vorbește tot mai blând, cu fundal liniștitor, "
                        f"până adormi (se oprește singur după ~{_mins} min).")
         else:
-            st.caption("😴 Modul de somn e pornit — butonul mare de oprire e mai jos.")
+            st.markdown("😴 Modul de somn e pornit — butonul mare de oprire e mai jos.")
 
         # ⏰ alarmă blândă de trezire — personajul te trezește dimineața cu vocea lui
         st.markdown("---")
@@ -4529,7 +4529,7 @@ def render_chat(char):
             db.update_character(char["id"], {"schedule": _merged})
         if _alarm_on:
             _when = ("în zilele: " + ", ".join(_adow[i] for i in _stored_adays)) if _stored_adays else "în fiecare zi"
-            st.caption(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, {_when} "
+            st.markdown(f"⏰ Te voi trezi blând la {_new_alarm}, cu vocea mea, {_when} "
                        f"(cât timp aplicația e deschisă). Poți amâna cu «😴 Încă {_sel_snz} minute».")
 
     # ⏰ alarmă activă: butoane „încă X minute" (amânare) / „m-am trezit"
@@ -4571,18 +4571,18 @@ def render_chat(char):
     )
     st.session_state[f"cont_{char['id']}"] = _cont
     if _cont:
-        st.caption("🎤 E rândul tău — apasă microfonul și spune mai departe. "
+        st.markdown("🎤 E rândul tău — apasă microfonul și spune mai departe. "
                    f"{char['name']} îți răspunde imediat cu vocea și microfonul rămâne pregătit.")
     if char.get("voice_id"):
-        st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea. "
+        st.markdown("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea. "
                    f"{char['name']} îți răspunde imediat și vei auzi răspunsul cu vocea lui — "
                    "nu trebuie să apeși niciun buton de redare. Prima dată telefonul îți cere "
                    "permisiunea pentru microfon — apasă „Permite”.")
     else:
-        st.caption("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea și "
+        st.markdown("📱 Apasă microfonul, spune ce vrei, apoi oprește înregistrarea și "
                    f"{char['name']} îți răspunde imediat. Prima dată telefonul îți cere "
                    "permisiunea pentru microfon — apasă „Permite”.")
-    st.caption("🍎 Pe iPhone/Safari: prima dată apare o cerere de permisiune pentru microfon — apasă "
+    st.markdown("🍎 Pe iPhone/Safari: prima dată apare o cerere de permisiune pentru microfon — apasă "
                "„Permite”. Dacă ai apăsat din greșeală „Nu permite”, mergi în Reglaje → Safari → "
                "Microfon și alege „Permite”, apoi reîncarcă pagina.")
     vm = st.audio_input("Mesaj vocal", label_visibility="collapsed", key=f"vm_{active_conv}")
@@ -4675,7 +4675,7 @@ def render_chat(char):
     # ---- our shared playlist ----
     if hasattr(db, "list_songs") and db.list_songs(char["id"]):
         with st.expander("🎵 Playlist-ul nostru"):
-            st.caption(f"Toate melodiile pe care i le-ai trimis lui {char['name']} — "
+            st.markdown(f"Toate melodiile pe care i le-ai trimis lui {char['name']} — "
                        "ascultă-le oricând, una după alta.")
             _render_playlist(char, key_prefix="chat")
 
@@ -4795,7 +4795,7 @@ def render_chat(char):
         
         # Opțiune: trimite ca sunet de fundal fără voce (mesaj doar cu ambient)
         st.markdown("---")
-        st.caption("💡 Trimite doar sunetul, fără voce (pentru mesaje ambientale pure)")
+        st.markdown("💡 Trimite doar sunetul, fără voce (pentru mesaje ambientale pure)")
         
         # Selector rapid pentru sunete pure
         _pure_sounds = ["🌧️ Ploaie liniștită", "🌊 Valuri la mare", "🌲 Pădure", 
@@ -4920,7 +4920,7 @@ def render_chat(char):
 
     # ---- heartfelt letter (listen with the character's voice) ----
     with st.expander("💌 Scrisoare"):
-        st.caption(f"{char['name']} îți poate «scrie» o scrisoare din suflet — "
+        st.markdown(f"{char['name']} îți poate «scrie» o scrisoare din suflet — "
                    "o auzi cu vocea lui, fără să apeși play.")
         if st.button("💌 Scrie-mi o scrisoare", key=f"letter_btn_{active_conv}",
                      use_container_width=True):
@@ -4943,7 +4943,7 @@ def render_chat(char):
         suggestions = st.session_state.get(f"sugg_{active_conv}", [])
 
     if suggestions:
-        st.caption("💬 Sugestii (apasă una ca să o trimiți):")
+        st.markdown("💬 Sugestii (apasă una ca să o trimiți):")
         for i, s in enumerate(suggestions):
             if st.button(s, key=f"sug_{active_conv}_{i}", use_container_width=True):
                 st.session_state.pending_prompt = s
@@ -4973,7 +4973,7 @@ def render_chat(char):
                 st.rerun()
 
     with st.expander("🎵 Sunet de fundal (alege și ascultă)"):
-        st.caption("Alege un sunet de fundal din listă — ploaie, ocean, pădure, foc de tabără și "
+        st.markdown("Alege un sunet de fundal din listă — ploaie, ocean, pădure, foc de tabără și "
                    "multe altele — și apasă „Ascultă”. Cât de tare se aude depinde de „volumul "
                    "fundalului” din Setări.")
         _amb_labels = list(AMBIENT_LIBRARY.keys())
@@ -4993,7 +4993,7 @@ def render_chat(char):
             if _data:
                 _play_voice_ambient([], _data, f"amblib_{active_conv}",
                                     amb_gain=st.session_state.get("fx_volume", 100) / 100.0)
-                st.caption(f"🔊 Se aude: {_amb_choice}")
+                st.markdown(f"🔊 Se aude: {_amb_choice}")
             else:
                 st.warning("Nu am putut crea sunetul acum. Încearcă din nou.")
 
@@ -5027,7 +5027,7 @@ def render_chat(char):
                         pass
         with st.chat_message("user", avatar="🧑"):
             if user_audio:
-                st.caption("🎤 Mesaj vocal")
+                st.markdown("🎤 Mesaj vocal")
                 st.audio(base64.b64decode(user_audio), format="audio/wav")
             st.markdown(prompt)
         haptic(15)
@@ -5086,7 +5086,7 @@ def render_chat(char):
                 _svol = max(0.0, min(1.0, st.session_state.get("ambient_volume", 100) / 100.0))
                 _sb64 = base64.b64encode(_scene_amb).decode()
                 with st.chat_message("assistant", avatar="🎵"):
-                    st.caption("🎵 Ambianță scenă")
+                    st.markdown("🎵 Ambianță scenă")
                     st.components.v1.html(
                         f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
                         f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
@@ -5268,7 +5268,7 @@ def render_call(char):
                                 voice_vol=st.session_state.get("call_volume", 100) / 100.0)
             st.audio(_ab, format="audio/wav")  # control de reascultare (fără autoplay dublu)
 
-    st.caption("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
+    st.markdown("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
                "îți va cere permisiunea pentru microfon — apasă „Permite”.")
     audio = st.audio_input("Vorbește", label_visibility="collapsed", key=f"mic_{conv}")
     if audio is not None:
@@ -5550,7 +5550,7 @@ def render_playlist_share(char):
     if not songs:
         st.info("Acest playlist e gol deocamdată.")
     else:
-        st.caption("Ascultă melodiile de mai jos. 🎧")
+        st.markdown("Ascultă melodiile de mai jos. 🎧")
         _render_playlist(char, key_prefix="share", readonly=True)
     st.markdown("---")
     st.button("← Deschide Persona (creează-ți propriile personaje)", key="plshare_back",
@@ -5800,7 +5800,7 @@ def render_amintiri():
     # ---- letters journal (Colecția de scrisori) ----
     if letters:
         st.markdown("### 💌 Scrisorile mele")
-        st.caption("Toate scrisorile pe care ți le-au scris personajele — jurnalul tău de amintiri.")
+        st.markdown("Toate scrisorile pe care ți le-au scris personajele — jurnalul tău de amintiri.")
         for L in letters:
             _body = L["content"].split("\n\n", 1)[1] if "\n\n" in L["content"] else L["content"]
             _date = (str(L.get("created_at") or ""))[:10]
@@ -5845,13 +5845,13 @@ def render_amintiri():
         songs = [m for m in items if m["media_kind"] == "song"]
         videos = [m for m in items if m["media_kind"] == "video" and m.get("video_b64")]
         if photos:
-            st.caption(f"📷 Poze ({len(photos)})")
+            st.markdown(f"📷 Poze ({len(photos)})")
             pcols = st.columns(3)
             for i, m in enumerate(photos):
                 with pcols[i % 3]:
                     st.image(base64.b64decode(m["image_b64"]), use_container_width=True)
         if songs:
-            st.caption("🎵 Playlist-ul nostru")
+            st.markdown("🎵 Playlist-ul nostru")
             ch_obj = db.get_character(cid)
             if ch_obj and hasattr(db, "list_songs"):
                 _render_playlist(ch_obj, key_prefix="amt")
@@ -5861,7 +5861,7 @@ def render_amintiri():
                     if m.get("song_b64"):
                         st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
         if videos:
-            st.caption(f"🎬 Videoclipuri ({len(videos)})")
+            st.markdown(f"🎬 Videoclipuri ({len(videos)})")
             for m in videos:
                 st.video(base64.b64decode(m["video_b64"]))
         if st.button(f"🎧 {cname} îmi recomandă melodii noi", key=f"rec_{cid}",
@@ -5903,7 +5903,7 @@ def _wav_seconds(b):
 def render_grup():
     uid = _identity_id()
     st.markdown("## 👥 Chat de grup")
-    st.caption("Pune mai multe personaje ale tale să discute între ele — tu asculți și poți interveni "
+    st.markdown("Pune mai multe personaje ale tale să discute între ele — tu asculți și poți interveni "
                "oricând. Relațiile dintre ele (soț/soție/fost etc.) se deduc automat din personalitatea fiecăruia.")
     gid = st.session_state.get("active_group")
 
@@ -6203,7 +6203,7 @@ def render_profil():
                 st.session_state.auth_user["name"] = new_name
                 st.rerun()
             st.markdown("---")
-            st.caption("⚙️ Setări")
+            st.markdown("⚙️ Setări")
             if st.button("🔊 Citește-mi setările (cu voce)", key="read_settings_btn",
                          use_container_width=True,
                          help="Îți spun cu voce ce setări ai acum, ca să le verifici fără să citești."):
@@ -6273,7 +6273,7 @@ def render_profil():
             )
             _write_brain_cookie(st.session_state.chat_brain)
             if st.session_state.chat_brain == "smart":
-                st.caption("💎 Mod inteligent activ — răspunsuri mai bogate (folosește credit la fiecare mesaj).")
+                st.markdown("💎 Mod inteligent activ — răspunsuri mai bogate (folosește credit la fiecare mesaj).")
             st.session_state.auto_play = st.toggle(
                 "🔊 Auto-redare voce",
                 value=st.session_state.auto_play,
@@ -6365,7 +6365,7 @@ def render_profil():
             if _tc[2].button("📞 Apel", key="test_ring_sound", use_container_width=True):
                 play_sound("ringtone")
             st.markdown("---")
-            st.caption("🔔 Notificări & mesaje de absență")
+            st.markdown("🔔 Notificări & mesaje de absență")
             st.session_state.notify_on = st.toggle(
                 "🔔 Notificări în browser",
                 value=st.session_state.get("notify_on", False),
@@ -6374,7 +6374,7 @@ def render_profil():
             )
             if st.session_state.notify_on:
                 _request_notify_permission_js()
-                st.caption("✅ Pornite. Merg cât timp aplicația e deschisă (și în fundal). "
+                st.markdown("✅ Pornite. Merg cât timp aplicația e deschisă (și în fundal). "
                            "Când închizi complet browserul nu pot ajunge.")
             st.session_state.absence_on = st.toggle(
                 "💤 Mesaje de absență (personajele te caută dacă lipsești)",
@@ -6398,7 +6398,7 @@ def render_profil():
                 _browser_notify("Persona 🎭", "Notificările funcționează! Personajele te vor anunța aici.")
                 st.toast("Am trimis o notificare de test 🔔")
             st.markdown("---")
-            st.caption("🎂 Ziua ta & sărbători")
+            st.markdown("🎂 Ziua ta & sărbători")
             _has_bd = bool(st.session_state.get("birthday"))
             _set_bd = st.checkbox("Vreau să-mi urați ziua de naștere", value=_has_bd, key="bd_enable")
             if _set_bd:
@@ -6410,7 +6410,7 @@ def render_profil():
                 if _new_bd != st.session_state.get("birthday"):
                     st.session_state.birthday = _new_bd
                     _write_notify_params()
-                st.caption("De ziua ta, personajele tale îți vor ura „La mulți ani!” 🎉")
+                st.markdown("De ziua ta, personajele tale îți vor ura „La mulți ani!” 🎉")
             elif st.session_state.get("birthday"):
                 st.session_state.birthday = ""
                 _write_notify_params()
@@ -6451,7 +6451,7 @@ def render_profil():
                 )
 
 # -- Secțiune întrebare secretă (securizare cont) ----------
-            st.caption("🔑 Întrebare secretă (pentru recuperarea parolei)")
+            st.markdown("🔑 Întrebare secretă (pentru recuperarea parolei)")
             _current_sq = auth.get_security_question(user["email"])
             if _current_sq:
                 st.info("**Întrebare curentă:** %s" % _current_sq)
