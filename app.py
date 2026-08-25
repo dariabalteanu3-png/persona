@@ -35,6 +35,13 @@ import voice
 import image_gen
 import stt
 
+# ── Diagnostic vizibil: care backend de DB e activ ──────────────────
+try:
+    from db_turso import turso_connected as _turso_ok
+    _db_backend_name = "Turso" if _turso_ok() else "mongomock (in-memory)"
+except ImportError:
+    _db_backend_name = "mongomock (in-memory)"
+
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
 st.set_page_config(
@@ -891,6 +898,15 @@ def _fix_autofill_js():
 def _render_login_register():
     _exp = bool(st.session_state.get("_open_auth_hint"))
     with st.expander("🔐 Autentificare", expanded=_exp):
+        # --- Status DB accesibil cu screen reader ---
+        if "Turso" in _db_backend_name:
+            st.caption("🟢 Baza de date: Turso — conturile sunt salvate permanent")
+        else:
+            st.warning(
+                "🔴 Atentie: Baza de date NU este Turso! "
+                "Conturile create acum NU vor persista la restart. "
+                "Verifica Streamlit Secrets ca TURSO_URL si TURSO_TOKEN sunt setate."
+            )
         st.markdown(
             '<div style="background:#0f1a12;border:1px solid #1f5130;border-radius:10px;'
             'padding:.6rem .7rem;font-size:.78rem;color:#8fdca8;margin-bottom:.7rem">'
@@ -920,7 +936,20 @@ def _render_login_register():
             if st.button("Intră în cont", key="do_login", use_container_width=True, type="primary"):
                 u = auth.authenticate(le, lp)
                 if not u:
-                    st.error("Nume de utilizator sau parolă greșite.")
+                    # Verifică dacă contul există măcar (poate fi problemă de backend)
+                    _exists = db.get_user_by_email((le or "").strip().lower())
+                    if _exists:
+                        st.error("Parolă greșită. Încearcă din nou.")
+                    else:
+                        _db_info = _db_backend_name if '_db_backend_name' in dir() else "necunoscut"
+                        st.error(
+                            "Contul \"%s\" nu a fost găsit.\n\n"
+                            "Cauze posibile:\n"
+                            "1. Contul a fost creat pe o altă bază de date (nu Turso)\n"
+                            "2. Trebuie să creezi un cont nou\n\n"
+                            "Backend DB activ: %s" % ((le or "?"), _db_info)
+                        )
+                        st.info("Apasă pe \"Cont nou\" ca să îți creezi un cont nou cu întrebare secretă.")
                 else:
                     _login_user(auth.public_by_email(le))
                     st.rerun()
@@ -928,12 +957,19 @@ def _render_login_register():
             if st.checkbox("🔑 Am uitat parola", key="show_forgot"):
                 fu = st.text_input("Numele tău de utilizator", key="fp_user", placeholder="ex: daria")
                 if st.button("Continuă", key="fp_next", use_container_width=True):
-                    q = auth.get_security_question(fu)
-                    if not q:
-                        st.error("Acest cont nu are o întrebare secretă setată (sau nu există). "
-                                 "Din păcate parola nu poate fi recuperată fără ea.")
+                    _has_q = auth.has_security_question(fu)
+                    if _has_q is None:
+                        st.error("Contul \"%s\" nu a fost găsit în baza de date. "
+                                 "Verifică numele de utilizator și încearcă din nou."
+                                 % (fu or ""))
+                        st.session_state.pop("fp_question", None)
+                    elif not _has_q:
+                        st.error("Contul există dar nu are o întrebare secretă setată. "
+                                 "Te rugăm să te loghezi și să adaugi o întrebare secretă "
+                                 "din pagina Profil > Setări.")
                         st.session_state.pop("fp_question", None)
                     else:
+                        q = auth.get_security_question(fu)
                         st.session_state.fp_user_val = (fu or "").strip().lower()
                         st.session_state.fp_question = q
                         st.rerun()
@@ -3431,6 +3467,13 @@ user = current_user()
 with st.sidebar:
     st.markdown('<div class="app-logo">🎭 Persona<span class="dot">.</span></div>', unsafe_allow_html=True)
     st.markdown('<div class="app-tag">Personaje AI cu voce clonată</div>', unsafe_allow_html=True)
+
+    
+    # --- DB backend indicator ---
+    if "Turso" in _db_backend_name:
+        st.caption("\ud83d\udfe2 DB: Turso (persistent)")
+    else:
+        st.caption("\ud83d\udd34 DB: in-memory (datele NU persist\u0103)")
 
     if user:
         st.markdown(
@@ -6388,7 +6431,60 @@ def render_profil():
                 st.toast("✅ Setări salvate!")
             st.markdown("---")
             st.markdown("---")
-            # -- Configuratie avansata (accesibila cu cititor de ecran) ----------
+                                    # -- Status bază de date ----------
+            try:
+                import db_turso as _dbmod
+                if getattr(_dbmod, "turso_connected", lambda: False)():
+                    _db_backend = "Turso (persistent)"
+                    _db_icon = "🟢"
+                else:
+                    _db_backend = "mongomock (in-memory — datele NU persistă)"
+                    _db_icon = "🔴"
+            except Exception:
+                _db_backend = "mongomock (in-memory — datele NU persistă)"
+                _db_icon = "🔴"
+            st.caption("%s **Bază de date:** %s" % (_db_icon, _db_backend))
+            if "in-memory" in _db_backend:
+                st.warning(
+                    "Atenție: datele contului NU persistă la restart! "
+                    "Asigură-te că TURSO_URL și TURSO_TOKEN sunt setate corect în Streamlit Secrets."
+                )
+
+# -- Secțiune întrebare secretă (securizare cont) ----------
+            st.caption("🔑 Întrebare secretă (pentru recuperarea parolei)")
+            _current_sq = auth.get_security_question(user["email"])
+            if _current_sq:
+                st.info("**Întrebare curentă:** %s" % _current_sq)
+            else:
+                st.warning("Nu ai o întrebare secretă setată. Recomandăm să adaugi una pentru a-ți putea recupera parola.")
+            _sq_col1, _sq_col2 = st.columns(2)
+            with _sq_col1:
+                _new_sq = st.selectbox(
+                    "Alege o întrebare secretă",
+                    SECURITY_QUESTIONS,
+                    key="set_sq_q",
+                    help="Această întrebare îți va fi cerută dacă uiți parola.",
+                )
+            with _sq_col2:
+                _new_sa = st.text_input(
+                    "Răspunsul tău",
+                    key="set_sq_a",
+                    help="Ține-l minte — îți va fi cerut la recuperarea parolei.",
+                )
+            if st.button("📝 Salvează întrebarea secretă", key="save_sq_btn",
+                         use_container_width=True, type="secondary"):
+                if not _new_sa or not _new_sa.strip():
+                    st.error("Te rugăm să introduci răspunsul.")
+                else:
+                    try:
+                        auth.set_security_question(user["email"], _new_sq, _new_sa)
+                        st.success("✅ Întrebarea secretă a fost salvată cu succes!")
+                        st.rerun()
+                    except Exception as _sq_err:
+                        st.error("Eroare la salvare: %s" % str(_sq_err))
+            st.markdown("---")
+
+# -- Configuratie avansata (accesibila cu cititor de ecran) ----------
             with st.expander("Configurare avansata (secrete si baza de date)", expanded=False):
                 st.markdown(
                     "**Aceste campuri te ajuta sa configurezi aplicatia. "

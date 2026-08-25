@@ -106,6 +106,22 @@ def reset_password(email, new_password):
     db.set_user_password(email, hash_password(new_password))
 
 
+def set_security_question(email, question, answer):
+    """Setează sau actualizează întrebarea secretă a unui utilizator."""
+    email = (email or "").strip().lower()
+    q = (question or "").strip() or None
+    a_hash = hash_password(_norm_answer(answer)) if (q and answer and answer.strip()) else None
+    db.update_user_security_question(email, q, a_hash)
+
+
+def has_security_question(email):
+    """Verifică dacă un utilizator are întrebare secretă setată."""
+    u = db.get_user_by_email((email or "").strip().lower())
+    if not u:
+        return None  # user not found
+    return bool(u.get("security_question"))  # True/False
+
+
 def create_session(user_id):
     token = secrets.token_urlsafe(32)
     # Sesiune permanentă (~10 ani) ca utilizatorul să rămână conectat.

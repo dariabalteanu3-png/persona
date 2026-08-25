@@ -82,6 +82,11 @@ def _post(requests_list, timeout=20):
     return out
 
 
+def turso_connected():
+    """Returnează True dacă Turso e configurat și a răspuns la ultimul ping."""
+    return bool(TURSO_URL and TURSO_TOKEN and _HTTP_URL)
+
+
 def _exec(sql, params=None):
     params = params or []
     args = [_to_arg(p) for p in params]
@@ -166,20 +171,37 @@ def _init_schema():
 
 
 def turso_ready():
-    """Verifică dacă Turso este configurat și accesibil; inițializează schema."""
+    """Verifică dacă Turso este configurat și accesibil; inițializează schema.
+    
+    Include retry logic: încearcă de 3 ori cu timeout crescător ca să
+    supraviețuiască erorilor tranzitorii de rețea.
+    """
+    import sys, time as _time
     if not TURSO_URL or not TURSO_TOKEN:
+        print("[db] TURSO_URL sau TURSO_TOKEN nu sunt setați — folosesc mongomock.", file=sys.stderr)
         return False
-    try:
-        _fetch("SELECT 1 AS ok")
-        _init_schema()
-        seed_ambient_library()
-        return True
-    except Exception as _e:
-        import sys
-        print(f"[db] Turso indisponibil la pornire ({type(_e).__name__}). "
-              f"Folosesc backend-ul de rezervă (datele NU persistă la restart).",
-              file=sys.stderr)
-        return False
+    _attempts = [15, 25, 40]  # timeout crescător per attempt
+    for _attempt, _timeout in enumerate(_attempts, 1):
+        try:
+            print(f"[db] Turso: încercarea {_attempt}/{len(_attempts)} (timeout={_timeout}s)...", file=sys.stderr)
+            _post([{"type": "execute", "stmt": {"sql": "SELECT 1 AS ok", "args": []}}], timeout=_timeout)
+            print(f"[db] Turso: conexiune reușită la încercarea {_attempt}!", file=sys.stderr)
+            _init_schema()
+            print("[db] Turso: schema inițializată.", file=sys.stderr)
+            # Seed-ul ambiental NU blochează pornirea
+            try:
+                seed_ambient_library()
+            except Exception as _seed_err:
+                print(f"[db] Seed ambiental eșuat ({type(_seed_err).__name__}): {_seed_err}"
+                      f" — Turso rămâne conectat.", file=sys.stderr)
+            return True
+        except Exception as _e:
+            print(f"[db] Turso: încercarea {_attempt} eșuată ({type(_e).__name__}): {_e}",
+                  file=sys.stderr)
+            if _attempt < len(_attempts):
+                _time.sleep(2)  # așteaptă 2s înainte de retry
+    print("[db] Turso: toate încercările eșuate. Folosesc backend-ul de rezervă.", file=sys.stderr)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +370,16 @@ def get_user_by_id(uid):
 def update_user(uid, data):
     _update("users", {"id": uid}, data)
     return get_user_by_id(uid)
+
+
+def update_user_security_question(email, question, answer_hash):
+    """Actualizează întrebarea secretă și hash-ul răspunsului pentru un user."""
+    _update("users", {"email": email}, {
+        "$set": {
+            "security_question": question,
+            "security_answer_hash": answer_hash,
+        }
+    })
 
 
 def set_user_verified(email):
