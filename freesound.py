@@ -1,7 +1,8 @@
 """Freesound API client — sursa principală pentru sunete contextuale.
 
 Folosește Freesound.org API v2 pentru a căuta sunete reale pe baza
-contextului conversației. Biblioteca locală DSP rămâne ca fallback
+contextului conversației. Toate căutările se fac în limba engleză
+pentru rezultate optime. Biblioteca locală DSP rămâne ca fallback
 când API-ul eșuează sau limita e atinsă.
 
 API Key: setat prin variabila de mediu FREESOUND_API_KEY
@@ -10,6 +11,7 @@ API Key: setat prin variabila de mediu FREESOUND_API_KEY
 import os
 import random
 import time
+import re
 import hashlib
 from pathlib import Path
 
@@ -50,18 +52,300 @@ def _make_cache_key(query: str, tag: str = "") -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+# ── Calitatea sunetului — filtrare rezultate slabe ───────────────────────────
+
+# Taguri care indică sunete de calitate slabă / nerelevante
+_LOW_QUALITY_TAGS = {
+    "synthesized", "synthetic", "generated", "computer generated",
+    "test", "recording test", "sample", "tone", "sine", "beep",
+    "white noise", "pink noise", "brown noise", "static",
+    "distortion", "glitch", "broken", "error",
+    "silence", "dead air", "muted",
+}
+
+# Cuvinte în numele sunetului care indică calitate scăzută
+_LOW_QUALITY_NAME_PATTERNS = [
+    r"test\s", r"sample\s", r"tone\b", r"beep\b",
+    r"noise\b", r"static\b", r"hum\b", r"buzz\b",
+    r"synthetic", r"generated", r"white\s", r"pink\s",
+]
+
+
+def _is_low_quality(sound: dict) -> bool:
+    """Verifică dacă un sunet Freesound este de calitate scăzută.
+
+    Returns True dacă sunetul pare a fi generat sintetic, test,
+    zgomot de fond nerelevant, etc.
+    """
+    name = (sound.get("name") or "").lower()
+    tags = [t.lower() for t in (sound.get("tags") or [])]
+    duration = sound.get("duration", 0)
+
+    # Prea scurt (< 1.5s) — probabil un click/bip
+    if duration < 1.5:
+        return True
+
+    # Verifică taguri de calitate slabă
+    if any(t in _LOW_QUALITY_TAGS for t in tags):
+        return True
+
+    # Verifică pattern-uri în nume
+    for pattern in _LOW_QUALITY_NAME_PATTERNS:
+        if re.search(pattern, name):
+            return True
+
+    return False
+
+
+# ── Mapare context românesc → query englezesc (Freesound) ────────────────────
+
+# Frază-level: propoziții / expresii întregi în română care mapează
+# direct la un query Freesound englez.
+_CONTEXT_PHRASES: list[tuple[str, list[str]]] = [
+    # Balcon
+    ("sunt pe balcon", ["balcony ambience outdoor", "birds on balcony", "city balcony ambience"]),
+    ("stau pe balcon", ["balcony ambience outdoor", "wind on balcony"]),
+    ("ies pe balcon", ["balcony ambience outdoor", "outdoor birds"]),
+    ("ma duc pe balcon", ["balcony ambience outdoor"]),
+    ("privesc de pe balcon", ["balcony ambience outdoor", "city sounds distant"]),
+
+    # Ponton / lac
+    ("sunt pe ponton", ["lake water lapping", "dock water sounds", "lake birds"]),
+    ("ma uit la lac", ["lake water ambience", "water lapping shore"]),
+    ("langa lac", ["lake water ambience", "birds near water"]),
+    ("pe malul apei", ["river shore water", "water lapping"]),
+    ("sunt la malul", ["river shore water", "waves shore"]),
+
+    # Duș
+    ("fac dus", ["shower water running", "bathroom shower"]),
+    ("fac duș", ["shower water running", "bathroom shower"]),
+    ("sunt sub dus", ["shower water running"]),
+    ("am intrat la dus", ["shower water running", "bathroom echo"]),
+    ("ma spal", ["water running tap", "washing hands"]),
+
+    # Uscător de păr
+    ("folosesc uscatorul", ["hair dryer blowing", "hair dryer"]),
+    ("folosesc uscătorul", ["hair dryer blowing", "hair dryer"]),
+    ("ma usc pe par", ["hair dryer blowing"]),
+    ("usc parul", ["hair dryer blowing"]),
+
+    # Bucătărie
+    ("taie ceapa", ["chopping vegetables", "knife cutting board"]),
+    ("tai ceapa", ["chopping vegetables", "knife cutting board"]),
+    ("gatesc", ["cooking sizzling pan", "kitchen cooking"]),
+    ("fac mancare", ["cooking sizzling pan", "kitchen sounds"]),
+    ("prajesc", ["frying food sizzling"]),
+    ("pun ceapa la prajit", ["frying food sizzling oil"]),
+    ("spal vasele", ["washing dishes water", "kitchen sink water"]),
+    ("bag la cuptor", ["oven door closing", "kitchen timer"]),
+
+    # Pat / dormit
+    ("sunt in pat", ["bedroom quiet ambience", "quiet room"]),
+    ("m-am bagat in pat", ["bedroom quiet night", "sheets rustling"]),
+    ("ma pun in pat", ["bedroom quiet ambience", "pillow soft"]),
+    ("incerc sa adorm", ["bedroom quiet night", "breathing calm"]),
+    ("nu pot sa dorm", ["bedroom quiet night", "clock ticking"]),
+
+    # Tren / transport
+    ("sunt in tren", ["train interior ride", "train on tracks"]),
+    ("calatoresc cu trenul", ["train interior ride", "railway sounds"]),
+    ("sunt in metrou", ["subway metro interior", "underground train"]),
+    ("iau metroul", ["subway metro ambience"]),
+    ("sunt in autobuz", ["bus interior ride", "bus engine"]),
+    ("sunt in masina", ["car interior driving", "road noise"]),
+    ("conduc masina", ["car driving road", "engine hum"]),
+
+    # Natură / exterior
+    ("sunt in padure", ["forest ambience birds", "forest nature sounds"]),
+    ("merg prin padure", ["walking forest leaves", "forest birds"]),
+    ("am iesit la plimbare", ["park birds ambience", "outdoor walking"]),
+    ("sunt pe plaja", ["ocean waves beach", "beach shore"]),
+    ("sunt la mare", ["ocean waves sea", "seaside ambience"]),
+    ("sunt la munte", ["mountain wind nature", "mountain ambience"]),
+    ("urc pe munte", ["hiking mountain wind", "gravel walking"]),
+
+    # Oraș
+    ("sunt in oras", ["city street ambience", "city traffic"]),
+    ("merg pe strada", ["city street walking", "footsteps sidewalk"]),
+    ("stau la coada", ["crowd queue waiting", "people talking"]),
+
+    # Ploaie / vreme
+    ("ploua afara", ["rain outside window", "rain ambience"]),
+    ("a inceput ploaia", ["rain starting", "rain drops"]),
+    ("tunet si fulger", ["thunder lightning storm", "thunder rumble"]),
+    ("ninge afara", ["snow falling quiet", "winter wind"]),
+    ("e ceata afara", ["fog ambience mist", "fog horn distant"]),
+    ("e vant afara", ["wind blowing outdoor", "wind gusts"]),
+
+    # Animale
+    ("aud cainele", ["dog barking", "dog woofing"]),
+    ("pisica toarce", ["cat purring", "cat meowing"]),
+    ("aud pasari", ["birdsong singing", "birds chirping"]),
+    ("pasari dimineata", ["morning birds dawn chorus", "dawn birds singing"]),
+]
+
+# Word-level: cuvinte cheie românești → query-uri Freesound engleze
+_CONTEXT_KEYWORDS: dict[str, list[str]] = {
+    # ── Natură ──
+    "ploaie": ["rain ambience", "rain drops on leaves"],
+    "furtuna": ["thunderstorm rain", "thunder rumble"],
+    "tunet": ["thunder rumble", "distant thunder"],
+    "zapada": ["snow crunching walking", "winter cold"],
+    "vânt": ["wind blowing outdoor", "wind gusts trees"],
+    "padure": ["forest ambience nature", "forest birds singing"],
+    "plaja": ["ocean waves beach", "seaside ambience"],
+    "mare": ["ocean waves sea", "waves shore"],
+    "lac": ["lake water ambience", "water lapping"],
+    "apa": ["water stream creek", "flowing water"],
+    "munte": ["mountain wind nature", "mountain ambience"],
+    "rau": ["river flowing water", "river stream"],
+    "cascada": ["waterfall rushing water"],
+
+    # ── Oraș / transport ──
+    "oras": ["city ambience street", "city traffic background"],
+    "strada": ["city street ambience", "traffic cars passing"],
+    "trafic": ["traffic cars passing", "street vehicles"],
+    "metrou": ["subway metro interior", "underground train ride"],
+    "tren": ["train interior ride", "train on tracks"],
+    "autobuz": ["bus interior ride", "bus engine hum"],
+    "avion": ["airplane cabin interior", "airplane engine drone"],
+    "masina": ["car interior driving", "road noise car"],
+    "bicicleta": ["bicycle riding", "bike chain pedaling"],
+    "barca": ["boat rowing water", "paddle water splashing"],
+
+    # ── Acasă / interior ──
+    "bucatarie": ["kitchen cooking sounds", "pots pans clanking"],
+    "gatit": ["cooking sizzling pan", "frying food oil"],
+    "prajit": ["frying food sizzling", "oil crackling pan"],
+    "taiat": ["chopping vegetables cutting board", "knife chopping"],
+    "baie": ["bathroom shower water", "bathroom echo tap"],
+    "dus": ["shower water running", "bathroom shower"],
+    "duș": ["shower water running", "bathroom shower"],
+    "pat": ["bedroom quiet ambience", "sheets rustling"],
+    "canapea": ["living room quiet", "couch sitting"],
+    "birou": ["office ambience keyboard", "typing keyboard"],
+    "tastatura": ["keyboard typing", "mechanical keyboard"],
+    "uscator": ["hair dryer blowing", "hair dryer noise"],
+    "uscător": ["hair dryer blowing"],
+    "frigider": ["refrigerator hum", "kitchen fridge"],
+    "ventilator": ["fan spinning ambience", "electric fan"],
+    "masina spalat": ["washing machine cycle", "washing machine drum"],
+    "uscator rufe": ["tumble dryer running"],
+
+    # ── Animale ──
+    "caine": ["dog barking", "dog woofing happy"],
+    "pisica": ["cat purring content", "cat meowing"],
+    "pasari": ["birdsong singing", "birds chirping nature"],
+    "păsări": ["birdsong singing", "birds morning chorus"],
+    "greieri": ["crickets chirping night", "night insects"],
+    "broasca": ["frog croaking pond", "frogs calling night"],
+    "cal": ["horse galloping", "horse clip clop"],
+    "vaca": ["cow mooing farm", "cattle farm ambience"],
+    "gaina": ["chicken clucking", "rooster crowing"],
+    "oaie": ["sheep bleating", "sheep baa"],
+
+    # ── Cafenea / social ──
+    "cafea": ["coffee shop ambience", "cafe chatter"],
+    "bar": ["bar pub ambience", "pub crowd chatter"],
+    "restaurant": ["restaurant ambience dining", "restaurant chatter"],
+    "magazin": ["store ambience shop", "shopping mall background"],
+    "biblioteca": ["library quiet ambience", "library whispers"],
+    "cimitir": ["cemetery quiet wind", "quiet outdoor"],
+
+    # ── Activități ──
+    "scris": ["writing pen paper", "pencil scratching paper"],
+    "citit": ["pages turning book", "book page turning"],
+    "cantec": ["singing vocal music", "human singing"],
+    "pian": ["piano playing music", "piano melody"],
+    "chitara": ["guitar strumming", "acoustic guitar playing"],
+    "perie": ["brushing teeth", "toothbrush scrubbing"],
+    "machiaj": ["cosmetics makeup brush", "makeup applying"],
+    "parfum": ["perfume spray bottle", "spray mist"],
+    "curatenie": ["vacuum cleaner", "cleaning sweeping"],
+
+    # ── Timp / vreme ──
+    "noapte": ["night ambience quiet", "night crickets"],
+    "dimineata": ["morning birds dawn", "morning rooster birds"],
+    "dimineață": ["morning birds dawn chorus"],
+    "seara": ["evening ambience sunset", "evening birds"],
+    "vara": ["summer ambience insects", "summer cicadas"],
+    "iarna": ["winter cold wind", "snow crunching"],
+    "primavara": ["spring birds nature", "spring morning birds"],
+    "toamna": ["autumn wind leaves", "leaves rustling wind"],
+    "ploios": ["rain ambience continuous", "rain on roof"],
+    "innorat": ["cloudy wind ambience", "wind overcast"],
+    "insorit": ["sunny day birds", "birds cheerful singing"],
+    "ceata": ["fog ambience misty", "fog horn distant"],
+    "ceață": ["fog ambience misty"],
+
+    # ── Activități specifice ──
+    "alerg": ["running footsteps", "jogging footsteps fast"],
+    "inot": ["swimming pool splashing", "water splashing swimming"],
+    "dans": ["dancing music rhythm", "dance music"],
+    "joaca": ["playing children playground", "kids laughing playing"],
+    "meditez": ["meditation ambient calm", "singing bowl peaceful"],
+    "yoga": ["meditation peaceful ambient", "gentle breathing"],
+    "masaj": ["massage spa ambient", "relaxing spa music"],
+    "tatuaj": ["tattoo machine buzzing"],
+    "frizer": ["hair clipper buzzing", "barbershop scissors"],
+}
+
+
+def context_to_queries(text: str) -> list[str]:
+    """Extrage query-uri de căutare din textul conversației (în engleză).
+
+    Prioritate:
+    1. Detectare frază (propoziție întreagă) — rezultate mai precise
+    2. Detectare cuvânt cheie — acoperire mai largă
+    3. Niciun rezultat → returnează listă goală
+
+    Toate query-urile returnate sunt în limba engleză pentru Freesound.
+    """
+    text_lower = text.lower()
+    all_queries: list[str] = []
+
+    # 1. Detecție la nivel de frază (prioritate maximă)
+    for phrase, queries in _CONTEXT_PHRASES:
+        if phrase in text_lower:
+            all_queries.extend(queries)
+
+    if all_queries:
+        # Am găsit fraze — returnăm query-urile de la frază
+        return all_queries[:5]
+
+    # 2. Detecție la nivel de cuvânt cheie
+    for keyword, queries in _CONTEXT_KEYWORDS.items():
+        # Folosim word boundary pentru a evita potriviri parțiale
+        # (ex: "pad" nu trebuie să potrivească "padure")
+        if re.search(r'(?:^|\s)' + re.escape(keyword) + r'(?:\s|$|,|\.|!|\?)', text_lower):
+            all_queries.extend(queries)
+
+    return all_queries[:5]
+
+
+def context_to_query(text: str) -> str | None:
+    """Extrage un singur query de căutare din textul conversației.
+
+    Funcția legacy — preferă context_to_queries() pentru multi-search.
+    """
+    queries = context_to_queries(text)
+    if not queries:
+        return None
+    return random.choice(queries)
+
+
 def search_sounds(query: str, tags: list[str] | None = None,
-                  duration_max: int = 120, page_size: int = 5) -> list[dict]:
+                  duration_max: int = 120, page_size: int = 15) -> list[dict]:
     """Caută sunete pe Freesound.
 
     Args:
-        query: Text de căutare (ex: "rain", "cooking", "forest birds")
+        query: Text de căutare în engleză (ex: "rain", "cooking", "forest birds")
         tags: Tags opționale pentru filtrare
         duration_max: Durata maximă în secunde (default 120s)
         page_size: Câte rezultate să returneze (max 150)
 
     Returns:
-        Listă de dict-uri cu info despre sunete:
+        Listă de dict-uri cu info despre sunete (fără sunete de calitate slabă):
         [{id, name, username, license, preview_url, page_url, duration, tags}]
     """
     if not _API_KEY:
@@ -86,6 +370,8 @@ def search_sounds(query: str, tags: list[str] | None = None,
         "page_size": min(page_size, 30),
         "fields": "id,name,username,license,duration,tags,url,previews",
         "filter": f"duration:[0 TO {duration_max}]",
+        # Sortează după relevanță (scoring), nu după data încărcării
+        "sort": "rating_desc",
     }
 
     if tags:
@@ -195,164 +481,74 @@ def download_preview(preview_url: str, sound_id: int) -> str | None:
         return None
 
 
-# ── Mapare context → query de căutare ─────────────────────────────────────
-
-# Mapare de cuvinte cheie din conversație la query-uri Freesound.
-# Folosește română + engleză pentru acoperire maximă.
-_CONTEXT_KEYWORDS: dict[str, list[str]] = {
-    # Natură
-    "ploaie": ["rain", "raindrops"],
-    "rain": ["rain", "raindrops"],
-    "furtuna": ["thunderstorm"],
-    "storm": ["thunderstorm"],
-    "zapada": ["snow", "winter wind"],
-    "vapeur": ["wind", "forest wind"],
-    "padure": ["forest ambience", "birds forest"],
-    "forest": ["forest ambience", "birds forest"],
-    "plaja": ["ocean waves", "beach"],
-    "beach": ["ocean waves", "beach"],
-    "mare": ["ocean waves", "sea"],
-    "ocean": ["ocean waves"],
-    "lac": ["lake water", "nature"],
-    "lac": ["lake water", "nature"],
-    "apa": ["water stream", "creek"],
-    "apa": ["water stream", "creek"],
-    "munte": ["mountain wind", "nature"],
-    "mountain": ["mountain wind"],
-
-    # Oraș / transport
-    "oras": ["city ambience", "street"],
-    "city": ["city ambience"],
-    "trafic": ["traffic", "street"],
-    "metro": ["subway train", "metro"],
-    "metrou": ["subway train"],
-    "tren": ["train", "railway"],
-    "train": ["train ambience"],
-    "avion": ["airplane cabin"],
-    "airplane": ["airplane cabin"],
-    "masina": ["car interior", "driving"],
-    "driving": ["car driving", "road"],
-    "autobuz": ["bus interior"],
-
-    # Acasă / interior
-    "bucatarie": ["kitchen", "cooking"],
-    "kitchen": ["kitchen sounds", "cooking"],
-    "cooking": ["cooking", "frying", "chopping"],
-    "gatit": ["cooking", "frying"],
-    "prajit": ["frying food"],
-    "taiat": ["chopping vegetables"],
-    "baie": ["bathroom", "shower", "water tap"],
-    "bathroom": ["shower water", "bathroom"],
-    "dush": ["shower water"],
-    "duș": ["shower water"],
-    "shower": ["shower water"],
-    "pat": ["bedroom", "quiet room"],
-    "canapea": ["living room", "quiet"],
-    "birou": ["office ambience", "keyboard typing"],
-    "keyboard": ["keyboard typing"],
-    "tastatura": ["keyboard typing"],
-    "uscator": ["hair dryer"],
-    "uscat": ["hair dryer"],
-    "masina spalat": ["washing machine"],
-    "frigider": ["refrigerator hum"],
-    "ventilator": ["fan ambience"],
-    "telefon": ["phone vibration", "notification"],
-    "caine": ["dog barking"],
-    "pisica": ["cat purring"],
-    "câine": ["dog barking"],
-    "pisică": ["cat purrying"],
-    "pasari": ["birdsong", "birds singing"],
-    "păsări": ["birdsong"],
-    "cimpanzeu": ["jungle ambience"],
-    "gradina": ["garden ambience", "birds garden"],
-    "curte": ["backyard ambience"],
-
-    # Cafenea / social
-    "cafea": ["coffee shop ambience"],
-    "cafe": ["coffee shop ambience", "cafe"],
-    "bar": ["bar ambience", "pub sounds"],
-    "restaurant": ["restaurant ambience", "dining"],
-    "magazin": ["store ambience", "shopping mall"],
-    "biblioteca": ["library ambience", "quiet room"],
-    "cimitir": ["cemetery", "quiet", "wind"],
-
-    # Activități
-    "scrise": ["writing pen paper"],
-    "citit": ["pages turning", "book"],
-    "citire": ["pages turning", "book"],
-    "cantec": ["singing", "vocal music"],
-    "cântec": ["singing"],
-    "muzica": ["music playing"],
-    "pian": ["piano playing"],
-    "chitara": ["guitar strumming"],
-    "perie": ["brushing teeth"],
-    "machiaj": ["cosmetics", "makeup brush"],
-    "cosmetice": ["cosmetics sounds"],
-    "parfum": ["perfume spray"],
-    "umed": ["wet surface", "sponge"],
-    "curatenie": ["vacuum cleaner", "cleaning"],
-
-    # Context ambient general
-    "noapte": ["night ambience", "crickets night"],
-    "night": ["night ambience"],
-    "dimineata": ["morning birds", "birds dawn"],
-    "dimineață": ["morning birds"],
-    "seara": ["evening ambience", "sunset"],
-    "seră": ["evening ambience"],
-    "vara": ["summer ambience", "summer insects"],
-    "iarna": ["winter ambience", "cold wind"],
-    "primavara": ["spring birds", "spring"],
-    "toamna": ["autumn wind", "leaves rustling"],
-    "ploios": ["rain ambience", "rain sounds"],
-    "înnorat": ["cloudy ambience", "wind"],
-    "insorit": ["sunny day", "birds cheerful"],
-    "ceata": ["fog ambience", "mist"],
-    "ceață": ["fog ambience", "mist"],
-}
-
-
-def context_to_query(text: str) -> str | None:
-    """Extrage un query de căutare din textul conversației.
-
-    Analizează textul pentru cuvinte cheie și returnează un query
-    potrivit pentru Freesound, sau None dacă nu se potrivește nimic.
-    """
-    text_lower = text.lower()
-    matches = []
-
-    for keyword, queries in _CONTEXT_KEYWORDS.items():
-        if keyword in text_lower:
-            matches.extend(queries)
-
-    if not matches:
-        return None
-
-    # Alege un query aleatoriu din potriviri
-    return random.choice(matches)
-
-
 def search_for_context(text: str, max_duration: int = 60) -> dict | None:
-    """Caută un sunet potrivit pentru contextul conversației.
+    """Caută un sunet REAL și potrivit pentru contextul conversației.
+
+    Acceptă atât text românesc (detectare automată → query englez) cât și
+    query-uri englezești directe (când e apelat din voice.py cu preset names).
+
+    Strategie:
+    1. Generează query-uri din contextul românesc (traduse în engleză)
+    2. Dacă nu găsește potriviri românești, folosește textul direct ca query
+    3. Pentru fiecare query, caută pe Freesound (max 15 rezultate)
+    4. Filtrează sunetele de calitate slabă
+    5. Alege cel mai potrivit sunet (durată medie, relevant)
 
     Args:
-        text: Textul mesajului utilizatorului (sau a contextului)
+        text: Textul mesajului utilizatorului SAU un query englez direct
         max_duration: Durata maximă a sunetului în secunde
 
     Returns:
         Dict cu info sunet + preview_url + info autor/licență,
         sau None dacă nu găsește nimic.
     """
-    query = context_to_query(text)
-    if not query:
-        return None
+    queries = context_to_queries(text)
+    if not queries:
+        # Dacă textul conține doar cuvinte englezești (preset name),
+        # folosește-l direct ca query — voice.py trece query-uri engleze
+        if text and re.search(r'[a-zA-Z]{3,}', text):
+            queries = [text.strip()]
+        else:
+            return None
 
-    results = search_sounds(query, duration_max=max_duration, page_size=5)
-    if not results:
-        return None
+    # Încearcă fiecare query până găsește un sunet bun
+    for query in queries[:3]:  # Max 3 query-uri diferite
+        results = search_sounds(query, duration_max=max_duration, page_size=15)
+        if not results:
+            continue
 
-    # Alege cel mai scurt sunet relevant (evită clipuri lungi)
-    selected = min(results, key=lambda r: r.get("duration", 999))
-    return selected
+        # Filtrează sunetele de calitate slabă
+        good_results = [r for r in results if not _is_low_quality(r)]
+
+        if not good_results:
+            # Dacă toate sunt slabe, încearcă următorul query
+            continue
+
+        # Alege cel mai potrivit sunet:
+        # - preferă durata medie (5-30s) — suficient pentru ambient
+        # - exclude sunete prea scurte (<3s) sau prea lungi (>60s)
+        ideal_min = 3
+        ideal_max = min(30, max_duration)
+
+        # Sortează: preferă durata în intervalul ideal
+        def _score(s):
+            dur = s.get("duration", 0)
+            if ideal_min <= dur <= ideal_max:
+                return abs(dur - 10)  # prefer ~10s
+            elif dur < ideal_min:
+                return 1000 + dur  # penalizează prea scurt
+            else:
+                return 500 + dur  # penalizează prea lung
+
+        good_results.sort(key=_score)
+        selected = good_results[0]
+
+        # Verifică dacă fișierul poate fi descărcat
+        path = download_preview(selected["preview_url"], selected["id"])
+        if path:
+            return selected
+
+    return None
 
 
 def get_audio_for_context(text: str) -> tuple[str | None, dict | None]:
