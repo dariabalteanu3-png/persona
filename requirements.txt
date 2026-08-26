@@ -22,3 +22,4 @@ ormsgpack
 # rebuild-marker-c: 2026-08-06g (sunete ambientale mai naturale: _naturalize reduce tonurile pure/bipurile + inmoaie inaltele)
 # rebuild-marker-d: 2026-08-06h (contor parola: min_len 4 + gate inregistrare < 4 - erau ratate)
 # rebuild-marker-e: 2026-08-08 (pin openai/numpy/soundfile/google-genai la versiunile care merg local — repara LLM+fallback dupa reinstalarea completa declansata de soundfile)
+streamlit-javascript>=0.1.3

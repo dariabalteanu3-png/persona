@@ -142,3 +142,12 @@ def user_from_token(token):
 def destroy_session(token):
     if token:
         db.delete_session(token)
+
+def authenticate_from_username(username):
+    """Autentificare directa pe baza username-ului (pentru auto-login dispozitiv)."""
+    username = (username or "").strip().lower()
+    u = db.get_user_by_email(username)
+    if u:
+        return u
+    return None
+

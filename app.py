@@ -29,6 +29,7 @@ except Exception:  # noqa
 
 import db
 import auth
+import device
 import mailer
 import llm
 import voice
@@ -474,6 +475,20 @@ def _login_user(u):
     tok = auth.create_session(u["id"])
     st.session_state.session_token = tok
     _set_cookie_js(tok)
+    # Asociere dispozitiv (auto-login data viitoare)
+    try:
+        _did = st.session_state.get("_device_id")
+        if _did:
+            _ua = ""
+            try:
+                from streamlit_javascript import st_javascript as _sj
+                _ua = _sj("navigator.userAgent") or ""
+            except Exception:
+                pass
+            _dname = device.parse_device_info(_ua)
+            device.associate_device(_did, u["email"], _dname, _ua)
+    except Exception:
+        pass
 
 
 def _logout_user():
@@ -498,6 +513,55 @@ def _restore_session():
         if u:
             st.session_state.auth_user = u
             st.session_state.session_token = tok
+
+
+
+def _restore_device_session():
+    """Auto-login prin fingerprint-ul dispozitivului din browser."""
+    if st.session_state.get("auth_user"):
+        return
+    if st.session_state.get("_device_restored"):
+        return
+    st.session_state["_device_restored"] = True
+    try:
+        from streamlit_javascript import st_javascript
+    except ImportError:
+        return
+    # Genereaza device_id din caracteristicile browserului
+    _js = """
+    (function() {
+        var fp = navigator.userAgent + '|' + screen.width + 'x' + screen.height +
+                '|' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|' +
+                navigator.language + '|' + navigator.platform;
+        var h = 0;
+        for (var i = 0; i < fp.length; i++) {
+            h = ((h << 5) - h) + fp.charCodeAt(i);
+            h = h & h;
+        }
+        var did = Math.abs(h).toString(16).padStart(8,'0') +
+                  Math.abs(h*31).toString(16).padStart(8,'0');
+        localStorage.setItem('persona_device_id', did);
+        return did;
+    })();
+    """
+    device_id = st_javascript(_js)
+    if not device_id or not isinstance(device_id, str):
+        return
+    device_id = device_id.strip()
+    if not device_id:
+        return
+    st.session_state["_device_id"] = device_id
+    # Cauta contul asociat
+    try:
+        result = device.lookup_device(device_id)
+        if result and result.get("username"):
+            user = auth.authenticate_from_username(result["username"])
+            if user:
+                st.session_state.auth_user = auth._public(user)
+                tok = auth.create_session(user["id"])
+                st.session_state.session_token = tok
+    except Exception:
+        pass
 
 
 def _restore_theme():
@@ -3449,6 +3513,10 @@ def _show_db_unavailable():
 # ------------------------- sidebar -------------------------
 try:
     _restore_session()
+    try:
+        _restore_device_session()
+    except Exception:
+        pass
 except Exception as _e:  # noqa: DB indisponibilă — nu trebuie să doboare aplicația
     if _is_db_conn_error(_e):
         try:
@@ -6483,6 +6551,46 @@ def render_profil():
                     except Exception as _sq_err:
                         st.error("Eroare la salvare: %s" % str(_sq_err))
             st.markdown("---")
+
+# -- Dispozitive asociate (auto-login) ----------
+            st.markdown("---")
+            st.markdown("**Dispozitive asociate contului tau (auto-login)**")
+            st.caption(
+                "Aceste dispozitive se conecteaza automat la contul tau "
+                "fara sa mai tastezi parola. Poti elimina o dispozitie daca nu o mai folosesti."
+            )
+            try:
+                _devices = device.list_devices(user["email"])
+                if _devices:
+                    for _dev in _devices:
+                        _dev_name = _dev.get("device_name", "Dispozitiv") or "Dispozitiv"
+                        _dev_id = _dev.get("device_id", "")
+                        _last = _dev.get("last_seen", "")
+                        _cols = st.columns([3, 1])
+                        _cols[0].markdown(
+                            "**%s** (ultima accesare: %s)" % (_dev_name, _last or "necunoscut")
+                        )
+                        if _cols[1].button("Sterge", key="del_dev_%s" % _dev_id[:8]):
+                            device.remove_device(_dev_id)
+                            st.toast("Dispozitiv sters.")
+                            st.rerun()
+                else:
+                    st.info(
+                        "Niciun dispozitiv asociat inca. "
+                        "Dupa ce te loghezi de pe un dispozitiv, acesta va aparea aici."
+                    )
+            except Exception:
+                st.info("Nu pot afisa dispozitivele acum.")
+            _cur_dev_id = st.session_state.get("_device_id", "")
+            if _cur_dev_id:
+                st.caption("Dispozitivul curent: %s" % _cur_dev_id[:16] + "...")
+            if st.button("Deconecteaza toate dispozitivele (logout everywhere)",
+                         key="logout_all_devices", use_container_width=True):
+                try:
+                    device.remove_all_devices(user["email"])
+                    st.toast("Toate dispozitivele au fost deconectate.")
+                except Exception:
+                    st.error("Eroare la deconectare.")
 
 # -- Configuratie avansata (accesibila cu cititor de ecran) ----------
             with st.expander("Configurare avansata (secrete si baza de date)", expanded=False):
