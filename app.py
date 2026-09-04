@@ -971,6 +971,33 @@ def _render_login_register():
                 "Conturile create acum NU vor persista la restart. "
                 "Verifica Streamlit Secrets ca TURSO_URL si TURSO_TOKEN sunt setate."
             )
+        # --- Status LLM (ce provider AI functioneaza) ---
+        try:
+            from llm import provider_status as _llm_ps
+            _llm = _llm_ps()
+            _llm_parts = []
+            if _llm.get("HAS_GROQ"):
+                _llm_parts.append("Groq: da")
+            else:
+                _llm_parts.append("Groq: NU")
+            if _llm.get("HAS_CEREBRAS"):
+                _llm_parts.append("Cerebras: da")
+            else:
+                _llm_parts.append("Cerebras: NU")
+            if _llm.get("HAS_OPENROUTER"):
+                _llm_parts.append("OpenRouter: da")
+            else:
+                _llm_parts.append("OpenRouter: NU")
+            _llm_ok = _llm.get("HAS_GROQ") or _llm.get("HAS_CEREBRAS") or _llm.get("HAS_OPENROUTER")
+            if _llm_ok:
+                st.markdown("🟡 Chat AI: %s" % ", ".join(_llm_parts))
+            else:
+                st.warning(
+                    "🔴 Chat AI nu este configurat! "
+                    "Adauga GROQ_API_KEY, CEREBRAS_API_KEY sau OPENROUTER_API_KEY in Streamlit Secrets."
+                )
+        except Exception:
+            pass
         st.markdown(
             '<div style="background:#0f1a12;border:1px solid #1f5130;border-radius:10px;'
             'padding:.6rem .7rem;font-size:.78rem;color:#8fdca8;margin-bottom:.7rem">'
@@ -3485,10 +3512,18 @@ def absence_fragment():
 
 
 def _is_db_conn_error(e):
-    """True dacă excepția e o eroare de conexiune la baza de date."""
+    """True dacă excepția e o eroare de conexiune la baza de date (inclusiv Turso)."""
     name = type(e).__name__
     mod = type(e).__module__ or ""
-    return ("psycopg2" in mod) or name in ("OperationalError", "DatabaseError", "InterfaceError")
+    msg = str(e).lower()
+    return (
+        ("psycopg2" in mod)
+        or name in ("OperationalError", "DatabaseError", "InterfaceError")
+        or "requests" in mod
+        or name in ("ConnectionError", "ConnectTimeout", "ReadTimeout")
+        or "turso" in msg
+        or "timeout" in msg
+    )
 
 
 def _show_db_unavailable():
