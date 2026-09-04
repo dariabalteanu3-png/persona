@@ -74,3 +74,47 @@ def turso_stats():
         return db_turso.turso_stats()
     except Exception:
         return {"reads": 0, "writes": 0, "errors": 0}
+
+
+_active_backend = "mongomock"
+try:
+    _active_backend = "turso" if "create_user" in dir() and db_turso.turso_connected() else "mongomock"
+except Exception:
+    _active_backend = "mongomock"
+
+
+def get_active_backend():
+    """Returnează numele backend-ului activ (turso/mongomock)."""
+    return _active_backend
+
+
+def try_reconnect_turso():
+    """Încearcă reconectarea la Turso în timpul rulării.
+    
+    Dacă Turso răspunde, importă funcțiile Turso peste mongomock.
+    Returnează (ok: bool, message: str).
+    """
+    global _active_backend
+    import sys
+    
+    if not os.environ.get("TURSO_URL") or not os.environ.get("TURSO_TOKEN"):
+        return False, "TURSO_URL sau TURSO_TOKEN nu sunt setate in environment."
+    
+    try:
+        import db_turso
+        ok = db_turso.turso_ready()
+        if not ok:
+            return False, "Turso nu raspunde (toate incercarile au esuat). Verifica TURSO_URL si TURSO_TOKEN."
+        
+        # Turso e conectat — importăm funcțiile peste mongomock
+        import db_turso as _t
+        # Copiem toate funcțiile publice din db_turso în namespace-ul curent
+        for _name in dir(_t):
+            if not _name.startswith('_'):
+                globals()[_name] = getattr(_t, _name)
+        _active_backend = "turso"
+        print("[db] Reconectare Turso reusita! Backend: Turso (persistent)", file=sys.stderr)
+        return True, "Turso reconectat cu succes!"
+    except Exception as e:
+        print(f"[db] Reconectare Turso esuata: {type(e).__name__}: {e}", file=sys.stderr)
+        return False, f"Eroare: {type(e).__name__}: {str(e)[:100]}"

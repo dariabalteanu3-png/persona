@@ -3572,7 +3572,8 @@ with st.sidebar:
     st.markdown('<div class="app-tag">Personaje AI cu voce clonată</div>', unsafe_allow_html=True)
 
     
-    # --- DB backend indicator (live ping) ---
+    
+    # --- DB backend indicator (live ping + reconnect) ---
     try:
         import db_turso as _dbmod_sb
         if getattr(_dbmod_sb, "turso_connected", lambda: False)():
@@ -3588,6 +3589,24 @@ with st.sidebar:
         st.markdown(":green[**DB:** Turso (persistent)]")
     else:
         st.markdown(":red[**DB:** in-memory (datele NU persista)]")
+        # Buton de reconectare Turso
+        if os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"):
+            if st.button("Reconecteaza Turso", key="reconnect_turso_btn",
+                         help="Incearca sa se reconecteze la baza de date Turso."):
+                with st.spinner("Se reconecteaza la Turso..."):
+                    try:
+                        import db as _db_reconnect
+                        ok, msg = _db_reconnect.try_reconnect_turso()
+                        if ok:
+                            st.success(msg)
+                            st.toast("Turso reconectat!")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    except Exception as _re_err:
+                        st.error("Eroare: %s" % str(_re_err)[:200])
+        else:
+            st.caption("TURSO_URL sau TURSO_TOKEN lipsesc din Secrets.")
 
     if user:
         st.markdown(
