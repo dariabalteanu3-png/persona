@@ -52,11 +52,13 @@ GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 GROQ_STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3")
 
 # Cerebras — fallback automat când Groq e indisponibil (API compatibil OpenAI)
-CEREBRAS_TEXT_MODEL = os.environ.get("CEREBRAS_TEXT_MODEL", "llama-3.3-70b")
+# NOTE: gpt-oss-120b e modelul actual; llama-3.3-70b a fost retras de Cerebras
+CEREBRAS_TEXT_MODEL = os.environ.get("CEREBRAS_TEXT_MODEL", "gpt-oss-120b")
 CEREBRAS_BASE_URL = os.environ.get("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")
 
 # OpenRouter — al doilea fallback (agregator multi-modele, API compatibil OpenAI)
-OPENROUTER_TEXT_MODEL = os.environ.get("OPENROUTER_TEXT_MODEL", "deepseek/deepseek-chat-v3-0324:free")
+# NOTE: deepseek-chat-v3-0324:free a devenit pay-only; nemotron e gratuit și performant
+OPENROUTER_TEXT_MODEL = os.environ.get("OPENROUTER_TEXT_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
 # Timeout (sec) pentru apelurile de chat — evită blocarea la timeout-uri lungi

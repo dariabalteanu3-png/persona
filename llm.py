@@ -91,6 +91,20 @@ def _is_rate_limit(e):
     return "429" in m or "rate limit" in m or "rate_limit" in m or "too many requests" in m
 
 
+def _is_quota_or_payment(e):
+    """True dacă eroarea e de tip plată necesară / quota depășit.
+    Aceste erori NU se rezolvă cu retry — trebuie schimbat providerul imediat."""
+    m = str(e).lower()
+    return (
+        "payment_required" in m
+        or "payment required" in m
+        or "402" in m
+        or "quota exceeded" in m
+        or "insufficient_quota" in m
+        or "billing" in m
+    )
+
+
 # ---- rezervă FIABILĂ: Emergent (Claude/OpenAI) prin endpoint compatibil OpenAI ----
 _EMERGENT_MODEL = os.environ.get("EMERGENT_CHAT_MODEL", "claude-sonnet-4-6")
 _emergent_key_cache = None
@@ -220,6 +234,9 @@ def _groq_text(system, text):
         except Exception as e:  # noqa - Groq failed (bad key/model/quota)
             last_err = e
             _log.warning("groq attempt %d/3 failed: %s", attempt + 1, repr(e)[:200])
+            # Erori de plată/quota: nu mai retry, trecem direct la fallback
+            if _is_quota_or_payment(e):
+                return _reliable_fallback(system, text, _original_error=e)
             if _is_rate_limit(e) and attempt < 2:
                 time.sleep(3 * (attempt + 1))
                 continue
