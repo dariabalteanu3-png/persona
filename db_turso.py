@@ -43,10 +43,8 @@ _COLLECTIONS = [
 
 _session = requests.Session()
 
-
-# ---------------------------------------------------------------------------
-# Conexiune & SQL de bază
-# ---------------------------------------------------------------------------
+# Contor operațiuni — util pentru debug
+_op_count = {"read": 0, "write": 0, "error": 0}
 
 def _cell(value):
     t = value.get("type")
@@ -59,27 +57,58 @@ def _cell(value):
     return value.get("value")
 
 
-def _post(requests_list, timeout=20):
-    """Trimite o listă de cereri SQL către /v2/pipeline și întoarce rezultatele."""
+def _post(requests_list, timeout=30, retries=3):
+    """Trimite o listă de cereri SQL către /v2/pipeline cu retry logic.
+    
+    Retry pe: ConnectTimeout, ReadTimeout, ConnectionError, HTTP 429/500/502/503.
+    Nu face retry pe erori de autentificare (401) sau erori SQL (constraint violations).
+    """
+    import sys, time as _time
     if not _HTTP_URL or not TURSO_TOKEN:
         raise RuntimeError("TURSO_URL sau TURSO_TOKEN nu sunt setate")
-    resp = _session.post(
-        f"{_HTTP_URL}/v2/pipeline",
-        headers={"Authorization": f"Bearer {TURSO_TOKEN}"},
-        json={"requests": requests_list},
-        timeout=timeout,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"Turso HTTP {resp.status_code}: {resp.text[:200]}")
-    data = resp.json()
-    out = []
-    for item in data.get("results", []):
-        if item.get("type") == "error":
-            raise RuntimeError(item.get("error", {}).get("message", "Turso error"))
-        resp_item = item.get("response", {})
-        if resp_item.get("type") == "execute":
-            out.append(resp_item.get("result") or {})
-    return out
+    _last_err = None
+    for _attempt in range(1, retries + 1):
+        try:
+            resp = _session.post(
+                f"{_HTTP_URL}/v2/pipeline",
+                headers={"Authorization": f"Bearer {TURSO_TOKEN}"},
+                json={"requests": requests_list},
+                timeout=timeout,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                out = []
+                for item in data.get("results", []):
+                    if item.get("type") == "error":
+                        raise RuntimeError(item.get("error", {}).get("message", "Turso error"))
+                    resp_item = item.get("response", {})
+                    if resp_item.get("type") == "execute":
+                        out.append(resp_item.get("result") or {})
+                return out
+            # Retry pe erori tranzitorii (rate limit, server busy)
+            if resp.status_code in (429, 500, 502, 503, 504) and _attempt < retries:
+                _wait = _attempt * 3
+                print(f"[db] Turso HTTP {resp.status_code} (attempt {_attempt}/{retries}), retry în {_wait}s...",
+                      file=sys.stderr)
+                _time.sleep(_wait)
+                continue
+            # Eroare non-retry (401, 403, 400 etc.)
+            raise RuntimeError(f"Turso HTTP {resp.status_code}: {resp.text[:200]}")
+        except (requests.exceptions.ConnectTimeout,
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.ConnectionError) as _net_err:
+            _last_err = _net_err
+            if _attempt < retries:
+                _wait = _attempt * 2
+                print(f"[db] Turso network error ({type(_net_err).__name__}) "
+                      f"(attempt {_attempt}/{retries}), retry în {_wait}s...",
+                      file=sys.stderr)
+                _time.sleep(_wait)
+                continue
+            raise
+    # All retries exhausted
+    if _last_err:
+        raise _last_err
 
 
 def turso_connected():
@@ -87,16 +116,31 @@ def turso_connected():
     return bool(TURSO_URL and TURSO_TOKEN and _HTTP_URL)
 
 
+def turso_stats():
+    """Returnează statistici despre operațiunile DB curente."""
+    return {
+        "reads": _op_count["read"],
+        "writes": _op_count["write"],
+        "errors": _op_count["error"],
+    }
+
+
 def _exec(sql, params=None):
     params = params or []
     args = [_to_arg(p) for p in params]
-    _post([{"type": "execute", "stmt": {"sql": sql, "args": args}}])
+    _op_count["write"] += 1
+    _post([{"type": "execute", "stmt": {"sql": sql, "args": args}}], timeout=30, retries=3)
 
 
 def _fetch(sql, params=None):
     params = params or []
     args = [_to_arg(p) for p in params]
-    results = _post([{"type": "execute", "stmt": {"sql": sql, "args": args}}])
+    _op_count["read"] += 1
+    try:
+        results = _post([{"type": "execute", "stmt": {"sql": sql, "args": args}}], timeout=30, retries=3)
+    except Exception as _e:
+        _op_count["error"] += 1
+        raise
     result = results[0]
     cols = [c["name"] for c in result.get("cols", [])]
     rows = []
@@ -264,6 +308,8 @@ def _where(q):
 
 
 def _insert(coll, doc):
+    """Inserează/înlocuiește un document. Verifică scrisul cu SELECT după INSERT."""
+    import sys
     doc = dict(doc)
     if "id" not in doc or not doc.get("id"):
         doc["id"] = str(uuid.uuid4())
@@ -271,6 +317,16 @@ def _insert(coll, doc):
         f"INSERT OR REPLACE INTO t_{coll} (id, doc) VALUES (?, ?)",
         [doc["id"], json.dumps(doc, ensure_ascii=False)],
     )
+    # Verificare post-scriere: citim documentul înapoi ca să confirmăm că a fost salvat
+    _verify = _find_one(coll, {"id": doc["id"]})
+    if not _verify:
+        _op_count["error"] += 1
+        print(f"[db] EROARE CRITICĂ: _insert({coll}) a raportat succes dar SELECT "
+              f"nu găsește documentul id={doc['id']}!", file=sys.stderr)
+        raise RuntimeError(
+            f"Turso: inserarea în {coll} a eșuat silențios (id={doc['id']}). "
+            f"Datele NU au fost salvate."
+        )
     return doc
 
 
@@ -325,7 +381,7 @@ def _update(coll, q, update):
 def _delete(coll, q):
     ids = [d["id"] for d in _find(coll, q)]
     for _id in ids:
-        _exec("DELETE FROM t_{coll} WHERE id = ?".format(coll=coll), [_id])
+        _exec(f"DELETE FROM t_{coll} WHERE id = ?", [_id])
     return len(ids)
 
 
@@ -343,6 +399,8 @@ def get_config(name, default=None):
 
 def create_user(email, password_hash, name, verified=False,
                 security_question=None, security_answer_hash=None):
+    """Creează un utilizator nou în Turso cu verificare post-scriere."""
+    import sys
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
@@ -356,7 +414,9 @@ def create_user(email, password_hash, name, verified=False,
         "prefs": {},
         "created_at": _now(),
     }
-    return _insert("users", doc)
+    result = _insert("users", doc)
+    print(f"[db] create_user OK: email={email}, id={doc['id'][:8]}...", file=sys.stderr)
+    return result
 
 
 def get_user_by_email(email):

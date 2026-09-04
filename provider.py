@@ -60,7 +60,7 @@ OPENROUTER_TEXT_MODEL = os.environ.get("OPENROUTER_TEXT_MODEL", "deepseek/deepse
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
 # Timeout (sec) pentru apelurile de chat — evită blocarea la timeout-uri lungi
-LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "45"))
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "90"))
 
 _gemini = None
 _groq = None

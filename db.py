@@ -41,21 +41,36 @@ def _pg_reachable():
         return False
 
 
+import sys as _sys
+
 # Prioritate: Turso (baza nouă) → PostgreSQL (Neon) → memorie (mongomock).
 if os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"):
     import db_turso
     if db_turso.turso_ready():
         from db_turso import *            # noqa: F401, F403
-        from db_turso import get_config, _now  # noqa: F401
+        from db_turso import get_config, _now, turso_stats  # noqa: F401
+        print("[db] Backend activ: Turso (persistent)", file=_sys.stderr)
     elif os.environ.get("DATABASE_URL") and _pg_reachable():
         from db_pg import *               # noqa: F401, F403
         from db_pg import get_config, _now  # noqa: F401
+        print("[db] Backend activ: PostgreSQL (fallback)", file=_sys.stderr)
     else:
         from db_mg import *               # noqa: F401, F403
         from db_mg import get_config, _now  # noqa: F401
+        print("[db] Backend activ: mongomock IN-MEMORY (datele NU persistă!)", file=_sys.stderr)
 elif os.environ.get("DATABASE_URL") and _pg_reachable():
     from db_pg import *          # noqa: F401, F403
     from db_pg import get_config, _now  # noqa: F401
+    print("[db] Backend activ: PostgreSQL", file=_sys.stderr)
 else:
     from db_mg import *          # noqa: F401, F403
     from db_mg import get_config, _now  # noqa: F401
+    print("[db] Backend activ: mongomock IN-MEMORY (datele NU persistă!)", file=_sys.stderr)
+
+
+def turso_stats():
+    """Returnează statistici DB (doar pentru Turso, altfel goale)."""
+    try:
+        return db_turso.turso_stats()
+    except Exception:
+        return {"reads": 0, "writes": 0, "errors": 0}

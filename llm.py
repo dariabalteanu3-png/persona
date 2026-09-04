@@ -205,9 +205,9 @@ def _groq_text_simple(system, text):
 
 
 def _groq_text(system, text):
-    # retry scurt pe limita per-minut (429) înainte de a cădea pe rezervă
+    # retry cu backoff pe limita per-minut (429) sau erori tranzitorii
     last_err = None
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             resp = groq_client().chat.completions.create(
                 model=GROQ_TEXT_MODEL,
@@ -219,8 +219,9 @@ def _groq_text(system, text):
             return content
         except Exception as e:  # noqa - Groq failed (bad key/model/quota)
             last_err = e
-            if _is_rate_limit(e) and attempt == 0:
-                time.sleep(3)
+            _log.warning("groq attempt %d/3 failed: %s", attempt + 1, repr(e)[:200])
+            if _is_rate_limit(e) and attempt < 2:
+                time.sleep(3 * (attempt + 1))
                 continue
             return _reliable_fallback(system, text, _original_error=e)
 
@@ -420,8 +421,8 @@ def test_provider():
         return False, repr(e)[:200]
 
 
-def _run_reply(system, text, sid, tries=2, smart=False):
-    """Run a one-shot reply with a light automatic retry on transient failures."""
+def _run_reply(system, text, sid, tries=3, smart=False):
+    """Run a one-shot reply with exponential-backoff retry on transient failures."""
     last = None
     n = max(1, tries)
     for attempt in range(n):
@@ -431,8 +432,9 @@ def _run_reply(system, text, sid, tries=2, smart=False):
                 return out
         except Exception as e:  # noqa
             last = e
+            _log.warning("_run_reply attempt %d/%d failed: %s", attempt + 1, n, repr(e)[:200])
         if attempt < n - 1:
-            time.sleep(0.5)
+            time.sleep(1.0 * (2 ** attempt))  # 1s, 2s, 4s …
     if last:
         raise last
     return ""

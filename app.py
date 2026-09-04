@@ -3537,7 +3537,18 @@ with st.sidebar:
     st.markdown('<div class="app-tag">Personaje AI cu voce clonată</div>', unsafe_allow_html=True)
 
     
-    # --- DB backend indicator ---
+    # --- DB backend indicator (live ping) ---
+    try:
+        import db_turso as _dbmod_sb
+        if getattr(_dbmod_sb, "turso_connected", lambda: False)():
+            _dbmod_sb._post([
+                {"type": "execute", "stmt": {"sql": "SELECT 1 AS ok", "args": []}}
+            ], timeout=8, retries=1)
+            _db_backend_name = "Turso"
+        else:
+            _db_backend_name = "mongomock (in-memory)"
+    except Exception:
+        _db_backend_name = "mongomock (in-memory)"
     if "Turso" in _db_backend_name:
         st.markdown(":green[**DB:** Turso (persistent)]")
     else:
@@ -4371,7 +4382,12 @@ def render_chat(char):
         if _chat_config_error:
             st.error(_chat_config_error)
         else:
-            st.info("⚠️ Nu am reușit să răspund la ultimul mesaj. Apasă mai jos ca să încerc din nou.")
+            st.warning(
+                "Am încercat de mai multe ori să trimit mesajul către furnizorul AI, "
+                "dar nu am primit răspuns. Este posibil să fie o problemă temporară "
+                "de conexiune sau furnizorul să fie supraîncarcat. "
+                "Apasă butonul de mai jos ca să încerc din nou."
+            )
         # Afișează detalii despre eroare (vizibil mereu când chatul eșuează)
         _last_err = st.session_state.get("_last_chat_error", "")
         if _last_err:
@@ -4425,7 +4441,7 @@ def render_chat(char):
                 st.session_state["_chat_config_error"] = llm.provider_configuration_error()
                 st.error(
                     st.session_state.get("_chat_config_error")
-                    or "Tot nu a mers. Mai încearcă în câteva secunde. 💛"
+                    or "Nu am primit raspuns nici de aceasta data. Furnizorul AI poate fi temporar indisponibil. Verifica conexiunea la internet si incearca din nou in cateva secunde."
                 )
             else:
                 _reply = " ".join(_parts)
@@ -6499,23 +6515,40 @@ def render_profil():
                 st.toast("✅ Setări salvate!")
             st.markdown("---")
             st.markdown("---")
-                                    # -- Status bază de date ----------
+                                    # -- Status baza de date ----------
             try:
                 import db_turso as _dbmod
                 if getattr(_dbmod, "turso_connected", lambda: False)():
-                    _db_backend = "Turso (persistent)"
-                    _db_icon = "🟢"
+                    # Ping live Turso
+                    try:
+                        _dbmod._post([
+                            {"type": "execute", "stmt": {"sql": "SELECT 1 AS ok", "args": []}}
+                        ], timeout=10, retries=1)
+                        _stats = getattr(_dbmod, "turso_stats", lambda: {})()
+                        _db_backend = "Turso (persistent)"
+                        _db_icon = "🟢"
+                        _db_ops = "Reads: %d | Writes: %d | Errors: %d" % (
+                            _stats.get("reads", 0), _stats.get("writes", 0), _stats.get("errors", 0)
+                        )
+                    except Exception as _ping_err:
+                        _db_backend = "Turso (eroare: %s)" % type(_ping_err).__name__
+                        _db_icon = "🟠"
+                        _db_ops = "EROARE: Turso nu raspunde!"
                 else:
-                    _db_backend = "mongomock (in-memory — datele NU persistă)"
+                    _db_backend = "mongomock (in-memory - datele NU persista)"
                     _db_icon = "🔴"
+                    _db_ops = "Conturile NU sunt salvate permanent!"
             except Exception:
-                _db_backend = "mongomock (in-memory — datele NU persistă)"
+                _db_backend = "mongomock (in-memory - datele NU persista)"
                 _db_icon = "🔴"
-            st.caption("%s **Bază de date:** %s" % (_db_icon, _db_backend))
-            if "in-memory" in _db_backend:
+                _db_ops = ""
+            st.markdown("%s **Baza de date:** %s" % (_db_icon, _db_backend))
+            if _db_ops:
+                st.markdown("*%s*" % _db_ops)
+            if "in-memory" in _db_backend or "eroare" in _db_backend.lower():
                 st.warning(
-                    "Atenție: datele contului NU persistă la restart! "
-                    "Asigură-te că TURSO_URL și TURSO_TOKEN sunt setate corect în Streamlit Secrets."
+                    "Atentie: datele contului NU persista la restart! "
+                    "Verifica TURSO_URL si TURSO_TOKEN in Streamlit Secrets."
                 )
 
 # -- Secțiune întrebare secretă (securizare cont) ----------
