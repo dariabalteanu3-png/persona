@@ -2183,6 +2183,24 @@ def haptic(ms=15):
     )
 
 
+def _audio_fmt(data, default="audio/wav"):
+    """Detecție MIME din bytes audio pentru st.audio().
+
+    Pe platforme fără ffmpeg un motor poate returna MP3 (fallback fără conversie
+    WAV); playerul primește atunci MIME-ul corect (audio/mpeg) în loc de
+    audio/wav greșit → eroarea de redare „format necunoscut\" dispare.
+    Sniffing: RIFF…WAVE → wav | ID3/0xFFEx → mp3 | altceva → default
+    """
+    try:
+        if data and data[:4] == b"RIFF":
+            return "audio/wav"
+        if data and (data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0)):
+            return "audio/mpeg"
+    except Exception:
+        pass
+    return default
+
+
 def _voice_preview_cached(sample_bytes, text, sample_name):
     """Generează un preview vocal și îl memorează în sesiune, ca să nu consume
     cota gratuită Hugging Face de fiecare dată (aceeași mostră + text = o singură generare)."""
@@ -3831,7 +3849,7 @@ def render_create():
         if edit_char and edit_char.get("voice_sample_b64"):
             st.info("Se va folosi mostra audio deja salvată pentru acest personaj.")
             try:
-                st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format="audio/wav")
+                st.audio(base64.b64decode(edit_char["voice_sample_b64"]), format=_audio_fmt(base64.b64decode(edit_char["voice_sample_b64"])))
             except Exception:  # noqa
                 st.warning("Mostra salvată nu poate fi previzualizată.")
         else:
@@ -3859,7 +3877,7 @@ def render_create():
                             clone_file.getvalue(),
                             "Salut! Aceasta este vocea mea. Îți place cum sună?",
                             clone_file.name)
-                    st.audio(_prev, format="audio/wav")
+                    st.audio(_prev, format=_audio_fmt(_prev))
                     st.markdown("Dacă îți place cum sună, apasă „Salvează personajul”. "
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
@@ -4301,19 +4319,19 @@ def render_chat(char):
                 _media_kind = m.get("media_kind", "")
                 if _media_kind == "ambient":
                     st.markdown(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
                 elif _media_kind == "ambient_pure":
                     st.markdown(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
                 elif _media_kind == "audio_file":
                     st.markdown(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
                 elif _media_kind == "song":
                     # Păstrează comportamentul existent pentru melodii
                     pass
                 else:
                     st.markdown("🎤 Mesaj vocal")
-                    st.audio(base64.b64decode(m["audio_b64"]), format="audio/wav")
+                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
             if m.get("media_kind") == "song" and m.get("song_b64"):
                 st.markdown(f"🎵 {m.get('song_name', 'melodie')}")
                 st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
@@ -4401,7 +4419,7 @@ def render_chat(char):
                             voice_vol=st.session_state.get(f"sleepvvol_{mid}", 1.0),
                         )
                         st.session_state["autoplay_mid"] = None
-                    st.audio(st.session_state[f"audio_{mid}"], format="audio/wav")
+                    st.audio(st.session_state[f"audio_{mid}"], format=_audio_fmt(st.session_state[f"audio_{mid}"]))
                     st.download_button(
                         "⬇️ Descarcă WAV",
                         data=st.session_state[f"audio_{mid}"],
@@ -4413,7 +4431,7 @@ def render_chat(char):
                 cue = st.session_state.get(f"sfxcue_{m['id']}", "ambianță")
                 st.markdown(f"🎧 {cue}")
                 ap = st.session_state.get("ambient_play_mid") == m["id"]
-                st.audio(st.session_state[f"sfx_{m['id']}"], format="audio/wav", autoplay=ap)
+                st.audio(st.session_state[f"sfx_{m['id']}"], format=_audio_fmt(st.session_state[f"sfx_{m['id']}"]), autoplay=ap)
                 if ap:
                     st.session_state["ambient_play_mid"] = None
 
@@ -4575,7 +4593,7 @@ def render_chat(char):
                         st.warning("Nu am putut genera mostra acum.")
             _tp = st.session_state.get(f"toneprev_{char['id']}")
             if _tp:
-                st.audio(_tp, format="audio/wav")
+                st.audio(_tp, format=_audio_fmt(_tp))
                 if st.session_state.pop(f"toneprev_play_{char['id']}", False):
                     _play_voice_ambient([_tp], None, "toneprev_" + char["id"][:6])
 
@@ -4907,7 +4925,7 @@ def render_chat(char):
                         except Exception:  # noqa
                             _data = None
                 if _data:
-                    st.audio(_data, format="audio/wav")
+                    st.audio(_data, format=_audio_fmt(_data))
             
             # Trimite sunetul în conversație
             if st.button("📤 Trimite sunetul în conversație", 
@@ -5169,7 +5187,7 @@ def render_chat(char):
         with st.chat_message("user", avatar="🧑"):
             if user_audio:
                 st.markdown("🎤 Mesaj vocal")
-                st.audio(base64.b64decode(user_audio), format="audio/wav")
+                st.audio(base64.b64decode(user_audio), format=_audio_fmt(base64.b64decode(user_audio)))
             st.markdown(prompt)
         haptic(15)
         play_sound("send", char.get("notif_theme"))
@@ -5237,7 +5255,7 @@ def render_chat(char):
                         f'}})();</script>',
                         height=0,
                     )
-                    st.audio(_scene_amb, format="audio/wav")
+                    st.audio(_scene_amb, format=_audio_fmt(_scene_amb))
 
             # ── MESAJELE TEXT (una câte una, cu pauze naturale) ────────────────
             for _i, _p in enumerate(parts):
@@ -5333,7 +5351,7 @@ def render_call(char):
             unsafe_allow_html=True,
         )
         if st.session_state.get("ringtone_audio"):
-                st.audio(st.session_state["ringtone_audio"], format="audio/wav", autoplay=True)
+                st.audio(st.session_state["ringtone_audio"], format=_audio_fmt(st.session_state["ringtone_audio"], default="audio/mp3"), autoplay=True)
         cc = st.columns([1, 2, 1])
         with cc[1]:
             a, b = st.columns(2)
@@ -5407,7 +5425,7 @@ def render_call(char):
             # voce + fundal ambiental continuu sub ea (fiabil pe telefon)
             _play_voice_ambient([_ab], st.session_state.get(f"sfx_{aid}"), aid,
                                 voice_vol=st.session_state.get("call_volume", 100) / 100.0)
-            st.audio(_ab, format="audio/wav")  # control de reascultare (fără autoplay dublu)
+            st.audio(_ab, format=_audio_fmt(_ab))  # control de reascultare (fără autoplay dublu)
 
     st.markdown("🎤 Apasă microfonul și vorbește, apoi oprește înregistrarea. Prima dată, telefonul "
                "îți va cere permisiunea pentru microfon — apasă „Permite”.")
@@ -6364,7 +6382,7 @@ def render_profil():
             if st.session_state.get("_settings_audio"):
                 if st.session_state.pop("_play_settings_audio", False):
                     _play_voice_ambient([st.session_state["_settings_audio"]], None, "settings_read")
-                st.audio(st.session_state["_settings_audio"], format="audio/wav")
+                st.audio(st.session_state["_settings_audio"], format=_audio_fmt(st.session_state["_settings_audio"]))
             st.markdown("---")
             st.markdown("#### 🗑️ Vocile mele")
             _voice_chars = [
@@ -6785,9 +6803,6 @@ def render_profil():
                     _toml_lines.append("")
                     _toml_lines.append("# === TTS ===")
                     _toml_lines.append('USE_EDGE_TTS = "1"')
-                    _toml_lines.append("")
-                    _toml_lines.append("# === FREESOUND (sunete reale) ===")
-                    _toml_lines.append('# FREESOUND_API_KEY = "o6PS..."')
                     _toml_lines.append("")
                     _toml_lines.append("# === BAZA DE DATE (Turso) ===")
                     if _turso_url:
