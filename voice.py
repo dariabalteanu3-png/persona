@@ -51,6 +51,40 @@ _FISH_API_KEY = (
 _FISH_MODEL = os.environ.get("FISH_AUDIO_MODEL", "s2.1-pro-free")
 _FISH_BASE_URL = os.environ.get("FISH_AUDIO_BASE_URL", "https://api.fish.audio")
 
+# ── Config ElevenLabs (motor de voce PRIORITAR, când cheia e configurată) ────
+# Cheia se citește din ELEVENLABS_API_KEY (alias acceptat: ELEVEN_API_KEY).
+# În Streamlit Cloud: Settings → Secrets — NU se pune în cod/GitHub.
+# Dacă ELEVENLABS_API_KEY nu este configurat, aplicația folosește Fish Audio
+# (metoda anterioară), apoi Chatterbox — exact ca înainte.
+# ELEVENLABS_VOICE_ID (opțional): dacă e setat, se folosește VOCEA PREDEFINITĂ
+# cu acel ID (fără clonare) — util pe planul gratuit al ElevenLabs.
+_ELEVEN_API_KEY = (
+    os.environ.get("ELEVENLABS_API_KEY", "")
+    or os.environ.get("ELEVEN_API_KEY", "")
+).strip()
+_ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
+_ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+_ELEVEN_BASE_URL = "https://api.elevenlabs.io"
+# Voci predefinite folosite automat când contul e pe plan gratuit (clonarea nu e
+# permisă) — fiecare personaj primește o voce DETERMINISTĂ diferită (derivată
+# din mostra lui), ca să NU exună toate aceeași voce. Overridable prin
+# ELEVENLABS_VOICE_IDS = "id1,id2,...". Toate ID-urile de mai jos sunt voci
+# gratuite livrate implicit cu orice cont ElevenLabs.
+_ELEVEN_DEFAULT_VOICES = [
+    v.strip() for v in os.environ.get("ELEVENLABS_VOICE_IDS", "").split(",")
+    if v.strip()
+] or [
+    "EXAVITQu4vr4xnSDxMaL",  # Sarah — matură, liniștitor
+    "cgSgspJ2msm6clMCkdW9",  # Jessica — jucăușă, caldă
+    "XrExE9yKIg1WjnnlVkGX",  # Matilda — calmă, profesională
+    "Xb7hH8MSUJpSbSDYk0k2",  # Alice — clară, prietenoasă
+    "hpp4J3VqNfWAUOO0d1Us",  # Bella — caldă, luminoasă
+    "cjVigY5qzO86Huf0OWal",  # Eric — neted, sigur
+    "IKne3meq5aSn9XLyUdCD",  # Charlie — profund, energic
+    "JBFqnCBsd6RMkjVDRZzb",  # George — cald, narator
+]
+_eleven_voice_cache: dict = {}   # hash mostră → voice_id clonat pe ElevenLabs
+
 _voice_samples: dict = {}   # voice_id → (sample_bytes, suffix, ref_text)
 _client = None
 _fallback_clients: dict = {}
@@ -58,6 +92,10 @@ _fallback_clients: dict = {}
 
 class VoiceGenerationError(RuntimeError):
     """Eroare user-facing de la serviciul de generare vocală."""
+
+
+class _ElevenCloningUnavailable(VoiceGenerationError):
+    """Planul contului nu permite Instant Voice Cloning (ex: planul gratuit)."""
 
 
 def _get_client():
@@ -355,14 +393,285 @@ def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_te
     return _fish_generate_json(text, sample_bytes, sample_name, ref_text)
 
 
-def _call_primary(text, sample_bytes, suffix, exaggeration=0.5, cfg_weight=0.5, reference_text=None):
-    """Metoda principală: Fish Audio → la eșec, Chatterbox/HF (cu rezervele lui)."""
+def _call_primary(
+    text, sample_bytes, suffix,
+    exaggeration=0.5, cfg_weight=0.5, reference_text=None,
+    stability=0.5, similarity_boost=0.75, style=0.0,
+):
+    """Lanț motor voce: ElevenLabs (dacă e configurat) → Fish Audio → Chatterbox/HF."""
+    if elevenlabs_available():
+        try:
+            return _eleven_generate(
+                text, sample_bytes, suffix,
+                stability=stability, similarity_boost=similarity_boost, style=style,
+            )
+        except VoiceGenerationError as exc:
+            print(f"[voice] ElevenLabs indisponibil, trec la Fish Audio: {exc}")
     if fish_audio_available():
         try:
             return _fish_generate(text, sample_bytes, suffix, reference_text=reference_text)
         except VoiceGenerationError as exc:
             print(f"[voice] Fish Audio indisponibil, trec la Chatterbox: {exc}")
+    # Mapare parametri ElevenLabs-style → Chatterbox (identică cu cea anterioară)
+    exaggeration = _clamp01(style * 1.5 + 0.25, 0.5)
+    cfg_weight = _clamp01(similarity_boost, 0.75)
     return _call_chatterbox_space(text, sample_bytes, suffix, exaggeration, cfg_weight)
+
+
+def _clamp01(val, default):
+    try:
+        return max(0.0, min(1.0, float(val)))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+# ── Generare prin ElevenLabs (motorul principal când cheia e configurată) ────
+# Fluxul:
+#   1) dacă ELEVENLABS_VOICE_ID e setat → se folosește acea voce predefinită;
+#   2) altfel clonăm mostra personajului cu Instant Voice Cloning:
+#      POST /v1/voices/add (cache în memorie, cu nume determinist
+#      "Persona-<hash>" ca să nu duplicăm voci la fiecare restart);
+#   3) generarea folosește POST /v1/text-to-speech/{voice_id} cu modelul
+#      eleven_multilingual_v2 (suportă limba română) și returnează audio PCM
+#      care este împachetat în WAV, compatibil cu tot restul aplicației.
+
+_ELEVEN_MIME = {
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg", ".flac": "audio/flac",
+}
+
+
+def _eleven_default_voice_for(sample_bytes):
+    """Voce predefinită deterministă pentru un personaj (din hash-ul mostrei lui).
+   cela face ca același personaj să aibă ACEEAȘI voce la fiecare generare, dar
+    personaje diferite să sune diferit."""
+    if not sample_bytes:
+        return _ELEVEN_DEFAULT_VOICES[0]
+    h = hashlib.sha256(sample_bytes).digest()
+    return _ELEVEN_DEFAULT_VOICES[h[0] % len(_ELEVEN_DEFAULT_VOICES)]
+
+
+def elevenlabs_available():
+    """True când cheia ElevenLabs este configurată (motorul principal activ)."""
+    return bool(_ELEVEN_API_KEY and os.environ.get("ELEVENLABS_ENABLED", "1") != "0")
+
+
+def _eleven_error_message(resp):
+    try:
+        data = resp.json()
+    except Exception:
+        return (resp.text or "")[:200] or str(resp.status_code)
+    if isinstance(data, dict):
+        detail = data.get("detail") or data.get("message") or data.get("error")
+        if isinstance(detail, dict):
+            return str(detail.get("message") or detail)[:200]
+        return str(detail or data)[:200]
+    return str(data)[:200]
+
+
+def _eleven_existing_voice(clone_name):
+    """Caută o voce deja creată pe contul ElevenLabs cu numele determinist dat."""
+    try:
+        resp = requests.get(
+            f"{_ELEVEN_BASE_URL}/v1/voices",
+            headers={"xi-api-key": _ELEVEN_API_KEY},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            for v in ((resp.json() or {}).get("voices") or []):
+                if v.get("name") == clone_name:
+                    return v.get("voice_id")
+    except Exception:
+        pass
+    return None
+
+
+def _eleven_pcm_to_wav(pcm, sample_rate=44100):
+    """Împachetează PCM brut (output_format=pcm_44100: 16-bit mono 44.1kHz fără header)
+    într-un container WAV valid pentru playerele aplicației."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(int(sample_rate))
+        wf.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _eleven_clone_voice(sample_bytes, suffix):
+    """Creează (sau reutilizează) o voce clonată pe ElevenLabs din mostra personajului.
+
+    Returnează voice_id-ul clonat sau ridică VoiceGenerationError (ceea ce declanșează
+    automat fallback-ul către Fish Audio). Pe planul gratuit Instant Voice Cloning nu
+    este disponibil — mesajul de eroare explică asta clar utilizatorului.
+    """
+    if not sample_bytes:
+        raise VoiceGenerationError(
+            "Mostra audio lipsește pentru clonarea vocii ElevenLabs. "
+            "Setează ELEVENLABS_VOICE_ID în Secrets sau adaugă o mostră personajului."
+        )
+    k = hashlib.sha256(sample_bytes).hexdigest()[:24]
+    cached = _eleven_voice_cache.get(k)
+    if cached:
+        return cached
+
+    # Deja clonată la un restart anterior? Căutăm după numele determinist.
+    clone_name = "Persona-" + hashlib.sha256(sample_bytes).hexdigest()[:12]
+    vid = _eleven_existing_voice(clone_name)
+    if not vid:
+        mime = _ELEVEN_MIME.get((suffix or ".wav").lower(), "audio/wav")
+        try:
+            resp = requests.post(
+                f"{_ELEVEN_BASE_URL}/v1/voices/add",
+                headers={"xi-api-key": _ELEVEN_API_KEY},
+                data={
+                    "name": clone_name,
+                    "description": "Voce clonata pentru aplicatia Persona",
+                },
+                files={"files": (f"reference{suffix or '.wav'}", sample_bytes, mime)},
+                timeout=120,
+            )
+        except requests.RequestException as exc:
+            raise VoiceGenerationError(f"Nu mă pot conecta la ElevenLabs: {exc}") from exc
+        if resp.status_code not in (200, 201):
+            msg = _eleven_error_message(resp)
+            low = msg.lower()
+            if resp.status_code in (401, 403) or "permission" in low or "cloning" in low:
+                raise _ElevenCloningUnavailable(
+                    "ElevenLabs nu permite clonarea vocii pe planul tău actual. "
+                    "Ca să clonezi voci proprii îți trebuie plan Starter (5 USD/lună) "
+                    "pe elevenlabs.io, SAU lasă cheia neconfigurată ca să revii la "
+                    "Fish Audio/Chatterbox, SAU setează ELEVENLABS_VOICE_ID în Secrets "
+                    "cu ID-ul unei voci predefinite de pe elevenlabs.io (merge și pe gratis)."
+                )
+            raise VoiceGenerationError(
+                f"ElevenLabs a refuzat clonarea vocii ({resp.status_code}): {msg}"
+            )
+        vid = (resp.json() or {}).get("voice_id")
+        if not vid:
+            raise VoiceGenerationError("ElevenLabs nu a returnat voice_id după clonare.")
+    _eleven_voice_cache[k] = vid
+    return vid
+
+
+def _eleven_generate(text, sample_bytes, suffix="reference.wav",
+                     stability=0.5, similarity_boost=0.75, style=0.0):
+    """Generează WAV cu ElevenLabs (eleven_multilingual_v2, suportă româna).
+
+    Dacă ELEVENLABS_VOICE_ID e configurat, se folosește acea voce predefinită
+    (funcționează și pe planul gratuit); altfel clonăm mostra personajului.
+    Returnează bytes WAV sau ridică VoiceGenerationError → fallback Fish/Chatterbox.
+    """
+    if _ELEVEN_VOICE_ID:
+        vid = _ELEVEN_VOICE_ID
+    else:
+        try:
+            vid = _eleven_clone_voice(sample_bytes, suffix)
+        except _ElevenCloningUnavailable:
+            # Plan gratuit → fiecare personaj primește o voce predefinită diferită,
+            # aleasă determinist din contenul mostrei (același personaj = aceeași voce).
+            vid = _eleven_default_voice_for(sample_bytes)
+            print("[voice] ElevenLabs: plan fară clonare → voce predefinită", vid)
+
+    payload = {
+        "text": text,
+        "model_id": _ELEVEN_MODEL,
+        "voice_settings": {
+            "stability": _clamp01(stability, 0.5),
+            "similarity_boost": _clamp01(similarity_boost, 0.75),
+            "style": _clamp01(style, 0.0),
+            "use_speaker_boost": True,
+        },
+    }
+
+    # Formatul de ieșire depinde de plan: WAV (pcm_44100) e doar Pro+; pe planuri
+    # mai scăzute (inclusiv FREE) se folosește mp3. Încercăm WAV mai întâi și
+    # cadem automat pe MP3 când contul nu îl permite. Returnăm OBLIGATORIU bytes
+    # WAV ca tot restul aplicației (st.audio, autosave în DB) să rămână valid;
+    # MP3 este convertit local cu ffmpeg dacă e disponibil, altfel e trimis
+    # ca atare (playerele browser pot citi mp3 din data-URI audio/wav prin sniffing).
+    used_fmt = None
+    msg = ""
+    resp = None
+    for out_fmt in ("pcm_44100", "mp3_44100_128"):
+        try:
+            resp = requests.post(
+                f"{_ELEVEN_BASE_URL}/v1/text-to-speech/{vid}",
+                headers={"xi-api-key": _ELEVEN_API_KEY, "Content-Type": "application/json"},
+                params={"output_format": out_fmt},
+                json=payload,
+                timeout=180,
+            )
+        except requests.RequestException as exc:
+            raise VoiceGenerationError(f"Nu mă pot conecta la ElevenLabs: {exc}") from exc
+        if resp.status_code == 200:
+            used_fmt = out_fmt
+            break
+        msg = _eleven_error_message(resp)
+        low = msg.lower()
+        # Formatul nu e permis pe acest plan → încercăm următorul (mp3).
+        if "output format" in low and out_fmt == "pcm_44100":
+            continue
+        # Vocea (cache-uită / predefinită) a fost ștearsă sau e invalidă?
+        if resp.status_code in (400, 401, 404, 422) and not _ELEVEN_VOICE_ID and sample_bytes:
+            print(f"[voice] ElevenLabs voice invalid ({vid}), re-clonez: {msg}")
+            k = hashlib.sha256(sample_bytes).hexdigest()[:24]
+            _eleven_voice_cache.pop(k, None)
+            try:
+                vid = _eleven_clone_voice(sample_bytes, suffix)
+            except _ElevenCloningUnavailable:
+                vid = _eleven_default_voice_for(sample_bytes)
+            continue  # reîncercăm cu vocea nouă (ambele formate din nou)
+        raise VoiceGenerationError(
+            f"ElevenLabs a returnat eroare ({resp.status_code}): {msg}"
+        )
+
+    if used_fmt is None:
+        raise VoiceGenerationError(
+            f"ElevenLabs a returnat eroare ({resp.status_code}): {msg}"
+        )
+
+    raw = resp.content
+    if not raw:
+        raise VoiceGenerationError("ElevenLabs a returnat un răspuns audio gol.")
+    if used_fmt == "pcm_44100":
+        return _eleven_pcm_to_wav(raw)
+    # mp3_44100_128 → WAV local (dacă există ffmpeg), altfel mp3 brut
+    wav = _mp3_to_wav(raw)
+    return wav if wav else bytes(raw)
+
+
+def _mp3_to_wav(mp3_bytes, sample_rate=44100):
+    """Convertește MP3 → mono WAV 16-bit cu ffmpeg (dacă e disponibil pe sistem).
+    Returnează bytes WAV sau None (utilizatorul primește mp3 brut ca fallback)."""
+    import shutil
+    import subprocess
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    tmp_in = None
+    try:
+        tmp_in = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp_in.write(mp3_bytes)
+        tmp_in.close()
+        out = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", tmp_in.name,
+             "-ac", "1", "-ar", str(sample_rate), "-sample_fmt", "s16",
+             "-f", "wav", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+        if out.returncode == 0 and out.stdout and bytes(out.stdout[:4]) == b"RIFF":
+            # ffmpeg scris pe pipe nu poate rescrie dimensiunile din header → le reparăm
+            return _repair_wav_header(bytes(out.stdout))
+    except Exception:  # noqa
+        pass
+    finally:
+        try:
+            if tmp_in and os.path.exists(tmp_in.name):
+                os.unlink(tmp_in.name)
+        except OSError:
+            pass
+    return None
 
 
 # ── Generare prin Hugging Face Space ─────────────────────────────────────────
@@ -561,8 +870,10 @@ def _numpy_to_wav(audio_np, sample_rate):
     return buf.getvalue()
 
 
-def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
-    """Generează audio pentru un voice_id salvat, folosind Space-ul HF."""
+def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5,
+              stability=0.5, similarity_boost=0.75, style=0.0):
+    """Generează audio pentru un voice_id salvat, folosind motorul activ (ElevenLabs
+    → Fish Audio → Chatterbox)."""
     info = _voice_samples.get(voice_id)
     if not info:
         raise VoiceGenerationError(
@@ -571,15 +882,24 @@ def _generate(text, voice_id, exaggeration=0.5, cfg_weight=0.5):
         )
     sample_bytes, suffix = info[0], info[1]
     ref_text = info[2] if len(info) > 2 else ""
-    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight, reference_text=ref_text)
+    return _call_primary(
+        text, sample_bytes, suffix, exaggeration, cfg_weight,
+        reference_text=ref_text,
+        stability=stability, similarity_boost=similarity_boost, style=style,
+    )
 
 
-def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5, reference_text=None):
+def _generate_preview(text, sample_bytes, sample_name, exaggeration=0.5, cfg_weight=0.5,
+                      reference_text=None, stability=0.5, similarity_boost=0.75, style=0.0):
     """Generează un preview direct din bytes (înainte de salvarea personajului)."""
     suffix = Path(str(sample_name or "reference.wav")).suffix.lower()
     if suffix not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
         suffix = ".wav"
-    return _call_primary(text, sample_bytes, suffix, exaggeration, cfg_weight, reference_text=reference_text)
+    return _call_primary(
+        text, sample_bytes, suffix, exaggeration, cfg_weight,
+        reference_text=reference_text,
+        stability=stability, similarity_boost=similarity_boost, style=style,
+    )
 
 
 # ── Normalizare text ─────────────────────────────────────────────────────────
@@ -703,18 +1023,29 @@ def text_to_speech(
             "și încarcă din nou mostra audio."
         )
     spoken = expressify(text) if expressive else (text or "...")
-    # Mapare parametri ElevenLabs-style → Chatterbox
-    exaggeration = max(0.0, min(1.0, float(style) * 1.5 + 0.25))
-    cfg_weight = max(0.0, min(1.0, float(similarity_boost)))
-    return _generate(spoken, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight)
+    # Parametri ElevenLabs-style, trimiși unmistre și motorului activ.
+    # Maparea ElevenLabs-style → Chatterbox (exaggeration/cfg) se face în _call_primary.
+    return _generate(
+        spoken, voice_id,
+        stability=_clamp01(stability, 0.5),
+        similarity_boost=_clamp01(similarity_boost, 0.75),
+        style=_clamp01(style, 0.0),
+    )
 
 
-def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav"):
+def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_name="reference.wav",
+                               stability=0.5, similarity_boost=0.75, style=0.0):
     """Generează un preview direct din mostră (înainte de salvarea personajului).
     `reference_text` (transcrierea mostrei) îmbunătățește clonarea Fish Audio,
-    dar e opțional — Chatterbox nu necesită transcriere.
+    dar e opțional — Chatterbox/ElevenLabs nu necesită transcriere.
     """
-    return _generate_preview(expressify(text), sample_bytes, sample_name, reference_text=reference_text)
+    return _generate_preview(
+        expressify(text), sample_bytes, sample_name,
+        reference_text=reference_text,
+        stability=_clamp01(stability, 0.5),
+        similarity_boost=_clamp01(similarity_boost, 0.75),
+        style=_clamp01(style, 0.0),
+    )
 
 
 

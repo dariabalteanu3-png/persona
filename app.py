@@ -6767,7 +6767,14 @@ def render_profil():
                     else:
                         _toml_lines.append('# GROQ_API_KEY = "gsk_..."')
                     _toml_lines.append("")
-                    _toml_lines.append("# === FISH AUDIO (optional) ===")
+                    _toml_lines.append("# === MOTOR VOCE: ELEVENLABS (prioritar deasupra Fish Audio) ===")
+                    _toml_lines.append("# Cheia de la https://elevenlabs.io (Profile → API Keys). Merge pe plan gratuit")
+                    _toml_lines.append("# dacă folosești o voce predefinită (ELEVENLABS_VOICE_ID); clonarea vocilor")
+                    _toml_lines.append("# proprii cere plan Starter (5 USD/lună).")
+                    _toml_lines.append('# ELEVENLABS_API_KEY = "sk_..."')
+                    _toml_lines.append('# ELEVENLABS_VOICE_ID = "..."   # opțional: voce predefinită (merge pe gratis)')
+                    _toml_lines.append("")
+                    _toml_lines.append("# === FISH AUDIO (fallback când ElevenLabs lipsește/eșuează) ===")
                     _toml_lines.append('# FISH_API_KEY = "sk-fish-..."')
                     _toml_lines.append("")
                     _toml_lines.append("# === HUGGING FACE (optional) ===")
@@ -6807,13 +6814,15 @@ def render_profil():
                         _openrouter_st = "activ" if _status.get("HAS_OPENROUTER") else "nu e setat"
                         _turso_st = "activ" if os.environ.get("TURSO_URL") else "nu e setat"
                         _fish_st = "activ" if os.environ.get("FISH_API_KEY") or os.environ.get("FISH_AUDIO_API_KEY") else "nu e setat"
+                        _eleven_st = "activ" if (os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_API_KEY")) else "nu e setat"
                         st.markdown(
                             "- **Groq (chat AI):** %s\n"
                             "- **Cerebras (fallback):** %s\n"
                             "- **OpenRouter (fallback):** %s\n"
                             "- **Baza de date Turso:** %s\n"
-                            "- **Fish Audio (voce):** %s" % (
-                                _groq_st, _cerebras_st, _openrouter_st, _turso_st, _fish_st
+                            "- **ElevenLabs (motor voce):** %s\n"
+                            "- **Fish Audio (voce fallback):** %s" % (
+                                _groq_st, _cerebras_st, _openrouter_st, _turso_st, _eleven_st, _fish_st
                             )
                         )
                     except Exception:
