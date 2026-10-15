@@ -4615,9 +4615,97 @@ def _freesound_for_prompt(preset_name, duration=6.0):
             return None
 
 
+def _eleven_sound_effect(text, duration=20.0, prompt_influence=0.45):
+    """Generează un peisaj sonor ambiental cu ElevenLabs Sound Generation
+    (motorul principal de ambient, ca și pentru voce).
+
+    Returnează bytes WAV sau ridică VoiceGenerationError → schema de fallback
+    (Freesound → DSP local) intra automat. Rezultatele sunt cachu-uite pe disc
+    (/tmp), ca aceeași scenă să nu fie regenerată la fiecare mesaj.
+    """
+    if not elevenlabs_available() or os.environ.get("AMBIENT_ELEVEN", "1") == "0":
+        raise VoiceGenerationError("ElevenLabs ambient nu este configurat/activ.")
+    norm = " ".join(str(text or "").lower().split())[:600]
+    if not norm:
+        raise VoiceGenerationError("Prompt ambiental lipsă.")
+    key = hashlib.sha256(("amb:" + norm + ":" + str(min(22, max(3, int(duration))))).encode()).hexdigest()[:32]
+    d = "/tmp/persona_ambient_cache"
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:  # noqa
+        pass
+    fp = os.path.join(d, key + ".wav")
+    try:
+        if os.path.exists(fp) and os.path.getsize(fp) > 1000:
+            with open(fp, "rb") as f:
+                return f.read()
+    except Exception:  # noqa
+        pass
+    resp = requests.post(
+        f"{_ELEVEN_BASE_URL}/v1/sound-generation",
+        headers={"xi-api-key": _ELEVEN_API_KEY},
+        params={"output_format": "mp3_44100_128"},
+        json={
+            "text": norm,
+            "duration_seconds": min(22, max(3, int(duration))),
+            "prompt_influence": max(0.0, min(1.0, prompt_influence)),
+            "with_looping": True,
+        },
+        timeout=120,
+    )
+    if resp.status_code != 200:
+        raise VoiceGenerationError(
+            f"ElevenLabs Sound a eșuat ({resp.status_code}): {_eleven_error_message(resp)}"
+        )
+    raw = resp.content
+    if not raw:
+        raise VoiceGenerationError("ElevenLabs Sound a returnat un sunet gol.")
+    # MP3 → mono WAV ca tot restul aplicației (st.audio, player) să-l redea la fel.
+    wav = _mp3_to_wav(raw, sample_rate=22050)
+    if not wav:
+        try:
+            import numpy as np
+            import soundfile as sf
+            data, srate = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+            data = np.asarray(data, dtype=np.float32)
+            if getattr(data, "ndim", 1) > 1:
+                data = data.mean(axis=1)
+            target = 22050
+            if int(srate) != target:
+                tgt_len = int(round(len(data) * target / srate))
+                xp = np.linspace(0, 1, len(data), endpoint=False)
+                xq = np.linspace(0, 1, tgt_len, endpoint=False)
+                data = np.interp(xq, xp, data).astype(np.float32)
+            peak = float(np.max(np.abs(data))) or 1.0
+            data = data / peak * 0.85
+            wf_buf = io.BytesIO()
+            with wave.open(wf_buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(target)
+                wf.writeframes(np.int16(np.clip(data, -1, 1) * 32767).tobytes())
+            wav = wf_buf.getvalue()
+        except Exception:  # noqa
+            wav = bytes(raw)   # mp3 brut — playerii browser îl recunosc din sniffing
+    try:
+        with open(fp, "wb") as f:
+            f.write(wav)
+    except Exception:  # noqa
+        pass
+    return wav
+
+
 def sound_effect(prompt, duration=6.0, prompt_influence=0.45):
-    """Returnează un sunet ambient — Freesound (real) cu fallback la DSP local."""
+    """Returnează un sunet ambient — ElevenLabs (motor principal), apoi
+    Freesound (real) cu fallback la DSP local."""
     text = str(prompt or "").lower()
+    # Motorul principal: ElevenLabs Sound Generation (dacă e configurat).
+    try:
+        _el = _eleven_sound_effect(prompt, duration=duration, prompt_influence=0.45)
+        if _el:
+            return _el
+    except Exception:  # noqa — cadem liniștit la Freesound/DSP
+        pass
     # Cale rapidă: dacă primim EXACT numele unui preset, îl folosim direct
     _exact = text.strip()
     if _exact in AMBIENT_PRESET_NAMES:

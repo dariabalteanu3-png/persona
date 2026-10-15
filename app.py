@@ -3864,7 +3864,8 @@ def render_create():
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     st.error(f"Nu am putut genera exemplul acum: {_e}")
-        st.markdown("ElevenLabs — motorul principal de voce, vorbire în română "
+        st.markdown("ElevenLabs — motorul principal de voce și de sunete "
+                   "ambientale, vorbire în română "
                    "(funcționează și pe planul gratuit, cu voci predefinite). "
                    "Fish Audio — clonarea vocii proprii — rămâne ca rezervă "
                    "automată, apoi Chatterbox.")
