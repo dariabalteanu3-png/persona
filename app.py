@@ -3690,7 +3690,7 @@ def render_create():
         st.markdown(
             '<div class="hero"><h1>Creează un <span class="accent">personaj</span></h1>'
             "<p>Dă-i un nume, o personalitate și un scenariu. Încarcă o mostră audio "
-            "pentru a-i clona vocea în română cu Fish Audio.</p></div>",
+            "pentru a-i da voce în română cu ElevenLabs.</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -3864,8 +3864,10 @@ def render_create():
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     st.error(f"Nu am putut genera exemplul acum: {_e}")
-        st.markdown("Fish Audio — clonare vocală în română (metoda principală). "
-                   "Chatterbox rămâne ca rezervă automată.")
+        st.markdown("ElevenLabs — motorul principal de voce, vorbire în română "
+                   "(funcționează și pe planul gratuit, cu voci predefinite). "
+                   "Fish Audio — clonarea vocii proprii — rămâne ca rezervă "
+                   "automată, apoi Chatterbox.")
 
     st.session_state.setdefault("cf_stab", 0.5)
     st.session_state.setdefault("cf_sim", 0.75)
@@ -3907,7 +3909,7 @@ def render_create():
                 voice_name = clone_name.strip()
                 # Testăm mostra — dar reutilizăm preview-ul dacă userul a apăsat deja „Ascultă vocea”.
                 try:
-                    with st.spinner("Testez mostra cu Fish Audio (prima generare poate dura 1-2 minute)..."):
+                    with st.spinner("Testez mostra cu ElevenLabs (prima generare poate dura sub un minut)..."):
                         preview = _voice_preview_cached(
                             sample_bytes,
                             "Salut! Aceasta este vocea personajului meu.",
@@ -5790,7 +5792,7 @@ def render_gallery():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată în română prin Fish Audio. Alege un șablon de mai jos sau apasă "
+            "răspunsul cu voce în română prin ElevenLabs. Alege un șablon de mai jos sau apasă "
             "<b>＋ Personaj nou</b>.</p></div>",
             unsafe_allow_html=True,
         )
@@ -6267,7 +6269,7 @@ def render_personaje():
         st.markdown(
             '<div class="hero"><h1>Dă viață unui <span class="accent">personaj</span>.</h1>'
             "<p>Creează personaje AI cu personalitate proprie, discută cu ele și ascultă-le "
-            "răspunsul cu vocea clonată în română prin Fish Audio. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
+            "răspunsul cu voce în română prin ElevenLabs. Apasă <b>＋ Personaj nou</b> de mai sus.</p></div>",
             unsafe_allow_html=True,
         )
 
