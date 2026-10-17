@@ -3922,6 +3922,57 @@ def render_create():
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
                     _show_error_detail("Nu am putut genera exemplul acum", _e)
+
+        # ── Diagnostic VOCE & SERVER — direct în rubrică, vizibil (nu într-un expander) ──
+        try:
+            import shutil as _shutil
+            import sys as _sys
+            _diag_rows = [
+                "Python server: %d.%d.%d" % _sys.version_info[:3],
+                "ffmpeg (conversie WAV): %s" % (
+                    "✅ prezent" if _shutil.which("ffmpeg") else
+                    "❌ LIPSĂ — packages.txt NU a fost instalat de Streamlit (redemorează cu container nou)"),
+            ]
+            try:
+                _diag_rows.append("Backend DB: %s" % db.get_active_backend())
+            except Exception:  # noqa
+                _diag_rows.append("Backend DB: necunoscut")
+            for _kk in ("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "FISH_API_KEY",
+                        "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY",
+                        "HF_TOKEN", "TURSO_URL", "TURSO_TOKEN"):
+                _diag_rows.append("%s: %s" % (_kk, "setată ✅" if os.environ.get(_kk) else "LIPSĂ ❌ (adaug-o în Streamlit Secrets)"))
+            try:
+                _diag_rows.append("Motor voce activ: %s" % (
+                    "ElevenLabs" if voice.elevenlabs_available() else
+                    ("Fish Audio" if voice.fish_audio_available() else "Chatterbox (HF)")))
+            except Exception as _dve:  # noqa
+                _diag_rows.append("Motor voce: verificare eșuată (%s)" % type(_dve).__name__)
+            st.markdown("**🔧 Diagnostic voce & server (rulează acum, pe serverul aplicației):**")
+            st.code("\n".join(_diag_rows), language="text")
+            if st.button("▶️ Rulează testul complet de voce", key="cf_diag_tts", use_container_width=True):
+                try:
+                    with st.spinner("Testez lanțul complet de voce..."):
+                        _tst = None
+                        if clone_file is not None and clone_file.getvalue():
+                            _tst = voice.text_to_speech_from_sample(
+                                "Test de diagnostic al vocii.", clone_file.getvalue(),
+                                None, clone_file.name)
+                        elif edit_char and edit_char.get("voice_sample_b64"):
+                            voice.register_character_voice(edit_char)
+                            _tst = voice.text_to_speech(
+                                "Test de diagnostic al vocii.", edit_char["voice_id"],
+                                **_tts_kwargs(edit_char))
+                    if _tst is not None:
+                        st.success("✅ Lanțul de voce FUNCȚIONEAZĂ pe acest moment (audio generat mai jos):")
+                        st.audio(_tst, format=_audio_fmt(_tst))
+                    else:
+                        st.error("Nicio mostră disponibilă pentru test — încarcă mai întâi o mostră vocală.")
+                except Exception as _e:
+                    _show_error_detail(
+                        "Testul complet de voce a eșuat — iată cauza exactă", _e)
+        except Exception as _diag_err:  # noqa: diagnosticul NU trebuie să strice vreodată formularul
+            st.caption("Diagnostic indisponibil momentan: %s" % str(_diag_err)[:120])
+
         st.markdown("ElevenLabs — motorul principal de voce și de sunete "
                    "ambientale, vorbire în română "
                    "(funcționează și pe planul gratuit, cu voci predefinite). "
