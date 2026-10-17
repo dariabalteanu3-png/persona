@@ -2175,6 +2175,31 @@ def _voice_error_msg(e):
     return f"Nu am putut reda vocea acum: {e}"
 
 
+def _show_error_detail(title, exc):
+    """Afișează CAUZA COMPLETĂ a unei erori de voce/salvare în interfață:
+    - mesajul scurt imediat (st.error),
+    - plus un expander cu textul întreg (toate motoarele încercate + motivul
+      fiecare + traceback) ca să poată fi copiat și trimis ca diagnoză.
+    NU blochează fluxul — doar expune informația."""
+    import traceback as _tb
+    _msg = str(exc if not isinstance(exc, (str, bytes)) else exc)
+    if isinstance(_msg, bytes):
+        _msg = _msg.decode("utf-8", "replace")
+    st.error(f"{title}: {_msg[:300]}")
+    try:
+        if isinstance(exc, BaseException):
+            tb_text = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+        else:
+            tb_text = ""
+    except Exception:  # noqa
+        tb_text = ""
+    with st.expander("🔍 Vezi detaliile complete ale erorii (apasă aici → copiază → trimite-mi)"):
+        _full = (_msg or "(fără mesaj)")
+        if tb_text:
+            _full += "\n\n--- traceback ---\n" + tb_text
+        st.code(_full, language="text")
+
+
 def haptic(ms=15):
     st.components.v1.html(
         f"<script>try{{window.parent.navigator.vibrate&&window.parent.navigator.vibrate({ms});"
@@ -3881,7 +3906,7 @@ def render_create():
                     st.markdown("Dacă îți place cum sună, apasă „Salvează personajul”. "
                                "Dacă nu, încarcă altă mostră.")
                 except Exception as _e:
-                    st.error(f"Nu am putut genera exemplul acum: {_e}")
+                    _show_error_detail("Nu am putut genera exemplul acum", _e)
         st.markdown("ElevenLabs — motorul principal de voce și de sunete "
                    "ambientale, vorbire în română "
                    "(funcționează și pe planul gratuit, cu voci predefinite). "
@@ -3943,13 +3968,13 @@ def render_create():
                         "Vocea clonată va funcționa când serviciul gratuit revine (în ~24h)."
                     )
                 except Exception as _ve2:  # noqa: BL001 — salvarea NU se blochează niciodată de testul de preview
-                    st.warning(
-                        f"Personajul se salvează, dar testul vocii a eșuat neașteptat: "
-                        f"{type(_ve2).__name__}: {str(_ve2)[:200]} "
-                        "Mostra e salvată oricum — reia testul cu „Ascultă vocea” mai târziu."
+                    _show_error_detail(
+                        "Personajul se salvează, dar testul vocii a eșuat neașteptat "
+                        "(mostra e salvată oricum — reia testul cu „Ascultă vocea” mai târziu)",
+                        _ve2,
                     )
             except Exception as e:  # noqa
-                st.error(f"Nu am putut pregăti vocea: {e}")
+                _show_error_detail("Nu am putut pregăti vocea", e)
                 return
 
         data = {
@@ -4414,7 +4439,7 @@ def render_chat(char):
                                 maybe_ambient(char, mid, m["content"])
                         st.session_state["autoplay_mid"] = mid
                     except Exception as e:  # noqa
-                        st.error(_voice_error_msg(e))
+                        _show_error_detail("Nu am putut reda vocea acum", e)
                 if st.session_state.get(f"audio_{mid}"):
                     if st.session_state.get("autoplay_mid") == mid:
                         # redare fiabilă pe telefon + fundal ambiental sub voce (dacă există)
@@ -4561,7 +4586,7 @@ def render_chat(char):
                         _m["content"], char["voice_id"], **tts_kwargs)
                     st.session_state["autoplay_mid"] = _gv
                 except Exception as _e:  # noqa
-                    _voice_error_msg(_e)  # marchează dacă s-au terminat creditele (banner clar)
+                    _show_error_detail("Nu am putut genera vocea mesajului", _e)  # ERA INVIZIBILĂ înainte
             st.rerun()
 
     prompt = st.chat_input(f"Scrie-i lui {char['name']}...")
