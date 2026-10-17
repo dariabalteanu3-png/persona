@@ -3893,6 +3893,21 @@ def render_create():
         )
         if clone_file is not None:
             st.success("✅ Mostra a fost încărcată.")
+            # Redare LOCALĂ imediată (fără rețea/motoare TTS) — utilizatorul aude
+            # direct fișierul încărcat, înainte de orice test cu motoarele.
+            try:
+                _raw = clone_file.getvalue()
+                if _raw:
+                    st.markdown(
+                        "📼 Mostra ta **%s** (%d KB) — redare directă:" % (
+                            clone_file.name, len(_raw) // 1024)
+                    )
+                    st.audio(_raw, format=_audio_fmt(_raw))
+                else:
+                    st.warning("Fișierul pare gol (0 KB) — reîncarcă o mostră audio validă.")
+            except Exception as _raw_err:  # noqa: nu blochează fluxul
+                st.warning("Nu pot reda fișierul aici (browserul tău poate nu suportă formatul), "
+                           "dar poți continua cu testul de mai jos: %s" % str(_raw_err)[:120])
             if st.button("🔊 Ascultă vocea (verifică înainte de salvare)",
                          key="cf_voice_preview", use_container_width=True):
                 try:
