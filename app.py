@@ -3942,6 +3942,12 @@ def render_create():
                         f"Personajul se salvează, dar nu am putut testa vocea acum: {_ve} "
                         "Vocea clonată va funcționa când serviciul gratuit revine (în ~24h)."
                     )
+                except Exception as _ve2:  # noqa: BL001 — salvarea NU se blochează niciodată de testul de preview
+                    st.warning(
+                        f"Personajul se salvează, dar testul vocii a eșuat neașteptat: "
+                        f"{type(_ve2).__name__}: {str(_ve2)[:200]} "
+                        "Mostra e salvată oricum — reia testul cu „Ascultă vocea” mai târziu."
+                    )
             except Exception as e:  # noqa
                 st.error(f"Nu am putut pregăti vocea: {e}")
                 return

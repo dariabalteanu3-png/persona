@@ -414,12 +414,18 @@ def _call_primary(
         except VoiceGenerationError as exc:
             _errors.append("ElevenLabs: %s" % exc)
             print(f"[voice] ElevenLabs indisponibil, trec la Fish Audio: {exc}")
+        except Exception as exc:  # noqa: BL001 — orice defect divergent NU trebuie să blocheze lanțul
+            _errors.append("ElevenLabs (eroare neașteptată %s): %s" % (type(exc).__name__, str(exc)[:200]))
+            print(f"[voice] ElevenLabs erorare neașteptată, trec la Fish Audio: {type(exc).__name__}: {exc}")
     if fish_audio_available():
         try:
             return _fish_generate(text, sample_bytes, suffix, reference_text=reference_text)
         except VoiceGenerationError as exc:
             _errors.append("Fish Audio: %s" % exc)
             print(f"[voice] Fish Audio indisponibil, trec la Chatterbox: {exc}")
+        except Exception as exc:  # noqa: BL001
+            _errors.append("Fish Audio (eroare neașteptată %s): %s" % (type(exc).__name__, str(exc)[:200]))
+            print(f"[voice] Fish Audio eroare neașteptată, trec la Chatterbox: {type(exc).__name__}: {exc}")
     # Mapare parametri ElevenLabs-style → Chatterbox (identică cu cea anterioară)
     exaggeration = _clamp01(style * 1.5 + 0.25, 0.5)
     cfg_weight = _clamp01(similarity_boost, 0.75)
@@ -427,6 +433,11 @@ def _call_primary(
         return _call_chatterbox_space(text, sample_bytes, suffix, exaggeration, cfg_weight)
     except VoiceGenerationError as exc:
         _errors.append("Chatterbox: %s" % exc)
+        raise VoiceGenerationError(
+            "Toate motoarele de voce au eșuat — " + "\n・ ".join(_errors)
+        ) from exc
+    except Exception as exc:  # noqa: BL001
+        _errors.append("Chatterbox (eroare neașteptată %s): %s" % (type(exc).__name__, str(exc)[:200]))
         raise VoiceGenerationError(
             "Toate motoarele de voce au eșuat — " + "\n・ ".join(_errors)
         ) from exc
