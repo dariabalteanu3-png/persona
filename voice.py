@@ -393,6 +393,73 @@ def _fish_generate(text, sample_bytes, sample_name="reference.wav", reference_te
     return _fish_generate_json(text, sample_bytes, sample_name, ref_text)
 
 
+def _emotion_profile(text):
+    """Detectează emoția DIN textul de spus (ro, fără diacritice).
+    Returnează (nume, stability, style) sau None. Emoția se AUZIDE în voce:
+    «sunt supărată» → voce mai tensionată și mai variată; «plâng» → voce
+    frântă, instabilă; «haha» → voce vie, veselă; «și la șoptit» → voce blândă.
+    Se se procesează prin PARAMETRI (stabilitate/stil ElevenLabs) — modelul
+    multilingual preia emoția din texte și le executa natural cu setările exprimate."""
+    t = str(text or "").lower()
+    import unicodedata as _ud
+    t = "".join(c for c in _ud.normalize("NFKD", t) if not _ud.combining(c))
+    _RULES = (
+        # (nume, stability, style, regex-uri pe cuvinte cheie)
+        ("plans", 0.14, 0.60, (
+            r"\b(plang|plange|planga\b|plangu\b)",
+            r"\blacrimi\b", r"\bimi doare inima\b", r"\bvai de mine\b",
+            r"\bsarman(?:ea|a|l)\b")),
+        ("suprear", 0.20, 0.72, (
+            r"\bsup[aãă]r(?:at|at[a-z]{0,3})\b", r"\benerv[a-z]{0,4}\b",
+            r"\bfuri(?:e|osa|os[a-z]{0,3})\b", r"\bm-ai supra(?:rat)\b",
+            r"\btaci(?: odat[a-z]?)?\b")),
+        ("ras", 0.28, 0.80, (
+            r"\bhah(?:a+)\b", r"\bhihi\b", r"\bihi\b", r"\bhohote\b",
+            r"\brâd de mine\b", r"\bimi place rau de\b", r"\bzămbesc\b")),
+        ("soptit", 0.50, 0.38, (
+            r"\b(?:soptit|soptire|soptesc)\b",
+            r"urech", r"\blini\u0219tit\b")),
+        ("excitat", 0.26, 0.70, (
+            r"\bwow\b", r"\bin sfarsit\b", r"\bincredibil\b",
+            r"\byay\b", r"\bunbelievable\b")),
+        ("tender", 0.50, 0.34, (
+            r"\bte iubesc\b", r"\bte pup\b", r"\bpupic\b",
+            r"\bdragostea mea\b")),
+        ("nervos", 0.18, 0.66, (
+            r"\bnervos[a-z]{0,3}\b", r"\bpanic[a-z]{0,3}\b", r"\bneliniștit\b")),
+    )
+    for info in _RULES:
+        name, stab, style, pats = info
+        for p in pats:
+            if re.search(p, t):
+                return (name, stab, style)
+    return None
+
+
+def _emotionize_params(text, stability, style):
+    """Ajustează (stability, style) după emoția detectată în text.
+    Compoziție cu setările utilizatorului: stabilitatea SE MIALS scădută
+    (mai expresivă si whiter tremurat), stilul SE MAXIMEAZA (mai teatral)."""
+    try:
+        prof = _emotion_profile(text)
+    except Exception:
+        return _clamp01(stability, 0.5), _clamp01(style, 0.0), None
+    if not prof:
+        return _clamp01(stability, 0.5), _clamp01(style, 0.0), None
+    name, estab, estyle = prof
+    stab0 = _clamp01(stability, 0.5)
+    style0 = _clamp01(style, 0.0)
+    nstab = min(stab0, estab)
+    nstyle = max(style0, estyle)
+    if (nstab, nstyle) != (stab0, style0):
+        try:
+            print(f"[voice] emoție VOCE performer: [{name}] → "
+                  f"stability {nstab:.2f}, style {nstyle:.2f}")
+        except Exception:
+            pass
+    return nstab, nstyle, name
+
+
 def _call_primary(
     text, sample_bytes, suffix,
     exaggeration=0.5, cfg_weight=0.5, reference_text=None,
@@ -405,6 +472,13 @@ def _call_primary(
     creare să poată afișa cauza reală, nu doar un „avem probleme tehnice".
     """
     _errors = []
+    # Emoția din text este AUZITĂ în voce (nu doar vizuală): se ajustează
+    # stabilitatea/stilul înaintea oricărui motor — «sunt supărată» → voce
+    # tensionată, «plâng» → voce frântă, «haha» → voce vie.
+    try:
+        stability, style, _emoname = _emotionize_params(text, stability, style)
+    except Exception:
+        pass
     if elevenlabs_available():
         try:
             return _eleven_generate(
@@ -1105,13 +1179,15 @@ def text_to_speech(
             "și încarcă din nou mostra audio."
         )
     spoken = expressify(text) if expressive else (text or "...")
-    # Parametri ElevenLabs-style, trimiși unmistre și motorului activ.
+    # Emoția pe TEXTUL BRUT (emoțiile trăiesc și în *acțiuni*), înainte de curățare:
+    _estab, _estyle, _emoname = _emotionize_params(text, stability, style)
+    # Parametri ElevenLabs-style, trimiși unos și motorului activ.
     # Maparea ElevenLabs-style → Chatterbox (exaggeration/cfg) se face în _call_primary.
     return _generate(
         spoken, voice_id,
-        stability=_clamp01(stability, 0.5),
+        stability=_estab,
         similarity_boost=_clamp01(similarity_boost, 0.75),
-        style=_clamp01(style, 0.0),
+        style=_estyle,
     )
 
 
@@ -1121,12 +1197,13 @@ def text_to_speech_from_sample(text, sample_bytes, reference_text=None, sample_n
     `reference_text` (transcrierea mostrei) îmbunătățește clonarea Fish Audio,
     dar e opțional — Chatterbox/ElevenLabs nu necesită transcriere.
     """
+    _estab, _estyle, _ = _emotionize_params(text, stability, style)
     return _generate_preview(
         expressify(text), sample_bytes, sample_name,
         reference_text=reference_text,
-        stability=_clamp01(stability, 0.5),
+        stability=_estab,
         similarity_boost=_clamp01(similarity_boost, 0.75),
-        style=_clamp01(style, 0.0),
+        style=_estyle,
     )
 
 
