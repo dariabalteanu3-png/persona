@@ -523,6 +523,47 @@ def _eleven_pcm_to_wav(pcm, sample_rate=44100):
     return buf.getvalue()
 
 
+def _eleven_evict_oldest_clones(keep=2):
+    """Eliberează sloturi de voci ștergând clonurile Persona-* cele mai vechi.
+
+    Clonele aplicației ("Persona-<hash>") sunt REGENERABILE: mostrele audio
+    rămân salvate în DB și clonele se recreează automat la prima utilizare,
+    deci ștergerea lor nu pierde nimic pentru utilizator. Pe planul Creator
+    limita e de 30 de voci (21 predefinite + clone), iar apelurile noi eșuează
+    cu "voice limit" când sloturile se umplu — asta cauza erori la ascultare/se salvare.
+    Păstrează cele mai recente `keep` clone. Returnează numărul celor șterse.
+    """
+    try:
+        resp = requests.get(
+            f"{_ELEVEN_BASE_URL}/v1/voices",
+            headers={"xi-api-key": _ELEVEN_API_KEY},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return 0
+        personas = [v for v in ((resp.json() or {}).get("voices") or [])
+                    if str(v.get("name", "")).startswith("Persona-")]
+        # lista e aproximativ cronologică (cele noi la final) →păstrăm coada
+        to_delete = personas[:-keep] if len(personas) > keep else []
+        n = 0
+        for v in to_delete:
+            try:
+                d = requests.delete(
+                    f"{_ELEVEN_BASE_URL}/v1/voices/{v.get('voice_id', '')}",
+                    headers={"xi-api-key": _ELEVEN_API_KEY},
+                    timeout=30,
+                )
+                if d.status_code in (200, 204):
+                    n += 1
+            except Exception:  # noqa
+                pass
+        if n:
+            print(f"[voice] ElevenLabs: sloturi pline → evacuate {n} clone vechi Persona-*")
+        return n
+    except Exception:  # noqa
+        return 0
+
+
 def _eleven_clone_voice(sample_bytes, suffix):
     """Creează (sau reutilizează) o voce clonată pe ElevenLabs din mostra personajului.
 
@@ -569,6 +610,31 @@ def _eleven_clone_voice(sample_bytes, suffix):
                     "Fish Audio/Chatterbox, SAU setează ELEVENLABS_VOICE_ID în Secrets "
                     "cu ID-ul unei voci predefinite de pe elevenlabs.io (merge și pe gratis)."
                 )
+            # Limita de voci atinsă (ex. Creator: max 30)? Eliberez sloturi ştergând
+            # clonele Persona-* vechi (regenerabile din mostre salvate) și reîncerc O dată.
+            if resp.status_code == 400 and ("voice" in low
+                                            and ("limit" in low or "max" in low or "can only create" in low)):
+                _evicted = _eleven_evict_oldest_clones()
+                if _evicted:
+                    try:
+                        resp = requests.post(
+                            f"{_ELEVEN_BASE_URL}/v1/voices/add",
+                            headers={"xi-api-key": _ELEVEN_API_KEY},
+                            data={
+                                "name": clone_name,
+                                "description": "Voce clonata pentru aplicatia Persona",
+                            },
+                            files={"files": (f"reference{suffix or '.wav'}", sample_bytes, mime)},
+                            timeout=120,
+                        )
+                    except requests.RequestException as exc:
+                        raise VoiceGenerationError(
+                            f"Nu mă pot conecta la ElevenLabs: {exc}") from exc
+                    if resp.status_code in (200, 201):
+                        _vid = (resp.json() or {}).get("voice_id")
+                        if _vid:
+                            _eleven_voice_cache[k] = _vid
+                            return _vid
             raise VoiceGenerationError(
                 f"ElevenLabs a refuzat clonarea vocii ({resp.status_code}): {msg}"
             )
