@@ -3976,7 +3976,24 @@ def render_create():
                                 **_tts_kwargs(edit_char))
                     if _tst is not None:
                         st.success("✅ Lanțul de voce FUNCȚIONEAZĂ pe acest moment (audio generat mai jos):")
+                        # Unele browsere mobile (Safari/iOS) afișă «Eroare» pe WAV-uri mari
+                        # în st.audio; reîncercare cu player local în HTML (data-URI)
+                        # + buton de descărcare ca rezervă.
                         st.audio(_tst, format=_audio_fmt(_tst))
+                        _b64p = base64.b64encode(_tst).decode("ascii")
+                        _mimep = _audio_fmt(_tst)
+                        st.markdown(
+                            '<audio controls preload="auto" style="width:100%">'
+                            f'<source src="data:{_mimep};base64,{_b64p}" type="{_mimep}"></audio>',
+                            unsafe_allow_html=True,
+                        )
+                        st.download_button(
+                            "⬇️ Descarcă fișierul audio (dacă playerul dă «Eroare»)",
+                            data=_tst,
+                            file_name="test_voce.wav",
+                            mime=_mimep,
+                            key=f"dl_diag_tts_{int(time.time())}",
+                        )
                     else:
                         st.error("Nicio mostră disponibilă pentru test — încarcă mai întâi o mostră vocală.")
                 except Exception as _e:
