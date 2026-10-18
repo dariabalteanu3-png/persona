@@ -3944,10 +3944,15 @@ def render_create():
                 _diag_rows.append("Backend DB: %s" % db.get_active_backend())
             except Exception:  # noqa
                 _diag_rows.append("Backend DB: necunoscut")
-            for _kk in ("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "FISH_API_KEY",
+            for _kk in ("ELEVENLABS_API_KEY", "FISH_API_KEY",
                         "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY",
                         "HF_TOKEN", "TURSO_URL", "TURSO_TOKEN"):
                 _diag_rows.append("%s: %s" % (_kk, "setată ✅" if os.environ.get(_kk) else "LIPSĂ ❌ (adaug-o în Streamlit Secrets)"))
+            # ELEVENLABS_VOICE_ID e OPȚIONALĂ — fără ea aplicația CLONEAZĂ vocea din
+            # mostra personajului (pe plan plătit). Nu e o eroare când lipsește.
+            _diag_rows.append("ELEVENLABS_VOICE_ID: %s" % (
+                "setată ✅" if os.environ.get("ELEVENLABS_VOICE_ID") else
+                "opțional — nu e nevoie de ea ✔ (vocea ta se clonează din mostra personajului)"))
             try:
                 _diag_rows.append("Motor voce activ: %s" % (
                     "ElevenLabs" if voice.elevenlabs_available() else
