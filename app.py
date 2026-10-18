@@ -1925,7 +1925,14 @@ def maybe_ambient(char, msg_id, text):
     try:
         cue = ""
         chosen_name = ""
-        if hasattr(llm, "pick_ambient_sound"):
+        # — 0) Vârf de regex dierect din text (fără LLM, instant): «spăl vase»,
+        #    «stau cu copilul», duș, ploaie... — întoarce mereu ECOUL corect și
+        #    Übercomputează lanțul LLM doar când nu se potrivește nimic clar.
+        try:
+            cue = llm.quick_sound_cue(text)
+        except Exception:  # noqa
+            cue = ""
+        if hasattr(llm, "pick_ambient_sound") and not cue:
             try:
                 _ctx = char.get("_time_ctx") or _time_context()
                 chosen_name = llm.pick_ambient_sound(
@@ -6217,6 +6224,11 @@ def render_grup():
         st.session_state.grp_playing = False
         st.rerun()
     voice_on = t3.toggle("🔊 Voce", value=st.session_state.get("grp_voice_on", False), key="grp_voice_on")
+    # «Voci vagi»: un murmur subtil de persoane în fundal sub vocea vorbitorului —
+    # dă senzația că ceilalți membri sunt CUTIA discretă, prin vârtelnic, la scenă.
+    murmur_on = st.toggle("👥 Voci vagi în fundal",
+                          value=st.session_state.get("grp_murmur_on", True),
+                          key="grp_murmur_on")
     st.caption("Participanți: " + ", ".join(c["name"] for c in chars))
 
     # ---------- generează o tură dacă rulează ----------
@@ -6240,7 +6252,6 @@ def render_grup():
                 except Exception:  # noqa
                     new_audio = None
             db.add_group_message(gid, speaker["id"], speaker["name"], line)
-
     # ---------- afișează mesajele ----------
     msgs = db.get_group_messages(gid)
     if not msgs:
@@ -6271,8 +6282,12 @@ def render_grup():
         st.session_state.grp_turn_idx = 0
         st.rerun()
 
-    # intervenția ta
-    u = st.chat_input("Scrie ceva în grup (opțional)...")
+    # intervenția ta — funcționează ORICÂND, chiar și când personajele vorbesc:
+    # mesajul tău intră în conversație la următoarea tură și răspund direct lui.
+    u = st.chat_input("💬 Intervine în grup (oricând, chiar și cât vorbesc ei)...")
+    if st.session_state.get("grp_playing"):
+        st.caption("💡 Scrii oricând în timp ce asculți — personajele îți răspund automat "
+                   "și discut mai departe.")
     if u:
         db.add_group_message(gid, "user", "Tu", u)
         st.rerun()
@@ -6280,8 +6295,28 @@ def render_grup():
     # ---------- redă vocea + avansează (buclă live până la Stop) ----------
     if st.session_state.get("grp_playing"):
         if new_audio:
-            _autoplay_voice(new_audio, f"grp_{st.session_state.get('grp_turn_idx', 0)}")
-            time.sleep(min(30.0, _wav_seconds(new_audio) + 0.9))
+            # Murmurul (voci vagi) se aude SUB voce, discret, pe toată durata replicii.
+            _g_murmur = None
+            if murmur_on:
+                try:
+                    _g_murmur = st.session_state.get("_grp_murmur_audio")
+                    if not _g_murmur:
+                        _g_murmur = voice.sound_effect(
+                            "distant murmur of a few voices talking softly in another room",
+                            duration=30.0,
+                        )
+                        st.session_state["_grp_murmur_audio"] = _g_murmur
+                except Exception:  # noqa: dacă murmurul eșuează, vocea plaină rămâne
+                    _g_murmur = None
+            try:
+                _play_voice_ambient(
+                    [new_audio], _g_murmur,
+                    f"grp_{st.session_state.get('grp_turn_idx', 0)}",
+                    amb_gain=0.16,
+                )
+            except Exception:  # noqa
+                _autoplay_voice(new_audio, f"grp_{st.session_state.get('grp_turn_idx', 0)}")
+            time.sleep(min(30.0, _wav_seconds(new_audio) + 0.4))
         else:
             time.sleep(2.6)
         st.rerun()

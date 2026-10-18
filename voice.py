@@ -1029,35 +1029,26 @@ def expressify(text):
     """Curată markup-ul şi normalizează textul românesc pentru TTS.
     Îmbunățiri pentru voce naturală:
     - Pauze naturale la semne de punctuație
-    - Transformarea emoticoanelor în descrieri vocale
+    - Emoticoanele/emoțiile NU se rostesc (se redă expresia vizual în chat)
     - Normalizarea numerelor şi simbolurilor
     - Păstrarea diacriticelor româneşti corecte
     """
     text = str(text or "")
     # Elimină formatarea markdown (păstrează cuvintele)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)   # **bold** → text
-    text = re.sub(r"\*([^*]+)\*", " ", text)           # *acțiune* → spațiu
+    text = re.sub(r"\*([^*]+)\*", " ", text)           # *acțiune* → spațiu (se redă vizual, NU voce)
     text = re.sub(r"__([^_]+)__", r"\1", text)         # __subliniat__ → text
     text = re.sub(r"_([^_]+)_", r"\1", text)           # _italic_ → text
     text = re.sub(r"#\s*", "", text)                   # # titluri
     text = re.sub(r"`[^`]+`", "", text)                 # `cod`
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [link](url) → text
 
-    # ── Emoticoane → descrieri vocale (pentru expresivitate) ────────────────
-    _emoticon_map = [
-        (r":\)", " zâmbind"),
-        (r":D", " râzând"),
-        (r";\)", " fac cu ochiul"),
-        (r":\(", " trist"),
-        (r":O", " uimit"),
-        (r":P", " jucăuș"),
-        (r"<3", " cu inimă"),
-        (r":\*", " pupând"),
-        (r"B\)", " cu ochelari"),
-        (r"xD", " râzând cu lacrimi"),
-    ]
-    for pattern, replacement in _emoticon_map:
-        text = re.sub(pattern, replacement, text)
+    # ── Emoticoane NU se rostesc — se redă expresia (emoji rămân în chat) ─────
+    _emoticon_pat = r":\)|:D|;\)|:\(|:O|:P|<3|:\*|B\)|xD"
+    text = re.sub(_emoticon_pat, " ", text)
+    # Indirectări de scenă din paranteze/dreptunghi — se redă VIZUAL, nu se rostesc.
+    text = re.sub(r"\([^)]{0,160}\)", " ", text)
+    text = re.sub(r"\[[^\]]{0,160}\]", " ", text)
 
     # Simboluri → cuvinte româneşti
     text = text.replace("&", " și ")

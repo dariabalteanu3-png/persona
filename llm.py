@@ -897,6 +897,76 @@ def pick_ambient_sound(character, text, sound_names, part_of_day="", season=""):
     return ""
 
 
+def quick_sound_cue(text):
+    """Determinist (fără LLM, instant): mapare ro→efect sonor direct din text.
+    Când replica conține clar o acțiune/situație cu sunet («spăl vase», «stau
+    cu copilul», duș, ploaie...), întoarce o descriere scurtă în engleză pentru
+    efectul respectiv; altfel ''. Consumat de voice.sound_effect, deci auzi
+    CONTEXTUL, nu doar replicile personajului.
+    Cheile sunt FĂRĂ diacritice — textul e trecut prin NFKD-stripping mai jos."""
+    t = str(text or "").lower()
+    import unicodedata as _ud
+    t = "".join(c for c in _ud.normalize("NFKD", t) if not _ud.combining(c))
+    cues = (
+        ("dishes clinking and running water in the kitchen sink",
+         "spal vase", "sap vase", "spalat vase", "vasele", "chiuveta", "vesela", "clatari"),
+        ("an adorable baby cooing and gurgling happily",
+         "bebelus", "copilul", "cu copilul", "leganat", "patut", "nene"),
+        ("children playing and laughing outdoors",
+         "copiii", "se joaca", "jucariile", "recreatie", "gradinita"),
+        ("warm shower water running",
+         "fac dus", "face dus", "un dus", "dusu", "sub dus"),
+        ("running water in a bathroom sink",
+         "curat baia", "spal pe maini", "lavabo", "baia"),
+        ("food sizzling in a frying pan, kitchen cooking sounds",
+         "gatesc", "gatit", "bucatarie", "supa", "bulion"),
+        ("espresso machine brewing, cozy cafe ambience",
+         "cafea", "cafenea", "espresso"),
+        ("cozy restaurant murmur with cutlery on plates",
+         "restaurant", "chelner", "meniu"),
+        ("steady rainfall", "ploaie", "ploua"),
+        ("distant thunderstorm rolling", "furtuna", "tunete", "tunet", "fulger"),
+        ("soft snowfall ambience", "ninsoare", "zapada", "ninge"),
+        ("gentle wind blowing", "vantul", "bat vant", "de afara vant"),
+        ("soft crackling fire with wood pops",
+         "focul", "fac foc", "am aprins", "soba", "lemnele"),
+        ("a happy dog barking nearby", "caine", "latra", "catelus"),
+        ("a cat purring softly", "pisica", "motanul", "miorlaie"),
+        ("phone ringing", "telefonul", "telefon", "de telefon"),
+        ("busy city traffic ambience", "masina", "strada", "trafic"),
+        ("train moving on rails", "trenul", "gara", "compartiment"),
+        ("subway train arriving", "metrou", "subteran"),
+        ("birds chirping in a sunny park",
+         "pasari", "pasarile", "gradina", "in parc", "parcul"),
+        ("forest ambience", "padure", "copacii"),
+        ("gentle ocean waves on beach shore", "plaja", "la mare", "valurile"),
+        ("typing on a keyboard", "tastatur", "la calculator", "la laptop"),
+        ("door slam" if "trant" in t else "door softly opening and closing",
+         "usa", "trantesc", "trantita"),
+        ("moderate footsteps on wooden floor", "pasii", "fac pasi", "pe jos"),
+        ("people chatting and laughing at a lively party",
+         "petrecere", "petrecem", "grupul", "oameni", "stau impreuna"),
+        ("smartphone notification chime", "notificari", "notif", "mesaj de la"),
+        ("light water splashing from watering plants",
+         "florile", "plantele", "stropitor"),
+        ("very quiet night room ambience", "liniste", "linistit", "dorm", "somn"),
+        ("keys rummaged in a bag", "cheile", "geanta", "rascolesc"),
+        ("vacuum cleaner running", "aspirator", "aspir", "curat cu"),
+        ("gentle applause", "aplauda", "din palme"),
+        ("soft busy rustle of putting on a coat", "manta", "palton", "imbrac"),
+        ("crowd murmuring in the distance", "striga", "urau", "rumoare"),
+    )
+    for entry in cues:
+        cue, keys = entry[0], entry[1:]
+        for k in keys:
+            if k and k in t:
+                return cue
+    return ""
+
+
+
+
+
 def sound_cue(text):
     """Return a short English sound-effect description for the reply, or '' if none."""
     prompt = (
