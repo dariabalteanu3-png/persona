@@ -481,10 +481,10 @@ def _call_primary(
         pass
     if elevenlabs_available():
         try:
-            return _eleven_generate(
+            return _ensure_mp3(_eleven_generate(
                 text, sample_bytes, suffix,
                 stability=stability, similarity_boost=similarity_boost, style=style,
-            )
+            ))
         except VoiceGenerationError as exc:
             _errors.append("ElevenLabs: %s" % exc)
             print(f"[voice] ElevenLabs indisponibil, trec la Fish Audio: {exc}")
@@ -493,7 +493,7 @@ def _call_primary(
             print(f"[voice] ElevenLabs erorare neașteptată, trec la Fish Audio: {type(exc).__name__}: {exc}")
     if fish_audio_available():
         try:
-            return _fish_generate(text, sample_bytes, suffix, reference_text=reference_text)
+            return _ensure_mp3(_fish_generate(text, sample_bytes, suffix, reference_text=reference_text))
         except VoiceGenerationError as exc:
             _errors.append("Fish Audio: %s" % exc)
             print(f"[voice] Fish Audio indisponibil, trec la Chatterbox: {exc}")
@@ -504,7 +504,7 @@ def _call_primary(
     exaggeration = _clamp01(style * 1.5 + 0.25, 0.5)
     cfg_weight = _clamp01(similarity_boost, 0.75)
     try:
-        return _call_chatterbox_space(text, sample_bytes, suffix, exaggeration, cfg_weight)
+        return _ensure_mp3(_call_chatterbox_space(text, sample_bytes, suffix, exaggeration, cfg_weight))
     except VoiceGenerationError as exc:
         _errors.append("Chatterbox: %s" % exc)
         raise VoiceGenerationError(
@@ -515,6 +515,53 @@ def _call_primary(
         raise VoiceGenerationError(
             "Toate motoarele de voce au eșuat — " + "\n・ ".join(_errors)
         ) from exc
+
+
+def _wav_to_mp3(wav_bytes, bitrate="96k"):
+    """Convertește WAV → MP3 mono cu ffmpeg (disponibil pe Streamlit Cloud via packages.txt).
+    Returnează bytes MP3 sau None (cădem pe WAV, care tot merge, doar mai mare)."""
+    import shutil
+    import subprocess
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not wav_bytes:
+        return None
+    tmp_in = None
+    try:
+        tmp_in = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_in.write(wav_bytes)
+        tmp_in.close()
+        out = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", tmp_in.name,
+             "-ac", "1", "-ar", "44100", "-b:a", bitrate, "-f", "mp3", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+        data = bytes(out.stdout or b"")
+        if out.returncode == 0 and data and (data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0)):
+            return data
+    except Exception:  # noqa
+        pass
+    finally:
+        try:
+            if tmp_in and os.path.exists(tmp_in.name):
+                os.unlink(tmp_in.name)
+        except OSError:
+            pass
+    return None
+
+
+def _ensure_mp3(audio_bytes):
+    """Returnează audio ca MP3 când posibil — format cea mai compatibil pe iOS/Safari
+    (redă instant în player) și de ~8× mai mic în DB decât WAV.
+    Dacă conversia nu e disponibilă, returnează bytes originali (WAV)."""
+    if not audio_bytes or audio_bytes[:4] != b"RIFF":
+        return audio_bytes
+    try:
+        mp3 = _wav_to_mp3(audio_bytes)
+        if mp3:
+            return mp3
+    except Exception:  # noqa
+        pass
+    return audio_bytes
 
 
 def _clamp01(val, default):

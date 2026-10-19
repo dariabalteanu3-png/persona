@@ -2053,11 +2053,12 @@ def _autoplay_voice(audio_bytes, uid):
     (browserele mobile blochează uneori autoplay-ul; reîncercăm de câteva ori)."""
     if not audio_bytes:
         return
+    mime = _audio_fmt(audio_bytes)
     b64 = base64.b64encode(audio_bytes).decode()
     st.components.v1.html(
         f'''
         <audio id="cv_{uid}" autoplay playsinline preload="auto">
-          <source src="data:audio/wav;base64,{b64}" type="audio/wav">
+          <source src="data:{mime};base64,{b64}" type="{mime}">
         </audio>
         <script>
         (function(){{
@@ -2134,7 +2135,7 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
     voices = [v for v in (voices or []) if v]
     if not voices and not ambient_bytes:
         return
-    srcs = ["data:audio/wav;base64," + base64.b64encode(v).decode() for v in voices]
+    srcs = ["data:%s;base64," % _audio_fmt(v) + base64.b64encode(v).decode() for v in voices]
     srcs_js = json.dumps(srcs)
     if amb_gain is None:
         gain = max(0.0, int(st.session_state.get("ambient_volume", 100)) / 100.0)
@@ -2158,11 +2159,12 @@ def _play_voice_ambient(voices, ambient_bytes, uid, voice_vol=1.0, amb_gain=None
             aid = f"amb_{uid}_{k}"
             amb_ids.append(aid)
             amb_vols.append(round(_v, 3))
+            _amb_mime = _audio_fmt(ambient_bytes)
             amb_html += (
                 f'<audio id="{aid}" loop preload="auto">'
-                f'<source src="data:audio/wav;base64,{amb_b64}" type="audio/wav"></audio>'
+                f'<source src="data:{_amb_mime};base64,{amb_b64}" type="{_amb_mime}"></audio>'
             )
-    amb_src = ("data:audio/wav;base64," + amb_b64) if amb_b64 else ""
+    amb_src = ("data:%s;base64," % _audio_fmt(ambient_bytes) + amb_b64) if amb_b64 else ""
     js = (
         _AMBIENT_JS
         .replace("__SRCS__", srcs_js)
@@ -4603,10 +4605,10 @@ def render_chat(char):
                     _html_audio_player(st.session_state[f"audio_{mid}"], mid,
                                        mime=_audio_fmt(st.session_state[f"audio_{mid}"]))
                     st.download_button(
-                        "⬇️ Descarcă WAV",
+                        "⬇️ Descarcă audio",
                         data=st.session_state[f"audio_{mid}"],
-                        file_name=f"{char['name']}_{mid[:6]}.wav",
-                        mime="audio/wav",
+                        file_name=f"{char['name']}_{mid[:6]}.mp3",
+                        mime=_audio_fmt(st.session_state[f"audio_{mid}"]),
                         key=f"dl_{mid}",
                     )
             if m["role"] == "assistant" and st.session_state.get(f"sfx_{m['id']}"):
@@ -5425,12 +5427,13 @@ def render_chat(char):
             if _scene_amb:
                 _suid = f"sca_{active_conv}_{len(reply)}"
                 _svol = max(0.0, min(1.0, st.session_state.get("ambient_volume", 100) / 100.0))
+                _amb_mime = _audio_fmt(_scene_amb)
                 _sb64 = base64.b64encode(_scene_amb).decode()
                 with st.chat_message("assistant", avatar="🎵"):
                     st.markdown("🎵 Ambianță scenă")
                     st.components.v1.html(
                         f'<audio id="{_suid}" loop autoplay preload="auto" style="display:none">'
-                        f'<source src="data:audio/wav;base64,{_sb64}" type="audio/wav"></audio>'
+                        f'<source src="data:{_amb_mime};base64,{_sb64}" type="{_amb_mime}"></audio>'
                         f'<script>(function(){{'
                         f'var a=document.getElementById("{_suid}");'
                         f'if(a){{a.volume={_svol:.3f};a.play().catch(function(){{}});}}'
