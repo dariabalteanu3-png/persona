@@ -2000,6 +2000,54 @@ def play_ui_sound(name, vol=None):
     )
 
 
+def _html_audio_player(audio_bytes, uid, mime=None, light=True):
+    """Player HTML iOS/Android-safe înlocuitor pentru st.audio().
+
+    Safari/iOS afișează adesea «Eroare» pe <audio> îngrădit de iframe-ul Streamlit
+    (de fapt audio nu eșuează: player native/interna se blochează). Acest player:
+      • <audio controls playsinline preload="auto"> în stil minimal pentru touch;
+      • autoplay false (iOS cere interaction) → chestiuni de tap;
+      • pe eroare: un buton de reascult generat în JS care reconstruiește
+        elem. AUDIO cu tipul corect și încearcă din nou (funcțional dacă browserul
+        a rămas cu un WAV cached corupt).
+
+    Set as  small (60px height) component so listele mari nu ocupă prea mult loc.
+    """
+    if not audio_bytes:
+        return
+    mime = mime or _audio_fmt(audio_bytes)
+    b64 = base64.b64encode(audio_bytes).decode()
+    html = f'''
+    <div id="pw_{uid}" style="width:100%">
+      <audio id="pa_{uid}" controls playsinline preload="auto"
+             style="width:100%;height:44px">
+        <source src="data:{mime};base64,{b64}" type="{mime}">
+      </audio>
+      <div id="pwr_{uid}" style="display:none;margin-top:6px">
+        <button onclick="(function(){{var a=document.getElementById('pa_{uid}');
+          if(!a) return; a.load(); var p=a.play();
+          if(p&&p.catch){{p.catch(function(){{}});}}}})();return false;"
+          style="background:#2f6f4f;color:#fff;border:none;padding:8px 16px;
+          border-radius:12px;font-size:.9rem">▶️ Reia redarea</button>
+      </div>
+      <script>
+      (function(){{
+        var a=document.getElementById('pa_{uid}');
+        if(!a) return;
+        var retryBox=document.getElementById('pwr_{uid}');
+        if(a.error || a.networkState===3){{
+          if(retryBox) retryBox.style.display='block';
+        }}
+        a.addEventListener('error', function(){{
+          if(retryBox) retryBox.style.display='block';
+        }}, true);
+      }})();
+      </script>
+    </div>
+    '''
+    st.components.v1.html(html, height=64)
+
+
 def _autoplay_voice(audio_bytes, uid):
     """Redă automat vocea personajului în apel, cât mai fiabil pe telefon
     (browserele mobile blochează uneori autoplay-ul; reîncercăm de câteva ori)."""
@@ -4445,19 +4493,23 @@ def render_chat(char):
                 _media_kind = m.get("media_kind", "")
                 if _media_kind == "ambient":
                     st.markdown(f"🔊 Sunet: {m.get('ambient_name', 'sunet')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
+                    _au = base64.b64decode(m["audio_b64"])
+                    _html_audio_player(_au, m.get("id", "amb"), mime=_audio_fmt(_au))
                 elif _media_kind == "ambient_pure":
                     st.markdown(f"🔇 Sunet pur: {m.get('ambient_name', 'sunet ambiental')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
+                    _au = base64.b64decode(m["audio_b64"])
+                    _html_audio_player(_au, m.get("id", "ambp"), mime=_audio_fmt(_au))
                 elif _media_kind == "audio_file":
                     st.markdown(f"🎵 Audio: {m.get('audio_name', 'fișier')}")
-                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
+                    _au = base64.b64decode(m["audio_b64"])
+                    _html_audio_player(_au, m.get("id", "af"), mime=_audio_fmt(_au))
                 elif _media_kind == "song":
                     # Păstrează comportamentul existent pentru melodii
                     pass
                 else:
                     st.markdown("🎤 Mesaj vocal")
-                    st.audio(base64.b64decode(m["audio_b64"]), format=_audio_fmt(base64.b64decode(m["audio_b64"])))
+                    _au = base64.b64decode(m["audio_b64"])
+                    _html_audio_player(_au, m.get("id", "vm"), mime=_audio_fmt(_au))
             if m.get("media_kind") == "song" and m.get("song_b64"):
                 st.markdown(f"🎵 {m.get('song_name', 'melodie')}")
                 st.audio(base64.b64decode(m["song_b64"]), format="audio/mp3")
@@ -4545,7 +4597,11 @@ def render_chat(char):
                             voice_vol=st.session_state.get(f"sleepvvol_{mid}", 1.0),
                         )
                         st.session_state["autoplay_mid"] = None
-                    st.audio(st.session_state[f"audio_{mid}"], format=_audio_fmt(st.session_state[f"audio_{mid}"]))
+                    # Player HTML iOS-safe: Safari/iOS afișează uneori «Eroare» pe
+                    # st.audio pentru WAV-uri cu date-uri mari; acest player minimal
+                    # merge peste tot și are buton de reia dacă browserul cache-uiește greșit.
+                    _html_audio_player(st.session_state[f"audio_{mid}"], mid,
+                                       mime=_audio_fmt(st.session_state[f"audio_{mid}"]))
                     st.download_button(
                         "⬇️ Descarcă WAV",
                         data=st.session_state[f"audio_{mid}"],
